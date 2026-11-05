@@ -1,61 +1,53 @@
-# Deal Radar
+# Deal Radar — Marktplaats → Telegram
 
-> Marktplaats bargain finder that compares listing prices to an observed market median and sends qualified deals to Telegram.
+Раз в несколько минут проверяет Marktplaats в радиусе 50 км от Vriezenveen (индекс 7671),
+сравнивает цены новых объявлений с накопленной рыночной медианой и отправляет в Telegram
+только заметно более дешёвые предложения без явных красных флагов. Бот сам не пишет продавцам.
 
-## Features
-- Searches configured product categories near a configured Dutch postcode.
-- Builds a rolling price history in SQLite and compares new listings against model/category medians.
-- Filters suspicious listings and shows softer risk warnings.
-- Sends only qualifying deals to Telegram; it never contacts sellers.
-- Runs on a local machine or on a 15-minute GitHub Actions schedule.
+Python 3.9+, внешние пакеты не нужны.
 
-## Repository layout
-- `bot.py` — Python standard-library-only bot.
-- `config.json` — search region, categories, price bounds, filters and discount thresholds.
-- `.github/workflows/deals.yml` — scheduled GitHub Actions workflow.
-- `.env.example` — names of local environment variables (no real secrets).
+## Первый запуск локально
 
-## GitHub Actions setup
-1. In **Settings → Secrets and variables → Actions**, add `TELEGRAM_TOKEN` and `TELEGRAM_CHAT_ID`.
-2. Open **Actions → deals** and select **Run workflow** for the first manual run.
-3. Review the workflow logs. Scheduled runs are configured every 15 minutes.
-
-The workflow uses GitHub Actions cache for `state.db`. Cache is best-effort storage, not a durable database; cache eviction or concurrent runs can reset price history. For durable history, run the bot on a persistent machine/VM with a persistent disk.
-
-## Local setup
-Python 3.9+; no third-party packages are required.
+1. Откройте бота в Telegram и нажмите **Start**.
+2. Установите переменные окружения и получите chat ID:
 
 ```bash
-export TELEGRAM_TOKEN="..."
-export TELEGRAM_CHAT_ID="..."
+export TELEGRAM_TOKEN="токен_от_BotFather"
+python bot.py --get-chat-id
+export TELEGRAM_CHAT_ID="число_из_ответа"
 python bot.py --test-telegram
-python bot.py --dry
-python bot.py --loop 600
 ```
 
-For Windows PowerShell:
+Для Windows PowerShell используйте `$env:TELEGRAM_TOKEN="..."`.
+3. Пробный запуск без отправки: `python bot.py --dry`. При первом запуске бот только собирает базу цен — сделок почти не будет.
+4. Постоянная работа: `python bot.py --loop 600`.
 
-```powershell
-$env:TELEGRAM_TOKEN="..."
-$env:TELEGRAM_CHAT_ID="..."
-python bot.py --dry
-```
+## GitHub Actions
 
-Never commit `.env`, Telegram tokens, chat IDs intended to remain private, or `state.db`.
+Workflow `.github/workflows/deals.yml` запускается каждые 15 минут и вручную через **Actions → deals → Run workflow**.
 
-## Configuration
-Edit `config.json` to change postcode, search radius, categories, allowed price ranges, include/exclude words, model grouping and discount thresholds.
+В **Settings → Secrets and variables → Actions** добавьте:
+- `TELEGRAM_TOKEN`
+- `TELEGRAM_CHAT_ID`
 
-The current configuration targets postcode `7671` within 50 km of Vriezenveen. Consider keeping this repository private if you do not want to disclose the search area.
+Не помещайте реальные токены в файлы репозитория.
 
-## How the deal score works
-- Market estimate is the median of matching listings observed over the configured market window.
-- When there are too few model-specific samples, the bot falls back to category-level statistics and applies a stricter threshold where configured.
-- These are asking prices, not verified completed-sale prices.
-- Hard red flags are rejected; softer warnings are included in Telegram messages.
-- A very low price is explicitly marked as potentially suspicious.
+SQLite `state.db` сохраняется через Actions cache. Это временный best-effort кэш, а не постоянное хранилище: после удаления кэша история цен начнётся заново. Для надёжной истории используйте постоянно работающую машину или VM с постоянным диском.
 
-## Important limitations
-Marktplaats does not provide a public search API for this use case. The bot uses an internal website endpoint that may change or block automated access. Respect the website's terms and use a conservative request frequency. GitHub-hosted runners may receive HTTP 403 responses; a persistent local machine may be more reliable.
+## Настройка
 
-The bot identifies candidates, not verified bargains. Check item condition, authenticity, seller reputation and safe in-person payment before buying.
+Всё в `config.json`: индекс, радиус, категории, диапазоны цен, пороги скидки, ключевые слова и регулярные выражения моделей. Текущая конфигурация использует индекс `7671` и радиус 50 км. Оставьте репозиторий Private, если не хотите раскрывать район поиска.
+
+## Как оценивается выгода
+
+- Рыночная оценка — медиана цен объявлений той же модели за последние 21 день.
+- Если данных по модели мало, используется медиана категории с более строгим порогом.
+- Это цены объявлений, а не подтверждённые цены завершённых продаж.
+- Явные признаки дефектов и подделок исключаются; мягкие предупреждения попадают в сообщение.
+- Слишком низкая цена помечается как потенциально подозрительная.
+
+## Ограничения
+
+У Marktplaats нет публичного API для такого поиска. Бот использует внутренний endpoint сайта, который может измениться или блокировать автоматические запросы. GitHub Actions может получить HTTP 403 из-за IP дата-центра; в таком случае используйте собственный постоянно включённый компьютер или VM.
+
+Бот только находит кандидатов. Проверяйте состояние товара, подлинность, продавца и безопасность оплаты перед покупкой.

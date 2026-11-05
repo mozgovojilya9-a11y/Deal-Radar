@@ -1,91 +1,281 @@
-# NewYearSimulator — Winter Academy RPG
+#!/usr/bin/env python3
+"""Marktplaats deal finder -> Telegram. Only the Python standard library."""
+import argparse
+import html
+import json
+import os
+import random
+import re
+import sqlite3
+import statistics
+import sys
+import time
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
 
-Roblox Luau project managed with Rojo 7.
+HERE = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.environ.get("DEAL_CONFIG", os.path.join(HERE, "config.json"))
+DB_PATH = os.environ.get("DEAL_DB", os.path.join(HERE, "state.db"))
+API = "https://www.marktplaats.nl/lrp/api/search"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+    "Accept": "application/json",
+    "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8",
+}
 
-This branch is an expanded playable vertical-slice foundation for the original Winter Academy simulator. It includes a stylized academy environment, mentor collection, lightning progression, server-authoritative monster encounters, battle rewards, inventory, item sales, crafting, pets/eggs, quest rewards, rebirth confirmation and a Roblox Marketplace integration that is disabled until real product IDs are configured.
+HARD_BAD = re.compile(
+    r"\b(defect\w*|kapot\w*|onderdelen|niet werkend|werkt niet|gebarsten|replica|kopie|nep|fake|imitatie|lookalike|look-a-like|gestolen)\b|1:1|icloud[\s-]*(slot|lock\w*|geblokkeerd|vergrendeld)",
+    re.I,
+)
+NEGATED = re.compile(r"\b(geen|zonder|niet)\s+(defect\w*|kapot\w*|gebarsten|krassen)", re.I)
+SOFT = [
+    (re.compile(r"\b(krasje\w*|kras|krassen|deuk\w*|barst\w*|schade)\b", re.I), "в описании упомянуты царапины/повреждения"),
+    (re.compile(r"(zonder|geen)\s+(doos|oplader|bon|factuur)", re.I), "нет коробки/зарядки/чека"),
+    (re.compile(r"alleen (via )?whatsapp|betaal\w* vooraf|paypal vrienden|verzend\w* na betaling|\bborg\b", re.I), "признаки мошенничества (предоплата/только WhatsApp)"),
+    (re.compile(r"gerepareerd|reparatie|nieuw scherm|vervangen scherm", re.I), "был ремонт или замена экрана"),
+    (re.compile(r"icloud|apple id", re.I), "проверьте iCloud/Apple ID перед покупкой"),
+]
 
-## Project structure
+def log(*a):
+    print(time.strftime("%H:%M:%S"), *a, flush=True)
 
-- `src/shared/Config.luau` — zones, mentor balance, monsters, combat scaling, item/drop tables, pets/eggs, recipes, quests, Game Pass and Developer Product catalog.
-- `src/server/Main.server.luau` — server-authoritative progression, training, combat, reward rolls, inventory, item selling, crafting, pet collection, quests, rebirth and RemoteEvents.
-- `src/server/DataService.luau` — player persistence using the existing `NewYearSim_v1` DataStore and `player_<UserId>` keys. It preserves legacy mentor IDs and adds defaults for new systems.
-- `src/server/PurchaseService.luau` — server-side Game Pass refresh and idempotent Developer Product receipt processing through an atomic player DataStore update.
-- `src/server/WinterAcademy.server.luau` — generated academy, mentor gallery, training court, runic arena, lighting and ambient effects.
-- `src/client/Client.client.luau` — responsive HUD, animated panels, mentor/world/inventory/quest/pet/crafting/shop/rebirth UI, local companion visuals, combat feedback and reward popups.
-- `default.project.json` — Rojo DataModel mapping.
+def norm(s):
+    return re.sub(r"[\s\-]", "", s.lower())
 
-## Playable systems in this branch
+def open_db():
+    db = sqlite3.connect(DB_PATH)
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS listings(
+            id TEXT PRIMARY KEY, qkey TEXT, grp TEXT, title TEXT, price REAL,
+            first_seen INTEGER, last_seen INTEGER);
+        CREATE INDEX IF NOT EXISTS ix_q ON listings(qkey, grp, last_seen);
+        CREATE TABLE IF NOT EXISTS sent(id TEXT PRIMARY KEY, ts INTEGER);
+        CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+    """)
+    return db
 
-- **Progression:** lightning, wins, stage, zone multipliers, mentor multipliers, pet multipliers, weapon bonus, rebirth multiplier, Game Pass multiplier and timed boosts.
-- **Mentors:** hire/equip through server-validated actions; in-world mentor displays expose an `E` proximity interaction.
-- **Combat:** each player gets an isolated combat lane, server-side attack cooldown and damage calculation, enemy health, player health damage, victory/defeat handling and stage progression.
-- **Drops:** stage-gated weighted drop pools create real inventory items after a victory.
-- **Inventory:** item counts persist; resources can be sold one at a time; equipped weapon/armor cannot be sold.
-- **Crafting:** recipes consume server-validated materials and create weapon/armor items. Gear affects training, damage and defense/health.
-- **Pets:** eggs spend Wins, weighted rolls grant pets, pets can be equipped into slots and apply server-side multipliers. Local cosmetic companion models follow the player.
-- **Quests:** milestone objectives track kills/stages and award Wins/materials once, stored in player data.
-- **Rebirth:** the player sees a confirmation panel; rebirth resets lightning/stage/zone while preserving collection and granting a permanent multiplier.
-- **Robux shop:** Game Pass and Developer Product prompts are wired. The catalog intentionally uses ID `0` until the owner creates the products in Creator Dashboard. Unconfigured items are shown as needing an ID and cannot be purchased. Developer Products are granted only by server receipt processing; the premium pet product adds a pet to the saved collection.
+def market_stats(db, qkey, grp, exclude_id, since):
+    sql = "SELECT price FROM listings WHERE qkey=? AND last_seen>=? AND id!=?"
+    args = [qkey, since, exclude_id]
+    if grp is not None:
+        sql += " AND grp=?"
+        args.append(grp)
+    prices = [r[0] for r in db.execute(sql, args)]
+    return (len(prices), statistics.median(prices)) if prices else (0, None)
 
-## Run locally
+def fetch_query(cfg, q, pages):
+    out = []
+    for p in range(pages):
+        params = {
+            "query": q["query"], "postcode": cfg["postcode"],
+            "distanceMeters": int(cfg["distance_km"] * 1000),
+            "limit": 100, "offset": p * 100,
+            "sortBy": "SORT_INDEX", "sortOrder": "DECREASING",
+            "searchInTitleAndDescription": "true",
+        }
+        req = urllib.request.Request(API + "?" + urllib.parse.urlencode(params), headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=25) as r:
+            data = json.load(r)
+        items = data.get("listings") or []
+        out += items
+        if len(items) < 100:
+            break
+        time.sleep(random.uniform(1.5, 3.0))
+    return out
 
-From the repository root:
+def parse_listing(l):
+    pi, loc = l.get("priceInfo") or {}, l.get("location") or {}
+    url = l.get("vipUrl") or ""
+    if url.startswith("/"):
+        url = "https://www.marktplaats.nl" + url
+    cents = pi.get("priceCents")
+    return {
+        "id": str(l.get("itemId") or ""), "title": l.get("title") or "",
+        "text": " ".join(filter(None, [l.get("title"), l.get("description"), l.get("categorySpecificDescription")])),
+        "price": cents / 100.0 if isinstance(cents, (int, float)) else None,
+        "ptype": pi.get("priceType"), "city": loc.get("cityName") or "",
+        "dist_km": loc.get("distanceMeters") / 1000.0 if isinstance(loc.get("distanceMeters"), (int, float)) else None,
+        "date": l.get("date"), "url": url,
+    }
 
-```bash
-rokit install
-rojo serve
-```
+def age_hours(s):
+    try:
+        dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+    except Exception:
+        return None
 
-Keep the terminal running while Roblox Studio is connected. In Roblox Studio, open the Rojo plugin and connect to the local server.
+def group_of(q, text):
+    rx = q.get("group_regex")
+    if not rx:
+        return "all"
+    found = sorted({norm(m.group(0)) for m in re.finditer(rx, text, re.I)})
+    return "-".join(found) if found else "other"
 
-To build a place file without starting the live server:
+def accept(q, it, cfg):
+    title = it["title"].lower()
+    inc = q.get("include_any")
+    if inc and not any(w.lower() in title for w in inc):
+        return False
+    for w in q.get("exclude", []):
+        if re.search(r"(?<!\w)" + re.escape(w.lower()) + r"(?!\w)", title):
+            return False
+    for rx in q.get("exclude_regex", []):
+        if re.search(rx, it["title"], re.I):
+            return False
+    if not it["id"] or it["price"] is None or it["price"] <= 0:
+        return False
+    if it["ptype"] not in (None, "FIXED"):
+        return False
+    if not (q.get("min_price", 0) <= it["price"] <= q.get("max_price", 10**9)):
+        return False
+    if it["dist_km"] is not None and it["dist_km"] > cfg["distance_km"] + 1:
+        return False
+    return True
 
-```bash
-rojo build -o /tmp/NewYearSimulator.rbxlx
-```
+def risks(it):
+    text = NEGATED.sub(" ", it["text"])
+    if HARD_BAD.search(text):
+        return None
+    return [label for rx, label in SOFT if rx.search(it["text"])]
 
-## Roblox Studio setup and acceptance test
+def tg(method, payload):
+    token = os.environ.get("TELEGRAM_TOKEN")
+    if not token:
+        raise RuntimeError("TELEGRAM_TOKEN is not configured")
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/{method}",
+        data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=25) as r:
+        return json.load(r)
 
-1. Make a separate private test experience; do not use production player data for the first migration tests.
-2. Publish that test experience.
-3. In **Game Settings → Security**, enable **Studio Access to API Services** for the test experience.
-4. Connect Rojo and run the place in Studio.
-5. Check the Output window for errors.
-6. Complete this test sequence:
-   - Join and confirm the new HUD loads with existing player data.
-   - Train until the first battle requirement is reached.
-   - Open **Наставники**, hire/equip a mentor, and confirm the displayed multiplier updates.
-   - Walk to a mentor display and press **E**; the mentor panel should open.
-   - Start a fight, attack several times, and observe the enemy health bar, bolt effect and player-health feedback.
-   - Win and confirm the reward popup; open **Инвентарь** and confirm the item exists.
-   - Sell one resource and confirm Wins increase.
-   - Open a pet egg, equip the pet, and confirm it follows the character and boosts training.
-   - Craft the **Посох инея** after collecting the required materials; equip it and confirm the bonus applies.
-   - Complete a quest and claim its reward only once.
-   - Open the rebirth panel, review the reset warning, and confirm a rebirth.
-   - Stop and rejoin the test session; confirm inventory, pets, gear, quest claims and progression persist.
-   - Repeat at a narrow mobile viewport and inspect for clipped or overlapping UI.
+def send(text, dry=False):
+    chat = os.environ.get("TELEGRAM_CHAT_ID")
+    if dry or not os.environ.get("TELEGRAM_TOKEN") or not chat:
+        print("---- (не отправлено, режим dry) ----\n" + text + "\n")
+        return
+    tg("sendMessage", {"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": False})
 
-## Robux setup
+def format_deal(q, it, med, n, kind, discount, flags):
+    lines = [
+        f"🔥 <b>-{discount:.0%}</b> · {html.escape(q['label'])}",
+        html.escape(it["title"]),
+        f"💶 <b>€{it['price']:.0f}</b> (рынок ≈ €{med:.0f}, по {n} объявл., {'по модели' if kind == 'model' else 'грубая оценка по категории'})",
+    ]
+    place = it["city"] or "—"
+    if it["dist_km"] is not None:
+        place += f" · {it['dist_km']:.0f} км"
+    lines.append("📍 " + html.escape(place))
+    lines.extend("⚠️ " + html.escape(f) for f in flags)
+    if discount > 0.6:
+        lines.append("⚠️ подозрительно низкая цена: возможна подделка или мошенничество")
+    lines.append(it["url"])
+    return "\n".join(lines)
 
-Before enabling real paid items:
-1. Create the Game Passes and Developer Products in the Roblox Creator Dashboard.
-2. Paste their real numeric IDs into `Config.GamePasses` and `Config.DeveloperProducts`.
-3. Test purchases in a private test experience with test accounts.
-4. Verify receipt processing and entitlement refresh before exposing the products to players.
+def run_once(cfg, db, dry=False):
+    now = int(time.time())
+    window = now - cfg.get("market_days", 21) * 86400
+    min_n, fails, sent_count = cfg.get("min_samples", 8), 0, 0
+    for q in cfg["queries"]:
+        qkey = q["key"]
+        existing = db.execute("SELECT COUNT(*) FROM listings WHERE qkey=?", (qkey,)).fetchone()[0]
+        first_run = existing == 0
+        pages = cfg.get("seed_pages", 5) if first_run else cfg.get("pages", 2)
+        try:
+            raw = fetch_query(cfg, q, pages)
+        except Exception as e:
+            log(f"[{qkey}] ошибка запроса: {e}")
+            fails += 1
+            time.sleep(random.uniform(2, 4))
+            continue
+        new_items = []
+        for l in raw:
+            it = parse_listing(l)
+            if not accept(q, it, cfg):
+                continue
+            grp = group_of(q, it["text"])
+            known = db.execute("SELECT 1 FROM listings WHERE id=?", (it["id"],)).fetchone()
+            if known:
+                db.execute("UPDATE listings SET last_seen=?, price=? WHERE id=?", (now, it["price"], it["id"]))
+            else:
+                db.execute("INSERT INTO listings VALUES(?,?,?,?,?,?,?)", (it["id"], qkey, grp, it["title"], it["price"], now, now))
+                new_items.append((it, grp))
+        db.commit()
+        for it, grp in new_items:
+            age = age_hours(it["date"])
+            if age is None and first_run:
+                continue
+            if age is not None and age > cfg.get("max_age_hours", 36):
+                continue
+            if db.execute("SELECT 1 FROM sent WHERE id=?", (it["id"],)).fetchone():
+                continue
+            flags = risks(it)
+            if flags is None:
+                continue
+            n, med = market_stats(db, qkey, grp, it["id"], window)
+            kind, need = "model", q.get("threshold", 0.2)
+            if grp == "all" or n < min_n or med is None:
+                n, med = market_stats(db, qkey, None, it["id"], window)
+                kind = "category"
+                need = max(q.get("threshold", 0.2) + 0.15, 0.4) if grp != "all" else q.get("threshold", 0.2)
+                if n < min_n * (2 if grp != "all" else 1) or med is None:
+                    continue
+            discount = 1 - it["price"] / med
+            if discount < need:
+                continue
+            send(format_deal(q, it, med, n, kind, discount, flags), dry)
+            db.execute("INSERT OR IGNORE INTO sent VALUES(?,?)", (it["id"], now))
+            db.commit()
+            sent_count += 1
+        time.sleep(random.uniform(2, 4))
+    db.execute("DELETE FROM listings WHERE last_seen<?", (now - 30 * 86400,))
+    db.commit()
+    if fails == len(cfg["queries"]):
+        row = db.execute("SELECT v FROM meta WHERE k='warned'").fetchone()
+        if not row or now - int(row[0]) > 6 * 3600:
+            send("⚠️ Бот не смог получить данные с Marktplaats (возможно, блокировка или смена формата). Проверьте логи.", dry)
+            db.execute("INSERT OR REPLACE INTO meta VALUES('warned',?)", (str(now),))
+            db.commit()
+    log(f"готово: отправлено {sent_count}, ошибок запросов {fails}")
 
-Never paste API keys, access tokens or private credentials into this repository.
+def get_chat_id():
+    data = tg("getUpdates", {})
+    seen = set()
+    for u in data.get("result", []):
+        m = u.get("message") or u.get("edited_message") or {}
+        c = m.get("chat")
+        if c and c["id"] not in seen:
+            seen.add(c["id"])
+            print("chat_id:", c["id"], "-", c.get("first_name") or c.get("title"))
+    if not seen:
+        print("Сообщений нет. Откройте бота в Telegram, нажмите Start и запустите снова.")
 
-## Known limitations — be transparent
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--loop", type=int, metavar="SEC", help="работать постоянно, проверяя каждые SEC секунд")
+    ap.add_argument("--dry", action="store_true", help="печатать сделки в консоль вместо отправки в Telegram")
+    ap.add_argument("--get-chat-id", action="store_true")
+    ap.add_argument("--test-telegram", action="store_true")
+    args = ap.parse_args()
+    if args.get_chat_id:
+        return get_chat_id()
+    if args.test_telegram:
+        return send("✅ Бот подключён, тестовое сообщение.")
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        cfg = json.load(f)
+    db = open_db()
+    if args.loop:
+        while True:
+            try:
+                run_once(cfg, db, args.dry)
+            except Exception as e:
+                log("ошибка цикла:", e)
+            time.sleep(args.loop * random.uniform(0.85, 1.15))
+    else:
+        run_once(cfg, db, args.dry)
 
-- The academy and mentor/pet/monster visuals in this branch are original stylized Roblox Part assemblies. They are more detailed than placeholder blocks but are not imported premium MeshPart rigs. If you want highly polished character models and complex castle meshes, add original licensed meshes/animations; do not invent asset IDs.
-- Combat is a first functional click-to-attack loop in isolated lanes. It has server-side health/damage, cooldowns, hit reactions and reward drops, but it is not yet a full real-time pathfinding enemy AI with complex attack combos.
-- Pets use lightweight local companion assemblies that follow the player; they are not full rigged animated creatures.
-- The current shop has the Marketplace flow but uses ID `0` placeholders. No real Robux purchase can be made until IDs are configured in Creator Dashboard.
-- The first vertical slice does not yet contain a full multi-world campaign, boss phase system, pet fusion/upgrading, sell-all/sorting, or a complete daily-event calendar.
-- The current generated world is one starting academy/courtyard with a first combat arena. Additional worlds should be built after this slice is verified.
-- A successful `rojo build` verifies project mapping/build output only. Runtime behavior, DataStore access, combat feel, receipt flow and mobile layout must be tested manually in Roblox Studio.
-
-## Vercel
-
-Vercel can host web assets or APIs connected to this repository. It does not run the Roblox game server or publish a Roblox experience.
+if __name__ == "__main__":
+    sys.exit(main())
