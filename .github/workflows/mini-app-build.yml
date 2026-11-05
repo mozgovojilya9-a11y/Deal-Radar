@@ -34,5 +34,9 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: TypeScript check
         run: npm run typecheck
+      - name: Python syntax and config validation
+        run: |
+          python -m py_compile ../bot.py
+          python -m json.tool ../config.json > /dev/null
       - name: Production build
         run: npm run build

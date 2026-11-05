@@ -40,6 +40,9 @@ export async function readDeals(options: {
     "listing_id,title,description,price,market_price,discount,category_key,category_label,model_group,city,distance_km,listing_url,image_url,warning_flags,posted_at,detected_at,active"
   );
   url.searchParams.set("active", "eq.true");
+  // Do not show stale listings after three days; Marktplaats listings may disappear or sell.
+  const freshSince = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+  url.searchParams.set("detected_at", "gte." + freshSince);
   url.searchParams.set("limit", String(Math.min(Math.max(options.limit ?? 60, 1), 100)));
 
   if (options.category && /^[a-z0-9-]{1,64}$/i.test(options.category)) {
