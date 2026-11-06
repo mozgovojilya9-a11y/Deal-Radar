@@ -166,10 +166,10 @@ class ScannerTests(unittest.TestCase):
             {"listing_id": "good-1", "category_key": "ps5", "title": "PS5 console", "description": "", "price": 300,
              "listing_url": "https://www.marktplaats.nl/v/good-1", "status": "good", "estimated_profit": 70, "profit_roi": 0.4,
              "detected_at": datetime.now(timezone.utc).isoformat()},
-            {"listing_id": "candidate-1", "category_key": "ps5", "title": "PS5 controller", "description": "", "price": 100,
+            {"listing_id": "candidate-1", "category_key": "ps5", "title": "PS5 Slim Console", "description": "", "price": 100,
              "listing_url": "https://www.marktplaats.nl/v/candidate-1", "status": "candidate", "estimated_profit": 5, "profit_roi": 0.05,
              "detected_at": datetime.now(timezone.utc).isoformat()},
-        ], "updatedAt": None, "valuationVersion": bot.FEED_SCHEMA_VERSION}
+        ], "updatedAt": None, "valuationVersion": bot.FEED_SCHEMA_VERSION, "scannerVersion": bot.SCANNER_DATA_VERSION}
         with open(os.environ["DEAL_FEED"], "w", encoding="utf-8") as handle:
             json.dump(feed, handle)
         db = bot.open_db()
