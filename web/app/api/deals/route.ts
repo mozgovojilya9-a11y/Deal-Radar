@@ -15,7 +15,7 @@ function isDeal(value: unknown): value is Deal {
   const deal = value as Partial<Deal>;
   return typeof deal.listing_id === "string"
     && typeof deal.title === "string"
-    && typeof deal.price === "number"
+    && typeof deal.price === "number" && deal.price > 0
     && (deal.market_price === null || typeof deal.market_price === "number")
     && (deal.discount === null || typeof deal.discount === "number")
     && typeof deal.category_key === "string"

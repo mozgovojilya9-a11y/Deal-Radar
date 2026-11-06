@@ -205,6 +205,24 @@ class ScannerTests(unittest.TestCase):
         self.assertNotEqual(bot.group_of(ps5, "PlayStation 5 Slim Console"), "unknown")
         self.assertTrue(ps5["strict_group"])
 
+    def test_ai_cannot_rescue_a_zero_price_listing(self):
+        now = datetime.now(timezone.utc).isoformat()
+        free_item = listing("free-item", 0, now, title="Unrelated Bluetooth speaker")
+        verdict = {
+            "free-item": {
+                "same_product": True, "comparable": True, "is_accessory": False,
+                "confidence": 0.99, "variant": "console", "reason": "test",
+            }
+        }
+        db = bot.open_db()
+        try:
+            with mock.patch.object(bot, "fetch_query", return_value=[free_item]), \
+                 mock.patch.object(bot, "review_listings_with_ai", return_value=verdict):
+                self.assertTrue(bot.run_once(CFG, db, dry=False))
+            self.assertEqual(bot.load_feed()["deals"], [])
+        finally:
+            db.close()
+
     def test_profit_floor_is_50_eur(self):
         cfg = {"profitability": {"market_resale_factor": 0.95, "buyer_negotiation_rate": 0.04, "selling_fee_rate": 0.08, "fixed_selling_cost_eur": 10, "min_profit_eur": 50, "min_roi": 0.2}}
         result = bot.calculate_resale_economics({"min_profit_eur": 50, "min_roi": 0.2}, 160, 127, 12, "marktplaats", cfg=cfg)
@@ -426,8 +444,15 @@ class ScannerTests(unittest.TestCase):
             "description": "", "price": 900, "listing_url": "https://www.marktplaats.nl/v/old-900",
             "status": "strong", "estimated_profit": 100, "profit_roi": 0.4,
         }
+        zero_deal = {
+            "listing_id": "old-zero", "category_key": "ps5", "title": "PS5 console",
+            "description": "", "price": 0, "listing_url": "https://www.marktplaats.nl/v/old-zero",
+            "status": "candidate", "estimated_profit": 200, "profit_roi": 2.0,
+            "detected_at": datetime.now(timezone.utc).isoformat(),
+        }
         with open(os.environ["DEAL_FEED"], "w", encoding="utf-8") as handle:
-            json.dump({"deals": [old_deal], "updatedAt": None}, handle)
+            json.dump({"deals": [old_deal, zero_deal], "updatedAt": None,
+                       "valuationVersion": bot.FEED_SCHEMA_VERSION}, handle)
         self.assertTrue(self.run_scan([]))
         self.assertEqual(bot.load_feed()["deals"], [])
 

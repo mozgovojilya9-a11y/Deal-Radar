@@ -524,26 +524,28 @@ def primary_rejection(q, it, cfg):
     """Return the first primary filter that rejects a listing, or None."""
     if not isinstance(q, dict):
         return "title"
-    searchable_text = it.get("text") or it.get("title") or ""
-    title_field = str(it.get("title") or "")
-    if not title_matches_query(q, searchable_text if q.get("match_description") else title_field):
-        return "title"
+    # Hard safety/economic checks run before title matching so Gemini can never
+    # rescue a free, auction, out-of-range, distant, or externally linked listing.
+    if not it.get("id") or it.get("price") is None or it["price"] <= 0:
+        return "invalid"
+    if it.get("ptype") not in (None, "FIXED"):
+        return "price_type"
+    absolute_cap = float(cfg.get("max_product_price_eur", 800))
+    category_cap = min(float(q.get("max_price", absolute_cap)), absolute_cap)
+    if not (float(q.get("min_price", 0)) <= it["price"] <= category_cap):
+        return "price_range"
+    if it.get("dist_km") is not None and it["dist_km"] > cfg["distance_km"] + 1:
+        return "distance"
     if it.get("external_link") or has_external_website_link(it.get("description") or ""):
         return "external_link"
     if q.get("group_type") == "television":
         year = television_model_year(it.get("text") or it.get("title") or "")
         if year is None or year < int(q.get("min_model_year", 2023)):
             return "old_model"
-    if not it["id"] or it["price"] is None or it["price"] <= 0:
-        return "invalid"
-    if it["ptype"] not in (None, "FIXED"):
-        return "price_type"
-    absolute_cap = float(cfg.get("max_product_price_eur", 800))
-    category_cap = min(float(q.get("max_price", absolute_cap)), absolute_cap)
-    if not (float(q.get("min_price", 0)) <= it["price"] <= category_cap):
-        return "price_range"
-    if it["dist_km"] is not None and it["dist_km"] > cfg["distance_km"] + 1:
-        return "distance"
+    searchable_text = it.get("text") or it.get("title") or ""
+    title_field = str(it.get("title") or "")
+    if not title_matches_query(q, searchable_text if q.get("match_description") else title_field):
+        return "title"
     return None
 
 def _structured_schema(schema):
@@ -926,7 +928,7 @@ def run_once(cfg, db, dry=False):
             continue
         q = queries_by_key.get(str(deal.get("category_key") or ""))
         cached_price = deal.get("price")
-        if not isinstance(cached_price, (int, float)) or cached_price > float(cfg.get("max_product_price_eur", 800)):
+        if not isinstance(cached_price, (int, float)) or cached_price <= 0 or cached_price > float(cfg.get("max_product_price_eur", 800)):
             continue
         cached_text = " ".join([deal.get("title") or "", deal.get("description") or ""])
         match_text = cached_text if (isinstance(q, dict) and q.get("match_description")) else (deal.get("title") or "")
@@ -981,7 +983,7 @@ def run_once(cfg, db, dry=False):
         ai_reviewable = [
             item for item in parsed_rows
             if primary_rejection(q, item, cfg) in (None, "title")
-            and item.get("id") and item.get("price") is not None
+            and item.get("id") and isinstance(item.get("price"), (int, float)) and item["price"] > 0
             and not item.get("external_link")
         ]
         ai_decisions = review_listings_with_ai(db, q, ai_reviewable)
@@ -1000,7 +1002,10 @@ def run_once(cfg, db, dry=False):
             ai_confident = bool(ai_decision and ai_decision.get("confidence", 0) >= 0.90)
             if ai_confident and (not ai_decision["same_product"] or ai_decision["is_accessory"]):
                 rejection = "ai_mismatch"
-            elif rejection == "title" and ai_confident and ai_decision["same_product"] and ai_decision["comparable"]:
+            elif (rejection == "title" and ai_confident and ai_decision["same_product"] and ai_decision["comparable"]
+                  and not (q.get("require_regex") or q.get("strict_group") or q.get("group_regex")
+                           or q.get("exclude") or q.get("exclude_regex")
+                           or q.get("group_type") in ("model_required", "television"))):
                 rejection = None
                 metrics["aiRescued"] += 1
             if rejection:
@@ -1157,7 +1162,8 @@ def run_once(cfg, db, dry=False):
             current_deals.append(deal)
     # Keep unverified candidates visible, but always below verified deals.
     # The UI renders them in a separate review section without claiming savings.
-    fresh_deals = [d for d in current_deals if d.get("status") in ("strong", "good", "candidate")]
+    fresh_deals = [d for d in current_deals if d.get("status") in ("strong", "good", "candidate")
+                   and isinstance(d.get("price"), (int, float)) and d["price"] > 0]
     rank = {"strong": 3, "good": 2, "candidate": 1}
     fresh_deals.sort(key=lambda d: (
         -rank.get(d.get("status", "candidate"), 0),
