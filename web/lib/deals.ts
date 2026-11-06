@@ -16,7 +16,8 @@ export type Deal = {
   model_year?: number | null;
   status?: DealStatus;
   market_confidence?: "high" | "preliminary" | "retail_proxy" | "none";
-  market_samples?: number;\n  market_sources?: Array<{ title: string; url: string }>;
+  market_samples?: number;
+  market_sources?: Array<{ title: string; url: string }>;
   evaluation_reason?: string | null;
   category_key: string;
   category_label: string;
