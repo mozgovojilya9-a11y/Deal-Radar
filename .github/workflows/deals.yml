@@ -7,6 +7,9 @@ on:
 
 concurrency: deals
 
+permissions:
+  contents: write
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -19,11 +22,34 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: state.db
-          key: state-${{ github.run_id }}
-          restore-keys: state-
-      - run: python bot.py
+          key: state-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            state-${{ runner.os }}-
+            state-
+      - name: Restore the published feed
+        run: |
+          git fetch origin deals-data
+          mkdir -p data
+          git show origin/deals-data:data/deals.json > data/deals.json
+      - name: Scan Marktplaats and update the JSON feed
+        run: python bot.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - name: Publish the feed to the data branch
+        run: |
+          set -euo pipefail
+          FEED_WORKTREE="$(mktemp -d)"
+          rmdir "$FEED_WORKTREE"
+          git worktree add --detach "$FEED_WORKTREE" origin/deals-data
+          mkdir -p "$FEED_WORKTREE/data"
+          cp data/deals.json "$FEED_WORKTREE/data/deals.json"
+          git -C "$FEED_WORKTREE" config user.name "github-actions[bot]"
+          git -C "$FEED_WORKTREE" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$FEED_WORKTREE" add data/deals.json
+          if git -C "$FEED_WORKTREE" diff --cached --quiet; then
+            echo "Deal feed did not change; skipping commit."
+            exit 0
+          fi
+          git -C "$FEED_WORKTREE" commit -m "Update Deal Radar feed"
+          git -C "$FEED_WORKTREE" push origin HEAD:refs/heads/deals-data
