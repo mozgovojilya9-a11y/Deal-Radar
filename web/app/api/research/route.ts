@@ -11,7 +11,9 @@ type MatchType = "exact" | "variant" | "related" | "accessory" | "unrelated";
 type Offer = { title: string; description: string; price: number; url: string; source: string; condition: Condition; kind: "marktplaats" | "web"; matchType?: MatchType; matchConfidence?: number; matchReason?: string };
 const USED_HOSTS = ["marktplaats.nl", "ebay.nl", "2dehands.be", "tweakers.net"];
 const NEW_HOSTS = ["ray-ban.com", "bol.com", "coolblue.nl", "mediamarkt.nl", "amazon.nl", "kamera-express.nl", "cameranu.nl", "apple.com", "samsung.com", "sony.nl", "nikon.nl", "fujifilm.com", "alternate.nl"];
-const USED_WORDS = /\b(tweedehands|gebruikt|used|pre-owned|occasion|refurbished|vraag\s*&\s*aanbod)\b/i;
+const USED_WORDS = /\b(tweedehands|gebruikt|used|pre-owned|occasion|vraag\s*&\s*aanbod)\b/i;
+const REFURBISHED_HOSTS = ["backmarket.nl", "refurbed.nl"];
+const REFURBISHED_WORDS = /\b(refurbished|reconditioned|renewed|gereviseerd|refurb)\b/i;
 const NEW_WORDS = /\b(nieuw|new|sealed|geseald|ongeopend)\b/i;
 const BAD_WORDS = /\b(case only|hoesje|oplaadcase alleen|charging case only|onderdelen|onderdeel|losse lens|lens only|battery only|accu only|charger only|lader alleen|defect|kapot|reparatie|parts only|for parts)\b/i;
 const PRICE_RE = /€\s?(\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})?|\d{2,5}(?:[.,]\d{2})?)/g;
@@ -66,6 +68,11 @@ function safeUrl(value: string) {
   } catch { return false; }
 }
 function conditionFor(host: string, text: string): Condition {
+  if (REFURBISHED_HOSTS.some((d) => host === d || host.endsWith("." + d)) || REFURBISHED_WORDS.test(text)) return "refurbished";
+  if (USED_HOSTS.some((d) => host === d || host.endsWith("." + d)) || USED_WORDS.test(text)) return "used";
+  if (NEW_HOSTS.some((d) => host === d || host.endsWith("." + d)) || NEW_WORDS.test(text)) return "new";
+  return "unknown";
+}
   if (USED_HOSTS.some((d) => host === d || host.endsWith("." + d)) || USED_WORDS.test(text)) return "used";
   if (NEW_HOSTS.some((d) => host === d || host.endsWith("." + d)) || NEW_WORDS.test(text)) return "new";
   return "unknown";
