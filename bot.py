@@ -22,7 +22,7 @@ FEED_PATH = os.environ.get("DEAL_FEED", os.path.join(HERE, "data", "deals.json")
 RETAIL_PATH = os.environ.get("DEAL_RETAIL_PRICES", os.path.join(HERE, "retail_prices.json"))
 API = "https://www.marktplaats.nl/lrp/api/search"
 SCANNER_DATA_VERSION = "4"
-FEED_SCHEMA_VERSION = 3
+FEED_SCHEMA_VERSION = 2
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
     "Accept": "application/json",
@@ -949,7 +949,10 @@ def run_once(cfg, db, dry=False):
     }
     queries_by_key = {q["key"]: q for q in cfg["queries"]}
     feed_deals = {}
-    compatible_feed = feed_doc.get("valuationVersion") == FEED_SCHEMA_VERSION
+    compatible_feed = (
+        feed_doc.get("valuationVersion") == FEED_SCHEMA_VERSION
+        and feed_doc.get("scannerVersion") == SCANNER_DATA_VERSION
+    )
     if not compatible_feed:
         log("версия оценки каталога изменилась — старые оценки не переиспользуются")
     for deal in (feed_doc.get("deals", []) if compatible_feed else []):
@@ -1218,6 +1221,7 @@ def run_once(cfg, db, dry=False):
     ))
     feed_doc = {
         "valuationVersion": FEED_SCHEMA_VERSION,
+        "scannerVersion": SCANNER_DATA_VERSION,
         "updatedAt": now_iso if changed or not feed_doc.get("updatedAt") or not compatible_feed else feed_doc["updatedAt"],
         "scannedAt": now_iso,
         "scannerStats": {**metrics, "primaryRejected": primary_rejected, "rejectedTotal": rejected_total,
