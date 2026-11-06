@@ -280,6 +280,15 @@ class ScannerTests(unittest.TestCase):
         }))
         self.assertEqual(bot.group_of(q, item["text"]), "wayfarer-gen-2")
 
+    def test_rayban_wayfarer_gen2_without_meta_word_is_accepted(self):
+        with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as handle:
+            config=json.load(handle)
+        q=next(q for q in config["queries"] if q["key"]=="rayban")
+        self.assertTrue(bot.title_matches_query(q, "Ray-Ban Wayfarer Gen 2 RW4012 Matte Black"))
+        self.assertTrue(bot.title_matches_query(q, "RW4012 601S1Z 50-22"))
+        self.assertFalse(bot.title_matches_query(q, "Ray-Ban Wayfarer Gen 1 RW4006"))
+        self.assertEqual(bot.group_of(q, "Ray-Ban Wayfarer Gen 2 RW4012"), "wayfarer-gen-2")
+
 
 if __name__ == "__main__":
     unittest.main()

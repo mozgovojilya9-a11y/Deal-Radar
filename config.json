@@ -128,7 +128,8 @@
         "rayban",
         "ray ban",
         "rw4012",
-        "meta wayfarer"
+        "meta wayfarer",
+        "rw 4012"
       ],
       "exclude": [
         "hoesje",
@@ -142,15 +143,17 @@
       "min_price": 40,
       "max_price": 800,
       "threshold": 0.25,
-      "group_regex": "\\b(?:wayfarer|rw4012)\\b",
-      "require_regex": "(?:(?=.*\\bray[\\s-]?ban\\b)(?=.*\\bmeta\\b)(?=.*\\bwayfarer\\b)(?=.*(?:\\bgen(?:eration)?[\\s.-]*(?:[2-9]\\d*|1\\d+)\\b|\\b(?:[2-9]\\d*|1\\d+)(?:st|nd|rd|th)?[\\s.-]*gen(?:eration)?\\b|\\b(?:[2-9]\\d*|1\\d+)(?:e|de)[\\s.-]*generatie\\b))|(?=.*\\bRW4012\\b)(?=.*\\bmeta\\b)|(?=.*\\bmeta\\b)(?=.*\\bwayfarer\\b)(?=.*\\bgen[\\s.-]*2\\b))",
+      "group_regex": "\\b(?:wayfarer|rw[\\s-]?4012)\\b",
+      "require_regex": "(?:(?=.*\\bRW[\\s-]?4012\\b)|(?=.*\\bray[\\s-]?ban\\b)(?=.*\\bwayfarer\\b)(?=.*\\bgen[\\s.-]*2\\b)|(?=.*\\bmeta\\b)(?=.*\\bwayfarer\\b)(?=.*\\bgen[\\s.-]*2\\b))",
       "search_variants": [
         "ray-ban meta wayfarer gen 2",
         "ray-ban meta gen 2",
         "ray-ban meta",
         "meta wayfarer",
         "RW4012",
-        "rayban meta"
+        "rayban meta",
+        "RW 4012",
+        "Meta Wayfarer Gen 2"
       ],
       "variant_pages": 1,
       "search_v2": true,
