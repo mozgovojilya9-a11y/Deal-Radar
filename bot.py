@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Marktplaats deal finder -> Telegram. Only the Python standard library."""
 import argparse
-import html
 import json
 import os
 import random
@@ -242,39 +241,6 @@ def make_feed_deal(q, it, med, discount, flags, grp):
     }
 
 
-def tg(method, payload):
-    token = os.environ.get("TELEGRAM_TOKEN")
-    if not token:
-        raise RuntimeError("TELEGRAM_TOKEN is not configured")
-    req = urllib.request.Request(
-        f"https://api.telegram.org/bot{token}/{method}",
-        data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=25) as r:
-        return json.load(r)
-
-def send(text, dry=False):
-    chat = os.environ.get("TELEGRAM_CHAT_ID")
-    if dry or not os.environ.get("TELEGRAM_TOKEN") or not chat:
-        print("---- (не отправлено, режим dry) ----\n" + text + "\n")
-        return
-    tg("sendMessage", {"chat_id": chat, "text": text, "parse_mode": "HTML", "disable_web_page_preview": False})
-
-def format_deal(q, it, med, n, kind, discount, flags):
-    lines = [
-        f"🔥 <b>-{discount:.0%}</b> · {html.escape(q['label'])}",
-        html.escape(it["title"]),
-        f"💶 <b>€{it['price']:.0f}</b> (рынок ≈ €{med:.0f}, по {n} объявл., {'по модели' if kind == 'model' else 'грубая оценка по категории'})",
-    ]
-    place = it["city"] or "—"
-    if it["dist_km"] is not None:
-        place += f" · {it['dist_km']:.0f} км"
-    lines.append("📍 " + html.escape(place))
-    lines.extend("⚠️ " + html.escape(f) for f in flags)
-    if discount > 0.6:
-        lines.append("⚠️ подозрительно низкая цена: возможна подделка или мошенничество")
-    lines.append(it["url"])
-    return "\n".join(lines)
-
 def run_once(cfg, db, dry=False):
     now = int(time.time())
     window = now - cfg.get("market_days", 21) * 86400
@@ -355,7 +321,7 @@ def run_once(cfg, db, dry=False):
                 skipped_discount += 1
                 continue
             feed_deals[it["id"]] = make_feed_deal(q, it, med, discount, flags, grp)
-            send(format_deal(q, it, med, n, kind, discount, flags), dry)
+            log(f"[{qkey}] добавлено в каталог: -{discount:.0%} €{it['price']:.0f} (рынок ≈ €{med:.0f}, {n} объявл.) {it['title'][:70]}")
             db.execute("INSERT OR IGNORE INTO sent VALUES(?,?)", (it["id"], now))
             db.commit()
             sent_count += 1
@@ -363,11 +329,8 @@ def run_once(cfg, db, dry=False):
     db.execute("DELETE FROM listings WHERE last_seen<?", (now - 30 * 86400,))
     db.commit()
     if fails == len(cfg["queries"]):
-        row = db.execute("SELECT v FROM meta WHERE k='warned'").fetchone()
-        if not row or now - int(row[0]) > 6 * 3600:
-            send("⚠️ Бот не смог получить данные с Marktplaats (возможно, блокировка или смена формата). Проверьте логи.", dry)
-            db.execute("INSERT OR REPLACE INTO meta VALUES('warned',?)", (str(now),))
-            db.commit()
+        log("все запросы к Marktplaats не удались — каталог не обновлён")
+        return False
     # Keep only recent listings; old offers should not remain in the public feed.
     cutoff = now - 72 * 3600
     fresh_deals = []
@@ -382,45 +345,32 @@ def run_once(cfg, db, dry=False):
             continue
     fresh_deals.sort(key=lambda item: item.get("detected_at") or "", reverse=True)
     fresh_deals = fresh_deals[:200]
-    if fresh_deals != feed_doc.get("deals", []):
-        feed_doc = {
-            "updatedAt": datetime.now(timezone.utc).isoformat(),
-            "deals": fresh_deals,
-        }
-        if not dry:
-            save_feed(feed_doc)
-            log(f"каталог обновлён: {len(fresh_deals)} предложений")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    changed = fresh_deals != feed_doc.get("deals", [])
+    feed_doc = {
+        "updatedAt": now_iso if changed or not feed_doc.get("updatedAt") else feed_doc["updatedAt"],
+        "scannedAt": now_iso,
+        "deals": fresh_deals,
+    }
+    if dry:
+        log(f"dry-run: каталог не записан ({len(fresh_deals)} предложений)")
+    else:
+        save_feed(feed_doc)
+        log(f"каталог сохранён: {len(fresh_deals)} предложений" + (" (есть изменения)" if changed else ""))
     log(
         f"готово: проверено объявлений {total_checked}, принято после базовых фильтров {total_accepted}, "
-        f"кандидатов на оценку {total_candidates}, отправлено {sent_count}, "
+        f"кандидатов на оценку {total_candidates}, добавлено в каталог {sent_count}, "
         f"отсечено по возрасту {skipped_age}, рискам {skipped_risk}, "
         f"недостатку рыночных данных {skipped_samples}, скидке {skipped_discount}, "
         f"ошибок запросов {fails}"
     )
-
-def get_chat_id():
-    data = tg("getUpdates", {})
-    seen = set()
-    for u in data.get("result", []):
-        m = u.get("message") or u.get("edited_message") or {}
-        c = m.get("chat")
-        if c and c["id"] not in seen:
-            seen.add(c["id"])
-            print("chat_id:", c["id"], "-", c.get("first_name") or c.get("title"))
-    if not seen:
-        print("Сообщений нет. Откройте бота в Telegram, нажмите Start и запустите снова.")
+    return fails < len(cfg["queries"])
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--loop", type=int, metavar="SEC", help="работать постоянно, проверяя каждые SEC секунд")
-    ap.add_argument("--dry", action="store_true", help="печатать сделки в консоль вместо отправки в Telegram")
-    ap.add_argument("--get-chat-id", action="store_true")
-    ap.add_argument("--test-telegram", action="store_true")
+    ap.add_argument("--dry", action="store_true", help="сканировать, но не записывать каталог")
     args = ap.parse_args()
-    if args.get_chat_id:
-        return get_chat_id()
-    if args.test_telegram:
-        return send("✅ Бот подключён, тестовое сообщение.")
     with open(CONFIG_PATH, encoding="utf-8") as f:
         cfg = json.load(f)
     db = open_db()
@@ -432,7 +382,7 @@ def main():
                 log("ошибка цикла:", e)
             time.sleep(args.loop * random.uniform(0.85, 1.15))
     else:
-        run_once(cfg, db, args.dry)
+        return 0 if run_once(cfg, db, args.dry) else 1
 
 if __name__ == "__main__":
     sys.exit(main())

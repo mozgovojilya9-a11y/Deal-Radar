@@ -20,5 +20,6 @@ export type Deal = {
 
 export type DealFeed = {
   updatedAt: string | null;
+  scannedAt?: string | null;
   deals: Deal[];
 };

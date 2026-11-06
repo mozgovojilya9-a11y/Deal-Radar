@@ -2,17 +2,20 @@ name: Mini App build
 
 on:
   push:
-    branches:
-      - main
-      - feature/telegram-mini-app
+    branches: [main, feature/telegram-mini-app]
     paths:
       - "web/**"
+      - "bot.py"
+      - "config.json"
+      - "tests/**"
       - ".github/workflows/mini-app-build.yml"
   pull_request:
-    branches:
-      - main
+    branches: [main]
     paths:
       - "web/**"
+      - "bot.py"
+      - "config.json"
+      - "tests/**"
       - ".github/workflows/mini-app-build.yml"
 
 permissions:
@@ -35,8 +38,13 @@ jobs:
       - name: TypeScript check
         run: npm run typecheck
       - name: Python syntax and config validation
+        working-directory: .
         run: |
-          python -m py_compile ../bot.py
-          python -m json.tool ../config.json > /dev/null
+          python -m py_compile bot.py
+          python -m json.tool config.json > /dev/null
+      - name: Scanner tests (offline)
+        working-directory: .
+        run: python -m unittest discover -s tests
       - name: Production build
+        working-directory: web
         run: npm run build

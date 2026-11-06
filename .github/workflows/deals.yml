@@ -8,10 +8,12 @@ on:
       - "config.json"
       - ".github/workflows/deals.yml"
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
-concurrency: deals
+concurrency:
+  group: deals
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -19,7 +21,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,28 +36,24 @@ jobs:
             state-
       - name: Restore the published feed
         run: |
-          git fetch origin deals-data
+          set -euo pipefail
           mkdir -p data
-          git show origin/deals-data:data/deals.json > data/deals.json
+          if git ls-remote --exit-code --heads origin deals-data > /dev/null 2>&1; then
+            git fetch --depth=1 origin deals-data
+            git show origin/deals-data:data/deals.json > data/deals.json || echo '{"updatedAt":null,"deals":[]}' > data/deals.json
+          else
+            echo "Branch deals-data does not exist yet; it will be created by the first run."
+            echo '{"updatedAt":null,"deals":[]}' > data/deals.json
+          fi
       - name: Scan Marktplaats and update the JSON feed
         run: python bot.py
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      - name: Publish the feed to the data branch
+      - name: Publish the feed to the deals-data branch
         run: |
           set -euo pipefail
-          FEED_WORKTREE="$(mktemp -d)"
-          rmdir "$FEED_WORKTREE"
-          git worktree add --detach "$FEED_WORKTREE" origin/deals-data
-          mkdir -p "$FEED_WORKTREE/data"
-          cp data/deals.json "$FEED_WORKTREE/data/deals.json"
-          git -C "$FEED_WORKTREE" config user.name "github-actions[bot]"
-          git -C "$FEED_WORKTREE" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C "$FEED_WORKTREE" add data/deals.json
-          if git -C "$FEED_WORKTREE" diff --cached --quiet; then
-            echo "Deal feed did not change; skipping commit."
-            exit 0
-          fi
-          git -C "$FEED_WORKTREE" commit -m "Update Deal Radar feed"
-          git -C "$FEED_WORKTREE" push origin HEAD:refs/heads/deals-data
+          export GIT_AUTHOR_NAME="github-actions[bot]" GIT_COMMITTER_NAME="github-actions[bot]"
+          export GIT_AUTHOR_EMAIL="41898282+github-actions[bot]@users.noreply.github.com" GIT_COMMITTER_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
+          blob="$(git hash-object -w data/deals.json)"
+          data_tree="$(printf '100644 blob %s\tdeals.json\n' "$blob" | git mktree)"
+          root_tree="$(printf '040000 tree %s\tdata\n' "$data_tree" | git mktree)"
+          commit="$(git commit-tree "$root_tree" -m "Update Deal Radar feed")"
+          git push --force origin "$commit:refs/heads/deals-data"
