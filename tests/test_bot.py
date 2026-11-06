@@ -152,13 +152,13 @@ class ScannerTests(unittest.TestCase):
         self.assertIsNone(deal["discount"])
         self.assertIn("недостаточно", deal["evaluation_reason"].lower())
 
-    def test_television_groups_include_brand_size_panel_and_resolution(self):
+    def test_television_groups_include_brand_size_panel_resolution_and_year(self):
         q = {"group_type": "television"}
-        samsung = bot.group_of(q, "Samsung Smart TV 43 inch 4K LED")
-        sony = bot.group_of(q, "Sony KD55X85 Android 4K TV")
-        samsung_qled = bot.group_of(q, "Samsung 43 inch 4K QLED")
-        self.assertEqual(samsung, "samsung-43-led-lcd-4k")
-        self.assertEqual(sony, "sony-55-panel-unknown-4k")
+        samsung = bot.group_of(q, "Samsung UE43CU8000 43 inch 4K LED")
+        sony = bot.group_of(q, "Sony KD55X85L 55 inch 4K TV")
+        samsung_qled = bot.group_of(q, "Samsung QE43Q80D 43 inch 4K QLED")
+        self.assertEqual(samsung, "samsung-43-led-lcd-4k-2023")
+        self.assertEqual(sony, "sony-55-panel-unknown-4k-2023")
         self.assertNotEqual(samsung, samsung_qled)
         self.assertEqual(bot.group_of(q, "Smart TV 43 inch"), "unknown")
 
