@@ -135,11 +135,12 @@ export async function createAiResearchPlan(
     "deal_radar_search_plan",
     PLAN_SCHEMA,
     [
-      "You are the product research planner for a second-hand marketplace price analyst.",
+      "You are the product research planner for a second-hand marketplace price analyst in the Netherlands.",
       "Identify the exact product from the user's wording. Do not invent model numbers, specifications, release years, or aliases.",
-      "Keep distinguishing details such as generation, storage, size, panel, model code, bundle, and regional suffix.",
-      "Return short search queries that a search engine can use. Every query must retain the user's core model identifier.",
-      "Separate used-market queries from new-retail queries. Use Dutch and English terms where useful.",
+      "Keep generation, storage, size, panel, model code, bundle and regional suffix exact.",
+      "Return short phrases directly usable on Marktplaats and Dutch retail search pages.",
+      "Use natural Dutch seller terms and English model wording. Every phrase must retain a core product identifier.",
+      "Do not expand to games, cases, accessories, parts or other generations. Separate used and new-retail searches.",
       "If the query is ambiguous, say so in productSummary and use conservative queries. Return JSON only.",
     ].join(" "),
     JSON.stringify({ query, includeUsed, includeNew }),
@@ -148,8 +149,8 @@ export async function createAiResearchPlan(
   if (!result) return null;
   return {
     productSummary: typeof result.productSummary === "string" ? result.productSummary.slice(0, 500) : "",
-    usedQueries: cleanStrings(result.usedQueries, includeUsed ? 2 : 0, 180),
-    newQueries: cleanStrings(result.newQueries, includeNew ? 2 : 0, 180),
+    usedQueries: cleanStrings(result.usedQueries, includeUsed ? 3 : 0, 180),
+    newQueries: cleanStrings(result.newQueries, includeNew ? 3 : 0, 180),
     keyAttributes: cleanStrings(result.keyAttributes, 8, 100),
   };
 }
