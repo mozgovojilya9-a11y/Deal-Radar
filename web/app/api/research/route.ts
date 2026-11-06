@@ -415,6 +415,8 @@ export async function POST(request: NextRequest) {
       exactMatches: exactCount,
       variants: variantCount,
       reviewedOffers: aiReview?.offers.length || 0,
+      googleSearchQueries: plan?.googleSearchQueries || [],
+      groundedSources: plan?.groundedSources || [],
     },
     searchQueries,
     marktplaatsSearchQueries: usedMarktplaatsQueries,
