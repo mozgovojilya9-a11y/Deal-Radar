@@ -45,11 +45,7 @@ jobs:
             echo "Branch deals-data does not exist yet; it will be created by the first run."
             echo '{"updatedAt":null,"deals":[]}' > data/deals.json
           fi
-      - name: Scan Marktplaats and update the JSON feed
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: gpt-6-luna
-          AI_REVIEW_MAX_PER_QUERY: "12"
+      - name: Scan Marktplaats and update the JSON feed (free rule-based mode)
         run: python bot.py
       - name: Publish the feed to the deals-data branch
         run: |
