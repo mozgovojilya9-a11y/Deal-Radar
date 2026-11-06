@@ -84,21 +84,58 @@ def fetch_query(cfg, q, pages):
         time.sleep(random.uniform(1.5, 3.0))
     return out
 
+def extract_image_url(l):
+    """Best-effort extraction of a public listing image from Marktplaats response."""
+    candidates = []
+    for key in ("pictures", "images", "imageUrls", "media"):
+        value = l.get(key)
+        if isinstance(value, list):
+            candidates.extend(value)
+        elif value:
+            candidates.append(value)
+    for key in ("imageUrl", "imageURL", "thumbnailUrl", "pictureUrl"):
+        if l.get(key):
+            candidates.append(l[key])
+    for item in candidates:
+        value = item
+        if isinstance(item, dict):
+            value = next((item.get(k) for k in (
+                "largeImageUrl", "largeUrl", "imageUrl", "url", "src",
+                "mediumImageUrl", "thumbnailUrl"
+            ) if item.get(k)), None)
+        if isinstance(value, str) and value.strip():
+            value = value.strip()
+            if value.startswith("//"):
+                return "https:" + value
+            if value.startswith("/"):
+                return "https://www.marktplaats.nl" + value
+            if value.startswith("https://") or value.startswith("http://"):
+                return value
+    return None
+
+
 def parse_listing(l):
     pi, loc = l.get("priceInfo") or {}, l.get("location") or {}
     url = l.get("vipUrl") or ""
     if url.startswith("/"):
         url = "https://www.marktplaats.nl" + url
     cents = pi.get("priceCents")
+    description = l.get("description") or l.get("categorySpecificDescription") or ""
     return {
-        "id": str(l.get("itemId") or ""), "title": l.get("title") or "",
-        "text": " ".join(filter(None, [l.get("title"), l.get("description"), l.get("categorySpecificDescription")])),
+        "id": str(l.get("itemId") or ""),
+        "title": l.get("title") or "",
+        "text": " ".join(filter(None, [l.get("title"), l.get("description"),
+                                       l.get("categorySpecificDescription")])),
+        "description": description,
+        "image_url": extract_image_url(l),
         "price": cents / 100.0 if isinstance(cents, (int, float)) else None,
-        "ptype": pi.get("priceType"), "city": loc.get("cityName") or "",
-        "dist_km": loc.get("distanceMeters") / 1000.0 if isinstance(loc.get("distanceMeters"), (int, float)) else None,
-        "date": l.get("date"), "url": url,
+        "ptype": pi.get("priceType"),
+        "city": loc.get("cityName") or "",
+        "dist_km": (loc.get("distanceMeters") / 1000.0)
+        if isinstance(loc.get("distanceMeters"), (int, float)) else None,
+        "date": l.get("date"),
+        "url": url,
     }
-
 def age_hours(s):
     try:
         dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
@@ -141,6 +178,54 @@ def risks(it):
     if HARD_BAD.search(text):
         return None
     return [label for rx, label in SOFT if rx.search(it["text"])]
+
+
+def supabase_upsert_deal(q, it, med, discount, flags, grp):
+    """Publish a qualified deal to Supabase for the Mini App. Optional until secrets are configured."""
+    supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not supabase_url or not service_key:
+        return False
+    payload = {
+        "listing_id": it["id"],
+        "title": it["title"],
+        "description": it.get("description") or "",
+        "price": it["price"],
+        "market_price": round(float(med), 2),
+        "discount": round(float(discount), 4),
+        "category_key": q["key"],
+        "category_label": q["label"],
+        "model_group": grp,
+        "city": it.get("city") or "",
+        "distance_km": it.get("dist_km"),
+        "listing_url": it["url"],
+        "image_url": it.get("image_url"),
+        "warning_flags": flags,
+        "posted_at": it.get("date") or None,
+        "detected_at": datetime.now(timezone.utc).isoformat(),
+        "active": True,
+    }
+    endpoint = supabase_url + "/rest/v1/deals?on_conflict=listing_id"
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "apikey": service_key,
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as response:
+            if response.status not in (200, 201, 204):
+                log("Supabase: неожиданный HTTP статус", response.status)
+                return False
+        return True
+    except Exception as exc:
+        # Do not print request headers or secrets. Telegram notification remains independent.
+        log("Supabase: не удалось сохранить объявление:", type(exc).__name__, str(exc)[:180])
+        return False
 
 def tg(method, payload):
     token = os.environ.get("TELEGRAM_TOKEN")
@@ -226,6 +311,8 @@ def run_once(cfg, db, dry=False):
             discount = 1 - it["price"] / med
             if discount < need:
                 continue
+            if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
+                supabase_upsert_deal(q, it, med, discount, flags, grp)
             send(format_deal(q, it, med, n, kind, discount, flags), dry)
             db.execute("INSERT OR IGNORE INTO sent VALUES(?,?)", (it["id"], now))
             db.commit()

@@ -1,0 +1,42 @@
+name: Mini App build
+
+on:
+  push:
+    branches:
+      - main
+      - feature/telegram-mini-app
+    paths:
+      - "web/**"
+      - ".github/workflows/mini-app-build.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "web/**"
+      - ".github/workflows/mini-app-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: TypeScript check
+        run: npm run typecheck
+      - name: Python syntax and config validation
+        run: |
+          python -m py_compile ../bot.py
+          python -m json.tool ../config.json > /dev/null
+      - name: Production build
+        run: npm run build
