@@ -18,8 +18,8 @@ type ProductResearch = {
   marktplaatsSearchQueries?: string[];
   listings: ResearchListing[]; webOffers: ResearchListing[]; warnings: string[];
 };
-type UserSettings = { categories: string[]; minDiscount: number; maxDistanceKm: number | null; minPrice: number | null; maxPrice: number | null };
-const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, maxDistanceKm: null, minPrice: null, maxPrice: null };
+type UserSettings = { categories: string[]; minDiscount: number; minPrice: number | null; maxPrice: number | null };
+const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, minPrice: null, maxPrice: 800 };
 const SETTINGS_KEY = "deal-radar-settings";
 const REFRESH_INTERVAL_MS = 120_000;
 const DISCOUNT_STEPS = [0, 10, 20, 30, 40, 50];
@@ -235,9 +235,10 @@ function readSettings(raw: unknown): UserSettings {
   return {
     categories,
     minDiscount: typeof stored.minDiscount === "number" && Number.isInteger(stored.minDiscount) ? Math.min(90, Math.max(0, stored.minDiscount)) : 0,
-    maxDistanceKm: typeof stored.maxDistanceKm === "number" && Number.isFinite(stored.maxDistanceKm) ? Math.min(100, Math.max(5, stored.maxDistanceKm)) : null,
     minPrice: positive(stored.minPrice),
-    maxPrice: stored.maxPrice === 800 ? null : positive(stored.maxPrice)
+    maxPrice: stored.priceFilterConfigured === true
+      ? positive(stored.maxPrice)
+      : (positive(stored.maxPrice) ?? 800)
   };
 }
 
@@ -318,7 +319,7 @@ function DealCard({ deal, saved, onSave, onOpen }: {
 export default function HomePage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [researchQuery, setResearchQuery] = useState("");
-  const [researchMaxPrice, setResearchMaxPrice] = useState("5000");
+  const [researchMaxPrice, setResearchMaxPrice] = useState("800");
   const [researchIncludeUsed, setResearchIncludeUsed] = useState(true);
   const [researchIncludeNew, setResearchIncludeNew] = useState(true);
   const [researchLoading, setResearchLoading] = useState(false);
@@ -391,6 +392,8 @@ export default function HomePage() {
     if (silent) setRefreshing(true); else setLoading(true);
     try {
       const params = new URLSearchParams({ sort });
+      if (settings.minPrice !== null) params.set("minPrice", String(settings.minPrice));
+      if (settings.maxPrice !== null) params.set("maxPrice", String(settings.maxPrice));
       const response = await fetch("/api/deals?" + params.toString(), { cache: "no-store" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Не удалось загрузить предложения");
@@ -406,7 +409,7 @@ export default function HomePage() {
     } finally {
       if (id === requestId.current) { setLoading(false); setRefreshing(false); }
     }
-  }, [sort]);
+  }, [sort, settings.minPrice, settings.maxPrice]);
 
   useEffect(() => {
     void loadDeals();
@@ -420,7 +423,6 @@ export default function HomePage() {
     let result = deals;
     if (settings.categories.length) result = result.filter((deal) => settings.categories.includes(deal.category_key));
     if (settings.minDiscount > 0) result = result.filter((deal) => deal.discount != null && Number(deal.discount) * 100 >= settings.minDiscount);
-    if (settings.maxDistanceKm !== null) result = result.filter((deal) => deal.distance_km != null && Number(deal.distance_km) <= settings.maxDistanceKm!);
     if (settings.minPrice !== null) result = result.filter((deal) => Number(deal.price) >= settings.minPrice!);
     if (settings.maxPrice !== null) result = result.filter((deal) => Number(deal.price) <= settings.maxPrice!);
     return result;
@@ -461,7 +463,7 @@ export default function HomePage() {
   }, [catQuery]);
   const bestDiscount = base.reduce((top, deal) => Math.max(top, Math.round(Number(deal.discount || 0) * 100)), 0);
   const settingsCount = (settings.minDiscount > 0 ? 1 : 0) + (settings.minPrice !== null ? 1 : 0) + (settings.maxPrice !== null ? 1 : 0)
-    + (settings.maxDistanceKm !== null ? 1 : 0) + (settings.categories.length ? 1 : 0);
+    + (settings.categories.length ? 1 : 0);
   function pickCategory(key: string) { setCategory(key); setTab("home"); window.scrollTo({ top: 0 }); }
 
   const strongDeals = useMemo(() => filtered.filter((deal) => !deal.status || deal.status === "strong"), [filtered]);
@@ -485,13 +487,12 @@ export default function HomePage() {
   }
 
   function persistSettings(next: UserSettings) {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...next, priceFilterConfigured: true })); } catch { /* storage unavailable */ }
   }
 
   function updateFilters(patch: Partial<UserSettings>) {
     const safePatch = { ...patch };
     if (typeof safePatch.maxPrice === "number" && !Number.isFinite(safePatch.maxPrice)) safePatch.maxPrice = null;
-    if (typeof safePatch.maxDistanceKm === "number") safePatch.maxDistanceKm = Math.min(100, Math.max(5, safePatch.maxDistanceKm));
     const next = { ...settings, ...safePatch };
     setSettings(next);
     persistSettings(next);
@@ -500,7 +501,7 @@ export default function HomePage() {
   async function runProductResearch() {
     const query = researchQuery.trim();
     const requestedMaxPrice = Number(researchMaxPrice);
-    const maxPrice = Number.isFinite(requestedMaxPrice) && requestedMaxPrice >= 10 ? requestedMaxPrice : 5000;
+    const maxPrice = Number.isFinite(requestedMaxPrice) && requestedMaxPrice >= 10 ? requestedMaxPrice : (settings.maxPrice ?? 800);
     if (query.length < 3) { setResearchError("Укажи точную модель или название товара."); return; }
     const initData = window.Telegram?.WebApp?.initData || "";
     if (!initData) { setResearchError("Открой приложение внутри Telegram, чтобы запустить веб-исследование."); return; }
@@ -511,7 +512,7 @@ export default function HomePage() {
       const response = await fetch("/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData, query, maxPrice, maxDistanceKm: settings.maxDistanceKm ?? 100, includeUsed: researchIncludeUsed, includeNew: researchIncludeNew })
+        body: JSON.stringify({ initData, query, maxPrice, includeUsed: researchIncludeUsed, includeNew: researchIncludeNew })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Не удалось провести исследование.");
@@ -561,7 +562,7 @@ export default function HomePage() {
   }
 
   const activeFilters = (settings.minDiscount > 0 ? 1 : 0) + (settings.minPrice !== null ? 1 : 0) + (settings.maxPrice !== null ? 1 : 0)
-    + (settings.maxDistanceKm !== null ? 1 : 0) + (settings.categories.length ? 1 : 0) + (category ? 1 : 0) + (search.trim() ? 1 : 0);
+    + (settings.categories.length ? 1 : 0) + (category ? 1 : 0) + (search.trim() ? 1 : 0);
 
   function resetFilters() {
     setSearch("");
@@ -852,16 +853,12 @@ export default function HomePage() {
         </div>
 
         <details open className="filters-fold">
-          <summary>Параметры поиска · цена, расстояние и скидка{settingsCount ? <b>{settingsCount}</b> : null}</summary>
+          <summary>Параметры поиска · цена и скидка{settingsCount ? <b>{settingsCount}</b> : null}</summary>
         <div className="filter-panel" role="group" aria-label="Фильтры по цене и скидке">
           <div className="filter-group">
-            <span className="filter-label">Радиус от базы сканера</span>
-            <label className="distance-control">
-              <input type="range" min="5" max="100" step="5" value={settings.maxDistanceKm ?? 100}
-                onChange={(event) => updateFilters({ maxDistanceKm: Number(event.target.value) >= 100 ? null : Number(event.target.value) })} aria-label="Радиус поиска в километрах" />
-              <strong>{settings.maxDistanceKm ?? 100} км</strong>
-            </label>
-            <small className="settings-note">Объявления собираются в радиусе до 100 км от индекса 7671. Здесь можно сузить расстояние.</small>
+            <span className="filter-label">Территория поиска</span>
+            <strong>Вся территория Нидерландов</strong>
+            <small className="settings-note">Сканер ищет объявления по всей стране, без привязки к индексу 7671.</small>
           </div>
           <div className="filter-group">
             <span className="filter-label">Цена, €</span>
@@ -926,13 +923,9 @@ export default function HomePage() {
             <div className="v2-field"><span>Минимальная скидка</span>
               <div className="discount-steps">{DISCOUNT_STEPS.map((step) => <button type="button" key={step} className={"discount-chip" + (settings.minDiscount === step ? " selected" : "")} onClick={() => updateFilters({ minDiscount: step })}>{step === 0 ? "Любая" : "от " + step + "%"}</button>)}</div>
             </div>
-            <div className="v2-field"><span>Радиус поиска объявлений</span>
-              <label className="distance-control">
-                <input type="range" min="5" max="100" step="5" value={settings.maxDistanceKm ?? 100}
-                  onChange={(event) => updateFilters({ maxDistanceKm: Number(event.target.value) >= 100 ? null : Number(event.target.value) })} aria-label="Радиус поиска в километрах" />
-                <strong>{settings.maxDistanceKm ?? 100} км</strong>
-              </label>
-              <p className="v2-hint">Базовая область сканера — до 100 км от индекса 7671. Выбранный радиус фильтрует ленту и ручной поиск Marktplaats.</p>
+            <div className="v2-field"><span>Территория поиска</span>
+              <strong>Вся территория Нидерландов</strong>
+              <p className="v2-hint">Сканер и ручное исследование ищут объявления по всей стране.</p>
             </div>
             <div className="v2-field"><span>Цена, €</span>
               <div className="price-range">
@@ -954,7 +947,7 @@ export default function HomePage() {
           </div>
           <div className="v2-result"><span><strong>{base.length}</strong> {finds(base.length)} подходит под ваши фильтры</span><button type="button" className="primary-button" onClick={() => pickCategory("")}>Показать</button></div>
           <button type="button" className="v2-row" onClick={() => setTab("saved")}><span>Избранное</span><b>{saved.length ? saved.length : "пусто"}</b></button>
-          <p className="v2-hint">Избранное и фильтры хранятся на этом устройстве. Сканер собирает объявления в пределах 100 км от индекса 7671; здесь можно сузить радиус и диапазон цены.</p>
+          <p className="v2-hint">Избранное и фильтры хранятся на этом устройстве. Поиск охватывает всю территорию Нидерландов; максимальную цену ты задаёшь самостоятельно.</p>
         </section>
       ) : null}
 
