@@ -75,9 +75,13 @@ class ScannerTests(unittest.TestCase):
         now = datetime.now(timezone.utc).isoformat()
         first = [listing("a", 400, now), listing("b", 400, now), listing("99", 250, now)]
         self.run_scan(first)
-        self.assertEqual(bot.load_feed()["deals"], [])
+        first_feed = bot.load_feed()["deals"]
+        self.assertEqual([d["listing_id"] for d in first_feed], ["99"])
+        self.assertEqual(first_feed[0]["status"], "candidate")
         self.run_scan(first + [listing("c", 400, now)])
-        self.assertEqual([d["listing_id"] for d in bot.load_feed()["deals"]], ["99"])
+        updated = bot.load_feed()["deals"]
+        self.assertEqual([d["listing_id"] for d in updated], ["99"])
+        self.assertEqual(updated[0]["status"], "strong")
 
     def test_listing_published_29_days_ago_is_eligible_with_30_day_window(self):
         posted = (datetime.now(timezone.utc) - timedelta(days=29)).isoformat()
@@ -128,6 +132,40 @@ class ScannerTests(unittest.TestCase):
         }
         self.assertTrue(bot.title_matches_query(airpods, "AirPods Pro 3"))
         self.assertFalse(bot.title_matches_query(airpods, "AirPods Pro 2"))
+
+    def test_duplicate_search_results_are_counted_once(self):
+        now = datetime.now(timezone.utc).isoformat()
+        rows = [listing("a", 400, now), listing("b", 400, now), listing("c", 400, now),
+                listing("a", 400, now), listing("b", 400, now)]
+        self.assertTrue(self.run_scan(rows))
+        stats = bot.load_feed()["scannerStats"]
+        self.assertEqual(stats["checked"], 5)
+        self.assertEqual(stats["unique"], 3)
+        self.assertEqual(stats["duplicates"], 2)
+
+    def test_candidate_without_comparables_is_kept_without_fake_discount(self):
+        now = datetime.now(timezone.utc).isoformat()
+        self.assertTrue(self.run_scan([listing("solo", 180, now)]))
+        deal = bot.load_feed()["deals"][0]
+        self.assertEqual(deal["status"], "candidate")
+        self.assertIsNone(deal["market_price"])
+        self.assertIsNone(deal["discount"])
+        self.assertIn("недостаточно", deal["evaluation_reason"].lower())
+
+    def test_television_groups_include_brand_size_panel_and_resolution(self):
+        q = {"group_type": "television"}
+        samsung = bot.group_of(q, "Samsung Smart TV 43 inch 4K LED")
+        sony = bot.group_of(q, "Sony KD55X85 Android 4K TV")
+        samsung_qled = bot.group_of(q, "Samsung 43 inch 4K QLED")
+        self.assertEqual(samsung, "samsung-43-led-lcd-4k")
+        self.assertEqual(sony, "sony-55-panel-unknown-4k")
+        self.assertNotEqual(samsung, samsung_qled)
+        self.assertEqual(bot.group_of(q, "Smart TV 43 inch"), "unknown")
+
+    def test_model_required_categories_do_not_group_unknown_models_together(self):
+        q = {"group_type": "model_required", "group_regex": r"\b(?:mini\s*3|mavic\s*3)\b"}
+        self.assertEqual(bot.group_of(q, "DJI Mini 3 Pro drone"), "djimini3")
+        self.assertEqual(bot.group_of(q, "Drone complete set"), "unknown")
 
     def test_all_queries_failing_does_not_touch_feed(self):
         db = bot.open_db()

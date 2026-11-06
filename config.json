@@ -554,7 +554,391 @@
       ],
       "min_price": 60,
       "max_price": 1500,
-      "threshold": 0.25
+      "threshold": 0.26,
+      "group_type": "television",
+      "strict_group": true,
+      "good_threshold": 0.18
+    },
+    {
+      "key": "drones",
+      "label": "Дроны DJI и Autel",
+      "query": "drone",
+      "include_any": [
+        "dji",
+        "autel",
+        "parrot"
+      ],
+      "exclude": [
+        "propeller",
+        "propellers",
+        "propeller guard",
+        "accu",
+        "battery",
+        "batterij",
+        "charger",
+        "lader",
+        "kabel",
+        "case",
+        "hoesje",
+        "tas",
+        "bag",
+        "gimbal",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "sticker"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:mini\\s*[234](?:\\s*pro)?|mavic\\s*(?:2|3)(?:\\s*(?:pro|max|classic))?|air\\s*[23](?:\\s*s)?|avata\\s*[12]|neo|fpv)\\b",
+      "strict_group": true,
+      "min_price": 100,
+      "max_price": 2500,
+      "threshold": 0.28,
+      "good_threshold": 0.19
+    },
+    {
+      "key": "bag-michael-kors",
+      "label": "Сумки Michael Kors",
+      "query": "michael kors tas",
+      "include_any": [
+        "michael kors"
+      ],
+      "require_regex": "\\bmichael\\s+kors\\b",
+      "exclude": [
+        "portemonnee",
+        "wallet",
+        "cardholder",
+        "riem",
+        "belt",
+        "schoen",
+        "jas",
+        "horloge",
+        "zonnebril",
+        "hoesje",
+        "phone case",
+        "sleutelhanger",
+        "keychain",
+        "strap"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:jet\\s*set|sloan|mercer|soho|emilia|cece|voyager|hamilton|manhattan|mott|carmen|lillie|carson)\\b",
+      "strict_group": true,
+      "min_price": 25,
+      "max_price": 500,
+      "threshold": 0.3,
+      "good_threshold": 0.2
+    },
+    {
+      "key": "backpack-michael-kors",
+      "label": "Рюкзаки Michael Kors",
+      "query": "michael kors rugzak",
+      "include_any": [
+        "michael kors"
+      ],
+      "require_regex": "\\bmichael\\s+kors\\b",
+      "exclude": [
+        "portemonnee",
+        "wallet",
+        "cardholder",
+        "riem",
+        "belt",
+        "schoen",
+        "jas",
+        "horloge",
+        "zonnebril",
+        "hoesje",
+        "phone case",
+        "sleutelhanger",
+        "keychain",
+        "strap"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:rhea|slater|erin|abbey|hudson|kent|jaycee|cooper|bex|mott)\\b",
+      "strict_group": true,
+      "min_price": 35,
+      "max_price": 450,
+      "threshold": 0.3,
+      "good_threshold": 0.2
+    },
+    {
+      "key": "microphone-shure",
+      "label": "Микрофоны Shure",
+      "query": "shure microfoon",
+      "include_any": [
+        "shure"
+      ],
+      "exclude": [
+        "stand",
+        "statief",
+        "kabel",
+        "cable",
+        "shockmount",
+        "houder",
+        "case",
+        "hoesje",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "windscreen",
+        "popfilter"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:sm7b|sm7db|sm58|sm57|mv7\\+?|beta\\s*58)\\b",
+      "strict_group": true,
+      "min_price": 35,
+      "max_price": 700,
+      "threshold": 0.28,
+      "good_threshold": 0.19
+    },
+    {
+      "key": "microphone-rode",
+      "label": "Микрофоны RØDE",
+      "query": "rode microfoon",
+      "include_any": [
+        "rode"
+      ],
+      "exclude": [
+        "stand",
+        "statief",
+        "kabel",
+        "cable",
+        "shockmount",
+        "houder",
+        "case",
+        "hoesje",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "windscreen",
+        "popfilter"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:podmic|nt-?1|nt-usb(?:\\+)?|wireless\\s*(?:go(?:\\s*ii)?|me|pro)|videomic(?:\\s*ntg)?)\\b",
+      "strict_group": true,
+      "min_price": 35,
+      "max_price": 650,
+      "threshold": 0.28,
+      "good_threshold": 0.19
+    },
+    {
+      "key": "microphone-dji",
+      "label": "Микрофоны DJI",
+      "query": "dji mic",
+      "include_any": [
+        "dji mic"
+      ],
+      "exclude": [
+        "case",
+        "hoesje",
+        "charging case",
+        "houder",
+        "kabel",
+        "cable",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "windkap",
+        "windscreen"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:mic\\s*2|mic\\s*mini|mic)\\b",
+      "strict_group": true,
+      "min_price": 35,
+      "max_price": 450,
+      "threshold": 0.28,
+      "good_threshold": 0.19
+    },
+    {
+      "key": "microphone-sennheiser",
+      "label": "Микрофоны Sennheiser",
+      "query": "sennheiser microfoon",
+      "include_any": [
+        "sennheiser"
+      ],
+      "exclude": [
+        "stand",
+        "statief",
+        "kabel",
+        "cable",
+        "case",
+        "hoesje",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "windkap",
+        "windscreen"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:mke\\s*600|mke\\s*400|profile|ew-?d|avx|xs\\s*wireless)\\b",
+      "strict_group": true,
+      "min_price": 40,
+      "max_price": 900,
+      "threshold": 0.28,
+      "good_threshold": 0.19
+    },
+    {
+      "key": "headphones-sony",
+      "label": "Наушники Sony",
+      "query": "sony koptelefoon",
+      "include_any": [
+        "sony"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "oorkussens",
+        "ear pads",
+        "earpad",
+        "kabel",
+        "cable",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "losse oordop",
+        "linker oordop",
+        "rechter oordop"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:wh-?1000xm[456]|wh-?xb910n|ult\\s*wear|wh-?ch720n|wf-?1000xm[45])\\b",
+      "strict_group": true,
+      "min_price": 35,
+      "max_price": 550,
+      "threshold": 0.27,
+      "good_threshold": 0.18
+    },
+    {
+      "key": "headphones-bose",
+      "label": "Наушники Bose",
+      "query": "bose koptelefoon",
+      "include_any": [
+        "bose"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "oorkussens",
+        "ear pads",
+        "earpad",
+        "kabel",
+        "cable",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "losse oordop",
+        "linker oordop",
+        "rechter oordop"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:quietcomfort\\s*ultra|quietcomfort\\s*45|quietcomfort\\s*35|qc\\s*ultra|qc45|qc35|700)\\b",
+      "strict_group": true,
+      "min_price": 45,
+      "max_price": 650,
+      "threshold": 0.27,
+      "good_threshold": 0.18
+    },
+    {
+      "key": "headphones-sennheiser",
+      "label": "Наушники Sennheiser",
+      "query": "sennheiser koptelefoon",
+      "include_any": [
+        "sennheiser"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "oorkussens",
+        "ear pads",
+        "earpad",
+        "kabel",
+        "cable",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:momentum\\s*[34]|hd\\s*(?:560s|600|650|660s|450|458bt)|accentum(?:\\s*plus)?)\\b",
+      "strict_group": true,
+      "min_price": 35,
+      "max_price": 650,
+      "threshold": 0.27,
+      "good_threshold": 0.18
+    },
+    {
+      "key": "headphones-jbl",
+      "label": "Наушники JBL",
+      "query": "jbl koptelefoon",
+      "include_any": [
+        "jbl"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "oorkussens",
+        "ear pads",
+        "earpad",
+        "kabel",
+        "cable",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "losse oordop"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:tour\\s*one(?:\\s*m2)?|live\\s*(?:770nc|660nc|650btnc)|tune\\s*(?:770nc|760nc|710bt)|club\\s*one)\\b",
+      "strict_group": true,
+      "min_price": 25,
+      "max_price": 400,
+      "threshold": 0.27,
+      "good_threshold": 0.18
+    },
+    {
+      "key": "headphones-beats",
+      "label": "Наушники Beats",
+      "query": "beats koptelefoon",
+      "include_any": [
+        "beats"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "oorkussens",
+        "ear pads",
+        "earpad",
+        "kabel",
+        "cable",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "losse oordop"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:studio\\s*(?:pro|3)|solo\\s*(?:4|3)|fit\\s*pro|powerbeats\\s*pro)\\b",
+      "strict_group": true,
+      "min_price": 35,
+      "max_price": 450,
+      "threshold": 0.27,
+      "good_threshold": 0.18
     }
-  ]
+  ],
+  "candidate_min_samples": 3
 }
