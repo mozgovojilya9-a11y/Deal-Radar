@@ -51,7 +51,8 @@
       ],
       "variant_pages": 1,
       "search_price_sorted": true,
-      "search_v2": true
+      "search_v2": true,
+      "ai_discovery": true
     },
     {
       "key": "ps4",
@@ -91,7 +92,8 @@
         "ps4 pro console",
         "playstation 4 pro"
       ],
-      "variant_pages": 1
+      "variant_pages": 1,
+      "ai_discovery": true
     },
     {
       "key": "airpods-pro-3",
@@ -114,7 +116,8 @@
       "min_price": 60,
       "max_price": 300,
       "threshold": 0.2,
-      "require_regex": "(?=.*\\bairpods[\\s-]*pro\\b)(?=.*(?:\\bpro[\\s-]*3\\b|\\b3(?:rd)?[\\s.-]*(?:gen(?:eration)?|e[\\s-]*generatie)\\b|\\bgen(?:eration)?[\\s.-]*3\\b|\\bthird[\\s-]*generation\\b))"
+      "require_regex": "(?=.*\\bairpods[\\s-]*pro\\b)(?=.*(?:\\bpro[\\s-]*3\\b|\\b3(?:rd)?[\\s.-]*(?:gen(?:eration)?|e[\\s-]*generatie)\\b|\\bgen(?:eration)?[\\s.-]*3\\b|\\bthird[\\s-]*generation\\b))",
+      "ai_discovery": true
     },
     {
       "key": "airpods-max",
@@ -211,7 +214,8 @@
       "match_description": true,
       "strict_group": true,
       "search_price_sorted": true,
-      "good_threshold": 0.3
+      "good_threshold": 0.3,
+      "ai_discovery": true
     },
     {
       "key": "watch-diesel",
@@ -484,7 +488,8 @@
       "min_profit_eur": 55,
       "min_roi": 0.25,
       "group_type": "model_required",
-      "strict_group": true
+      "strict_group": true,
+      "ai_discovery": true
     },
     {
       "key": "iphone-15",
@@ -663,7 +668,8 @@
       "good_threshold": 0.18,
       "min_model_year": 2023,
       "min_profit_eur": 70,
-      "min_roi": 0.25
+      "min_roi": 0.25,
+      "ai_discovery": true
     },
     {
       "key": "drones",
@@ -704,7 +710,8 @@
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 90,
-      "min_roi": 0.25
+      "min_roi": 0.25,
+      "ai_discovery": true
     },
     {
       "key": "bag-michael-kors",
@@ -1100,7 +1107,8 @@
       "good_threshold": 0.19,
       "min_profit_eur": 100,
       "min_roi": 0.22,
-      "require_regex": "\\b(?:a7\\s*(?:iv|v|c\\s*ii|iii)|a6700|a6400|zv-e10\\s*(?:ii)?|zv-1\\s*(?:ii)?)\\b"
+      "require_regex": "\\b(?:a7\\s*(?:iv|v|c\\s*ii|iii)|a6700|a6400|zv-e10\\s*(?:ii)?|zv-1\\s*(?:ii)?)\\b",
+      "ai_discovery": true
     },
     {
       "key": "camera-canon",
