@@ -66,6 +66,10 @@ def open_db():
             variant TEXT, reason TEXT, checked_at INTEGER NOT NULL,
             PRIMARY KEY(id, qkey));
         CREATE INDEX IF NOT EXISTS ix_ai_reviews_q ON ai_reviews(qkey, checked_at);
+        CREATE TABLE IF NOT EXISTS ai_search_plans(
+            qkey TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
+            queries_json TEXT NOT NULL, checked_at INTEGER NOT NULL
+        );
     """)
     return db
 
@@ -114,7 +118,8 @@ def fetch_marktplaats_v2(cfg, query, pages):
 
 def fetch_query(cfg, q, pages):
     """Search several wording/model-code variants, then deduplicate by Marktplaats ID."""
-    terms = q.get("search_variants") or [q["query"]]
+    terms = list(q.get("search_variants") or [q["query"]])
+    terms.extend(q.get("ai_search_variants") or [])
     terms = list(dict.fromkeys(str(term).strip() for term in terms if str(term).strip()))
     out = []
     seen = set()
@@ -727,6 +732,135 @@ def request_ai_listing_review(q, items):
     }
 
 
+
+def clean_ai_search_variants(q, values, limit=2):
+    """Accept only short, product-anchored search phrases from Gemini."""
+    if not isinstance(values, list):
+        return []
+    anchors = [q.get("query", ""), q.get("label", "")]
+    anchors += q.get("include_any", []) or []
+    anchors += q.get("search_variants", []) or []
+    anchor_tokens = {
+        re.sub(r"[^a-z0-9]", "", token.lower())
+        for phrase in anchors if isinstance(phrase, str)
+        for token in re.findall(r"[a-z0-9]+", phrase.lower())
+        if len(token) >= 3
+    }
+    existing = {
+        re.sub(r"[^a-z0-9]", "", str(term).lower())
+        for term in (q.get("search_variants") or [])
+    }
+    clean = []
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        term = re.sub(r"\s+", " ", value).strip(" \t\r\n\"'")
+        if len(term) < 4 or len(term) > 72 or re.search(r"https?://|www\.|site:|\bOR\b", term, re.I):
+            continue
+        normalized = re.sub(r"[^a-z0-9]", "", term.lower())
+        if normalized in existing or not any(token in normalized for token in anchor_tokens):
+            continue
+        if normalized not in {re.sub(r"[^a-z0-9]", "", x.lower()) for x in clean}:
+            clean.append(term)
+        if len(clean) >= limit:
+            break
+    return clean
+
+
+def request_ai_search_plan(q):
+    """Ask Gemini for additional Dutch/English Marktplaats query variants."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return []
+    schema = {
+        "type": "object",
+        "properties": {"queries": {"type": "array", "items": {"type": "string"}}},
+        "required": ["queries"],
+    }
+    system = (
+        "You are a marketplace search-query strategist for Marktplaats Netherlands. "
+        "Generate at most two additional short search phrases for the exact target product. "
+        "Use natural Dutch seller wording, common English product wording, and model codes "
+        "that already appear in the supplied target data. Keep generation, edition, size, capacity "
+        "and product family exact. Do not add accessories, games, cases, spare parts, other generations, "
+        "broad category words, invented model numbers, guessed specifications, prices, URLs or search operators. "
+        "Every query must retain at least one exact product anchor from the supplied target. Return JSON only."
+    )
+    user = json.dumps({
+        "target": {
+            "key": q.get("key"), "label": q.get("label"), "query": q.get("query"),
+            "include_any": q.get("include_any", []),
+            "search_variants": q.get("search_variants", []),
+            "require_regex": q.get("require_regex"),
+            "group_regex": q.get("group_regex"),
+            "exclude": q.get("exclude", []),
+        },
+        "task": "Suggest additional phrases likely to find genuine fixed-price used listings on Marktplaats NL.",
+    }, ensure_ascii=False)
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + urllib.parse.quote(model, safe="") + ":generateContent"
+    payload = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": user}]}],
+        "generationConfig": {
+            "temperature": 0.15,
+            "maxOutputTokens": 400,
+            "responseMimeType": "application/json",
+            "responseSchema": _structured_schema(schema),
+        },
+    }
+    request = urllib.request.Request(
+        endpoint, data=json.dumps(payload).encode("utf-8"),
+        headers={"x-goog-api-key": api_key, "Content-Type": "application/json"}, method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        data = json.load(response)
+    content = "".join(
+        part.get("text", "")
+        for part in data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+    )
+    parsed = json.loads(content)
+    return clean_ai_search_variants(q, parsed.get("queries", []), limit=2)
+
+
+def get_ai_search_variants(db, q):
+    """Use a weekly cached Gemini plan so scheduled scans don't call AI every 10 minutes."""
+    if not q.get("ai_discovery") or not os.environ.get("GEMINI_API_KEY"):
+        return []
+    qkey = str(q.get("key") or "")
+    fingerprint_data = {
+        "query": q.get("query"), "label": q.get("label"),
+        "include_any": q.get("include_any", []),
+        "search_variants": q.get("search_variants", []),
+        "require_regex": q.get("require_regex"),
+        "group_regex": q.get("group_regex"),
+    }
+    fingerprint = hashlib.sha256(json.dumps(fingerprint_data, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    now = int(time.time())
+    cached = db.execute(
+        "SELECT fingerprint, queries_json, checked_at FROM ai_search_plans WHERE qkey=?",
+        (qkey,),
+    ).fetchone()
+    if cached and cached[0] == fingerprint and now - int(cached[2]) < 7 * 86400:
+        try:
+            return clean_ai_search_variants(q, json.loads(cached[1]), limit=2)
+        except (TypeError, json.JSONDecodeError):
+            pass
+    try:
+        variants = request_ai_search_plan(q)
+    except Exception as exc:
+        log(f"[{qkey}] Gemini search-planning unavailable: {type(exc).__name__}: {str(exc)[:120]}")
+        variants = []
+    db.execute(
+        "INSERT OR REPLACE INTO ai_search_plans(qkey,fingerprint,queries_json,checked_at) VALUES(?,?,?,?)",
+        (qkey, fingerprint, json.dumps(variants, ensure_ascii=False), now),
+    )
+    db.commit()
+    if variants:
+        log(f"[{qkey}] Gemini added {len(variants)} search variants: {variants}")
+    return variants
+
+
 def review_listings_with_ai(db, q, items, max_new=None):
     """Use cached AI decisions; only send new/changed listings to the model."""
     if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("OLLAMA_HOST")):
@@ -946,6 +1080,7 @@ def run_once(cfg, db, dry=False):
         "rejectedDiscount": 0, "rejectedProfit": 0, "candidateNoMarket": 0,
         "candidatePreliminary": 0, "retailProxyEvaluated": 0,
         "aiReviewed": 0, "aiRejected": 0, "aiRescued": 0,
+        "aiSearchPlans": 0, "aiSearchVariants": 0,
     }
     queries_by_key = {q["key"]: q for q in cfg["queries"]}
     feed_deals = {}
@@ -991,7 +1126,13 @@ def run_once(cfg, db, dry=False):
         existing = db.execute("SELECT COUNT(*) FROM listings WHERE qkey=?", (qkey,)).fetchone()[0]
         pages = cfg.get("seed_pages", 5) if existing == 0 else cfg.get("pages", 2)
         try:
-            raw = fetch_query(cfg, q, pages)
+            search_q = dict(q)
+            ai_variants = get_ai_search_variants(db, q)
+            if ai_variants:
+                search_q["ai_search_variants"] = ai_variants
+                metrics["aiSearchPlans"] += 1
+                metrics["aiSearchVariants"] += len(ai_variants)
+            raw = fetch_query(cfg, search_q, pages)
         except Exception as exc:
             log(f"[{qkey}] ошибка запроса: {exc}")
             fails += 1
@@ -1018,6 +1159,12 @@ def run_once(cfg, db, dry=False):
             and item.get("id") and isinstance(item.get("price"), (int, float)) and item["price"] > 0
             and not item.get("external_link")
         ]
+        # Review plausible-title candidates first, then prioritize the cheapest asking prices.
+        ai_reviewable.sort(key=lambda item: (
+            primary_rejection(q, item, cfg) == "title",
+            float(item.get("price") or float("inf")),
+            str(item.get("date") or ""),
+        ))
         ai_decisions = review_listings_with_ai(db, q, ai_reviewable)
         metrics["aiReviewed"] += len(ai_decisions)
         candidates = {}
@@ -1237,7 +1384,8 @@ def run_once(cfg, db, dry=False):
         f"повторов {metrics['duplicates']}, первично принято {metrics['accepted']}, "
         f"кандидатов {metrics['candidates']}, сильных {metrics['strongDeals']}, "
         f"хороших {metrics['goodDeals']}, на проверке {metrics['reviewCandidates']}, "
-        f"новых выгодных {metrics['newDeals']}, ошибок запросов {fails}")
+        f"новых выгодных {metrics['newDeals']}, Gemini-планов {metrics['aiSearchPlans']}, "
+        f"доп. запросов {metrics['aiSearchVariants']}, ошибок запросов {fails}")
     return fails < len(cfg["queries"])
 
 def main():
