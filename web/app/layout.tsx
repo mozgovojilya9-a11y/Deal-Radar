@@ -8,8 +8,8 @@ const styleStart = designDocument.indexOf("<style>");
 const styleEnd = designDocument.indexOf("</style>", styleStart);
 const designCss = styleStart >= 0 && styleEnd > styleStart
   ? designDocument.slice(styleStart + "<style>".length, styleEnd)
-  : undefined;
-if (!designCss) throw new Error("Design CSS was not found in design/index.html");
+  : "";
+if (!designCss.trim()) throw new Error("Design CSS was not found in design/index.html");
 
 export const metadata: Metadata = {
   title: "Deal Radar — умный поиск выгодных покупок",

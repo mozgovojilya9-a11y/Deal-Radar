@@ -75,9 +75,7 @@ class ScannerTests(unittest.TestCase):
         now = datetime.now(timezone.utc).isoformat()
         first = [listing("a", 400, now), listing("b", 400, now), listing("99", 250, now)]
         self.run_scan(first)
-        first_feed = bot.load_feed()["deals"]
-        self.assertEqual({d["listing_id"] for d in first_feed}, {"a", "b", "99"})
-        self.assertTrue(all(d["status"] == "candidate" for d in first_feed))
+        self.assertEqual(bot.load_feed()["deals"], [])
         self.run_scan(first + [listing("c", 400, now)])
         updated = bot.load_feed()["deals"]
         self.assertEqual([d["listing_id"] for d in updated], ["99"])
@@ -143,14 +141,37 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(stats["unique"], 3)
         self.assertEqual(stats["duplicates"], 2)
 
-    def test_candidate_without_comparables_is_kept_without_fake_discount(self):
+    def test_candidate_without_comparables_is_filtered_from_main_feed(self):
         now = datetime.now(timezone.utc).isoformat()
         self.assertTrue(self.run_scan([listing("solo", 180, now)]))
-        deal = bot.load_feed()["deals"][0]
-        self.assertEqual(deal["status"], "candidate")
-        self.assertIsNone(deal["market_price"])
-        self.assertIsNone(deal["discount"])
-        self.assertIn("недостаточно", deal["evaluation_reason"].lower())
+        self.assertEqual(bot.load_feed()["deals"], [])
+
+    def test_query_aliases_match_ps5_console_variants_and_hide_candidates_from_main_feed(self):
+        q = {"query": "playstation 5", "include_any": ["ps5"], "exclude": []}
+        self.assertTrue(bot.title_matches_query(q, "PS5 Slim Console"))
+        self.assertTrue(bot.title_matches_query(q, "PlayStation 5 Disc Drive"))
+        feed = {"deals": [
+            {"listing_id": "good-1", "category_key": "ps5", "title": "PS5 console", "description": "", "price": 300,
+             "listing_url": "https://www.marktplaats.nl/v/good-1", "status": "good", "estimated_profit": 70, "profit_roi": 0.4,
+             "detected_at": datetime.now(timezone.utc).isoformat()},
+            {"listing_id": "candidate-1", "category_key": "ps5", "title": "PS5 controller", "description": "", "price": 100,
+             "listing_url": "https://www.marktplaats.nl/v/candidate-1", "status": "candidate", "estimated_profit": 5, "profit_roi": 0.05,
+             "detected_at": datetime.now(timezone.utc).isoformat()},
+        ], "updatedAt": None}
+        with open(os.environ["DEAL_FEED"], "w", encoding="utf-8") as handle:
+            json.dump(feed, handle)
+        db = bot.open_db()
+        try:
+            self.assertTrue(self.run_scan([]))
+        finally:
+            db.close()
+        self.assertEqual([d["listing_id"] for d in bot.load_feed()["deals"]], ["good-1"])
+
+    def test_profit_floor_is_50_eur(self):
+        cfg = {"profitability": {"market_resale_factor": 0.95, "buyer_negotiation_rate": 0.04, "selling_fee_rate": 0.08, "fixed_selling_cost_eur": 10, "min_profit_eur": 50, "min_roi": 0.2}}
+        result = bot.calculate_resale_economics({"min_profit_eur": 50, "min_roi": 0.2}, 160, 127, 12, "marktplaats", cfg=cfg)
+        self.assertFalse(result["profitable"])
+        self.assertLess(result["estimated_profit"], 50)
 
     def test_television_groups_include_brand_size_panel_resolution_and_year(self):
         q = {"group_type": "television"}
@@ -184,6 +205,28 @@ class ScannerTests(unittest.TestCase):
         for name in ("tg", "send", "format_deal", "get_chat_id"):
             self.assertFalse(hasattr(bot, name), name)
 
+    def test_unknown_category_key_in_cached_feed_is_ignored(self):
+        cached = {
+            "updatedAt": None,
+            "deals": [{
+                "listing_id": "missing-q",
+                "category_key": "totally-unknown",
+                "title": "PS5 console",
+                "description": "",
+                "price": 430,
+                "listing_url": "https://www.marktplaats.nl/v/missing-q",
+                "status": "candidate",
+            }],
+        }
+        with open(os.environ["DEAL_FEED"], "w", encoding="utf-8") as handle:
+            json.dump(cached, handle)
+        db = bot.open_db()
+        try:
+            self.assertTrue(self.run_scan([], dry=False))
+        finally:
+            db.close()
+        self.assertEqual(bot.load_feed()["deals"], [])
+
     def test_external_website_links_are_rejected_and_email_is_allowed(self):
         now = datetime.now(timezone.utc).isoformat()
         linked = listing("linked", 150, now)
@@ -191,7 +234,7 @@ class ScannerTests(unittest.TestCase):
         clean = listing("clean", 150, now)
         clean["description"] = "See our listing on https://www.marktplaats.nl/v/clean"
         self.assertTrue(self.run_scan([linked, clean]))
-        self.assertEqual([d["listing_id"] for d in bot.load_feed()["deals"]], ["clean"])
+        self.assertEqual(bot.load_feed()["deals"], [])
         self.assertTrue(bot.has_external_website_link("shop.example.nl"))
         self.assertFalse(bot.has_external_website_link("seller@gmail.com"))
 

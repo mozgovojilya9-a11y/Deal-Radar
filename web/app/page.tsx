@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Deal, ScannerStats } from "@/lib/deals";
 
-type Tab = "home" | "categories" | "saved" | "analytics" | "profile";
+type Tab = "home" | "strong" | "categories" | "saved" | "analytics" | "profile";
 type Sort = "profit" | "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
 type ResearchListing = { title: string; price: number; url: string; source: string; condition: "used" | "new" | "unknown"; kind: "marktplaats" | "web"; estimatedProfit?: number | null; profitRoi?: number | null; status?: string };
@@ -104,6 +104,114 @@ function euro(value: number | null | undefined) {
 function priceValue(raw: string): number | null {
   const parsed = Number(raw.replace(",", "."));
   return raw.trim() !== "" && Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+const SEARCH_STOP_WORDS = new Set(["a", "an", "and", "for", "the", "with", "de", "het", "een", "voor", "met", "и", "для"]);
+const SEARCH_PRODUCT_ALIASES = [
+  { names: ["playstation 5", "ps5", "плейстейшен 5", "плейстейшн 5", "пс5", "пс 5"], console: true },
+  { names: ["playstation 4", "ps4", "плейстейшен 4", "плейстейшн 4", "пс4", "пс 4"], console: true },
+  { names: ["airpods"], accessoryTerms: ["case", "hoesje", "charger", "oplader", "eartips", "replacement", "siliconen"] },
+  { names: ["ray ban", "rayban", "ray-ban", "рейбан", "рей бен", "meta wayfarer", "wayfarer"], accessoryTerms: ["case", "hoesje", "etui", "pouch", "replacement", "lens", "lenses"] }
+];
+const CONSOLE_ACCESSORIES = new Set(["controller", "controllers", "dualsense", "dualshock", "gamepad", "headset", "remote", "stand", "skin", "sticker", "hoesje", "case", "koffer"]);
+
+function searchTokens(value: string): string[] {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/\b(1st|2nd|3rd|4th)\b/g, (_, ordinal: string) => ordinal[0])
+    .replace(/([\p{L}])([\p{N}])/gu, "$1 $2")
+    .replace(/([\p{N}])([\p{L}])/gu, "$1 $2")
+    .match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function containsPhrase(textTokens: string[], phrase: string): boolean {
+  const phraseTokens = searchTokens(phrase);
+  return phraseTokens.length > 0 && textTokens.some((_, index) =>
+    phraseTokens.every((token, offset) => textTokens[index + offset] === token));
+}
+
+function isOneEditAway(left: string, right: string): boolean {
+  if (left === right) return true;
+  if (Math.abs(left.length - right.length) > 1) return false;
+  let leftIndex = 0, rightIndex = 0, edits = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    if (left[leftIndex] === right[rightIndex]) {
+      leftIndex++;
+      rightIndex++;
+      continue;
+    }
+    if (++edits > 1) return false;
+    if (leftIndex + 1 < left.length && rightIndex + 1 < right.length
+      && left[leftIndex] === right[rightIndex + 1] && left[leftIndex + 1] === right[rightIndex]) {
+      leftIndex += 2;
+      rightIndex += 2;
+    } else if (left.length > right.length) {
+      leftIndex++;
+    } else if (right.length > left.length) {
+      rightIndex++;
+    } else {
+      leftIndex++;
+      rightIndex++;
+    }
+  }
+  return edits + Number(leftIndex < left.length || rightIndex < right.length) <= 1;
+}
+
+function tokenMatches(queryToken: string, productTokens: string[]): boolean {
+  return productTokens.some((token) => token === queryToken
+    || (queryToken.length >= 5 && token.length >= 5 && isOneEditAway(queryToken, token)));
+}
+
+function queryAliasStart(queryTokens: string[], alias: string): number {
+  const aliasTokens = searchTokens(alias);
+  if (!aliasTokens.length) return -1;
+  return queryTokens.findIndex((_, index) =>
+    aliasTokens.every((token, offset) => {
+      const queryToken = queryTokens[index + offset];
+      return queryToken !== undefined && (token === queryToken
+        || (token.length >= 5 && queryToken.length >= 5 && isOneEditAway(token, queryToken)));
+    }));
+}
+
+function matchesSearchIntent(product: string, query: string, title = product): boolean {
+  const queryTokens = searchTokens(query);
+  if (!queryTokens.length) return false;
+  const productTokens = searchTokens(product);
+  const titleTokens = searchTokens(title);
+  const significantTokens = queryTokens.filter((token) => !SEARCH_STOP_WORDS.has(token));
+  if (!significantTokens.length) return false;
+
+  const intent = SEARCH_PRODUCT_ALIASES.find(({ names }) =>
+    names.some((name) => queryAliasStart(queryTokens, name) >= 0));
+
+  if (intent) {
+    const matchedAlias = intent.names
+      .map((name) => ({ name, start: queryAliasStart(queryTokens, name) }))
+      .find((match) => match.start >= 0);
+    if (!matchedAlias) return false;
+    const matchedTitleAlias = intent.names.some((name) => containsPhrase(titleTokens, name));
+    if (!matchedTitleAlias) return false;
+
+    const aliasLength = searchTokens(matchedAlias.name).length;
+    const extraQueryTokens = queryTokens.slice(0, matchedAlias.start)
+      .concat(queryTokens.slice(matchedAlias.start + aliasLength))
+      .filter((token) => !SEARCH_STOP_WORDS.has(token));
+    const accessoryTerms = [...CONSOLE_ACCESSORIES, ...(intent.accessoryTerms ?? [])];
+    const requestedAccessory = extraQueryTokens.some((token) => accessoryTerms.includes(token)
+      || ["disc", "drive", "game", "games"].includes(token));
+    if (!requestedAccessory) {
+      const titleIsAccessory = titleTokens.some((token) => accessoryTerms.includes(token))
+        || containsPhrase(titleTokens, "disc drive");
+      const titleShowsIncludedItems = /(?:\+|met|with|incl(?:uding)?|inclusief).{0,30}\b(?:\d+\s*)?(?:controllers?|games?|case|hoesje|charger|oplader)\b/.test(title.toLowerCase());
+      const titleShowsProduct = intent.console
+        ? titleTokens.includes("console") || titleTokens.includes("set") || titleShowsIncludedItems
+        : titleTokens.includes("bundle") || titleTokens.includes("set") || titleShowsIncludedItems;
+      if (titleIsAccessory && !titleShowsProduct) return false;
+    }
+
+    return extraQueryTokens.every((token) => tokenMatches(token, titleTokens));
+  }
+
+  return significantTokens.every((token) => tokenMatches(token, productTokens));
 }
 
 function readSettings(raw: unknown): UserSettings {
@@ -300,8 +408,12 @@ export default function HomePage() {
     if (category.startsWith("group:")) result = result.filter((deal) => groupOf(deal.category_key) === category.slice(6));
     else if (category) result = result.filter((deal) => deal.category_key === category);
     if (search.trim()) {
-      const term = search.trim().toLocaleLowerCase();
-      result = result.filter((deal) => (deal.title + " " + (deal.description || "")).toLocaleLowerCase().includes(term));
+      const term = search.trim();
+      result = result.filter((deal) => matchesSearchIntent(
+        deal.title + " " + (deal.description || ""),
+        term,
+        deal.title
+      ));
     }
     return result;
   }, [base, category, search]);
@@ -589,6 +701,43 @@ export default function HomePage() {
         </section>
       ) : null}
 
+      {tab === "strong" ? (
+        <section className="content-section" id="strong-deals">
+          <div className="section-heading">
+            <div>
+              <h2>Сильные сделки<span className="heading-count">{strongDeals.length}</span></h2>
+              <p>Только предложения с подтверждённой прибылью от €50 и выше</p>
+            </div>
+            <button className="refresh-button" onClick={() => void loadDeals(true)} disabled={loading || refreshing}><span className={loading || refreshing ? "spin" : ""}>↻</span> Обновить</button>
+          </div>
+
+          <div className="summary-strip">
+            <span><strong>{strongDeals.length}</strong> сильных сделок</span>
+            {bestDiscount ? <span>лучшая скидка <strong>−{bestDiscount}%</strong></span> : null}
+            {updatedAt ? <span>обновлено {dateLabel(updatedAt)}</span> : null}
+          </div>
+
+          <div className="toolbar">
+            <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Найти сильную сделку..." /></label>
+            <label className="sort-select"><span>Сортировка</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="profit">По прибыли</option><option value="discount">По скидке</option><option value="newest">Сначала новые</option><option value="price">Сначала дешевле</option></select></label>
+          </div>
+
+          {error && deals.length === 0 ? (
+            <div className="state-panel error-panel"><div className="state-icon">!</div><h3>Лента пока не подключена</h3><p>{error}</p><button className="secondary-button" onClick={() => void loadDeals()}>Попробовать снова</button></div>
+          ) : loading && strongDeals.length === 0 ? (
+            <div className="deal-grid">{Array.from({ length: 6 }).map((_, index) => <div className="skeleton-card" key={index}><div /><span /><span /><span /></div>)}</div>
+          ) : strongDeals.length === 0 ? (
+            <div className="state-panel"><div className="state-icon">⌁</div>
+              <h3>Пока нет сильных сделок</h3>
+              <p>Сканер ищет предложения с прибылью от €50. Когда они появятся, они будут здесь.</p>
+              <button className="secondary-button" onClick={() => setTab("home")}>К основным находкам</button>
+            </div>
+          ) : (
+            <div className="deal-grid">{strongDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div>
+          )}
+        </section>
+      ) : null}
+
       {tab === "home" ? (
       <section className="content-section" id="deals">
         <div className="section-heading">
@@ -717,6 +866,7 @@ export default function HomePage() {
 
       <nav className="bottom-nav" aria-label="Основная навигация">
         <button className={tab === "home" ? "nav-active" : ""} onClick={() => setTab("home")}><Icon name="home" />Главная</button>
+        <button className={tab === "strong" ? "nav-active" : ""} onClick={() => setTab("strong")}><Icon name="grid" />Сильные</button>
         <button className={tab === "categories" ? "nav-active" : ""} onClick={() => setTab("categories")}><Icon name="grid" />Категории</button>
         <button className={tab === "analytics" ? "nav-active" : ""} onClick={() => setTab("analytics")}><Icon name="chart" />Аналитика</button>
         <button className={tab === "saved" ? "nav-active" : ""} onClick={() => setTab("saved")}><Icon name="heart" />Избранное{saved.length ? <i>{saved.length}</i> : null}</button>

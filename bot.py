@@ -388,8 +388,12 @@ def television_model_year(text):
 
 def group_of(q, text):
     """Build comparable product buckets instead of comparing unrelated items."""
+    if not isinstance(q, dict):
+        return "unknown"
+    if text is None:
+        return "unknown"
     group_type = q.get("group_type")
-    lowered = text.lower()
+    lowered = str(text).lower()
     if q.get("key") == "rayban":
         return "wayfarer-gen-2" if title_matches_query(q, text) else "unknown"
     if group_type == "television":
@@ -442,14 +446,51 @@ def group_of(q, text):
         return "-".join(found) if found else "unknown"
     return "-".join(found) if found else "other"
 
+def expand_query_aliases(q):
+    """Generate a small set of common product aliases so the bot understands the intended item."""
+    if not isinstance(q, dict):
+        return set()
+    values = []
+    for key in ("query", "label"):
+        value = q.get(key)
+        if value:
+            values.append(str(value))
+    values.extend(str(item) for item in (q.get("include_any") or []))
+    aliases = set()
+    for value in values:
+        cleaned = re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+        if not cleaned:
+            continue
+        aliases.add(cleaned)
+        aliases.add(cleaned.replace(" ", ""))
+        aliases.add(cleaned.replace(" ", "-"))
+        if "playstation 5" in cleaned or "ps5" in cleaned:
+            aliases.update({"ps5", "playstation 5", "playstation5", "ps5 console", "ps5 slim", "ps5 disc", "ps5 digital"})
+        if "playstation 4" in cleaned or "ps4" in cleaned:
+            aliases.update({"ps4", "playstation 4", "playstation4", "ps4 pro", "ps4 slim"})
+        if "airpods pro" in cleaned or "airpods" in cleaned:
+            aliases.update({"airpods pro", "airpods-pro", "airpods pro 3", "airpods pro 2"})
+        if "ray ban" in cleaned or "rayban" in cleaned or "wayfarer" in cleaned:
+            aliases.update({"ray ban", "ray-ban", "rayban", "wayfarer", "meta wayfarer"})
+        if "iphone" in cleaned:
+            aliases.update({"iphone", "iphone 16", "iphone 15", "iphone 14", "iphone 13", "iphone 12"})
+    return {a for a in aliases if a}
+
+
 def title_matches_query(q, title):
     """Apply model-specific title filters to both live listings and cached feed cards."""
-    if not q:
+    if not isinstance(q, dict):
         return False
-    lowered = title.lower()
-    inc = q.get("include_any")
-    if inc and not any(w.lower() in lowered for w in inc):
+    if title is None:
         return False
+    lowered = str(title).lower()
+    aliases = expand_query_aliases(q)
+    if aliases and any(alias in lowered for alias in aliases):
+        pass
+    else:
+        inc = q.get("include_any")
+        if inc and not any(w.lower() in lowered for w in inc):
+            return False
     required = q.get("require_regex")
     if required and not re.search(required, title, re.I):
         return False
@@ -464,8 +505,11 @@ def title_matches_query(q, title):
 
 def primary_rejection(q, it, cfg):
     """Return the first primary filter that rejects a listing, or None."""
+    if not isinstance(q, dict):
+        return "title"
     searchable_text = it.get("text") or it.get("title") or ""
-    if not title_matches_query(q, searchable_text if q.get("match_description") else it["title"]):
+    title_field = str(it.get("title") or "")
+    if not title_matches_query(q, searchable_text if q.get("match_description") else title_field):
         return "title"
     if it.get("external_link") or has_external_website_link(it.get("description") or ""):
         return "external_link"
@@ -553,6 +597,7 @@ def find_retail_reference(q, group, references, cfg):
 
 def calculate_resale_economics(q, asking_price, reference_price, sample_count, reference_type, reference=None, cfg=None):
     """Estimate conservative resale price and profit after typical selling friction."""
+    q = q or {}
     cfg = cfg or {}
     rules = cfg.get("profitability", {})
     retail_proxy = reference_type == "new_retail"
@@ -566,7 +611,7 @@ def calculate_resale_economics(q, asking_price, reference_price, sample_count, r
     profit = net_sale - float(asking_price) - refurb
     invested = float(asking_price) + refurb
     roi = profit / invested if invested > 0 else -1.0
-    min_profit = float(q.get("min_profit_eur", rules.get("min_profit_eur", 40)))
+    min_profit = float(q.get("min_profit_eur", rules.get("min_profit_eur", 50)))
     min_roi = float(q.get("min_roi", rules.get("min_roi", 0.20)))
     if retail_proxy:
         min_profit = max(min_profit, float(rules.get("retail_proxy_min_profit_eur", 70)))
@@ -635,12 +680,13 @@ def run_once(cfg, db, dry=False):
         if not isinstance(cached_price, (int, float)) or cached_price > float(cfg.get("max_product_price_eur", 800)):
             continue
         cached_text = " ".join([deal.get("title") or "", deal.get("description") or ""])
-        if not title_matches_query(q, cached_text if q.get("match_description") else (deal.get("title") or "")):
+        match_text = cached_text if (isinstance(q, dict) and q.get("match_description")) else (deal.get("title") or "")
+        if not title_matches_query(q, match_text):
             continue
         if has_external_website_link(deal.get("description") or ""):
             continue
         deal_id = str(deal["listing_id"])
-        if q.get("group_type") == "television":
+        if isinstance(q, dict) and q.get("group_type") == "television":
             year = television_model_year(" ".join([deal.get("title") or "", deal.get("description") or ""]))
             if year is None or year < int(q.get("min_model_year", 2023)):
                 continue
@@ -761,8 +807,8 @@ def run_once(cfg, db, dry=False):
 
             model_year = television_model_year(item["text"]) if q.get("group_type") == "television" else None
             if reference_type == "new_retail":
-                if economics and economics["profitable"]:
-                    status = "strong" if economics["profit_roi"] >= 0.50 and economics["estimated_profit"] >= economics["minimum_profit_required"] * 1.5 else "good"
+                if economics and economics["profitable"] and economics["estimated_profit"] >= 50:
+                    status = "strong" if economics["profit_roi"] >= 0.50 and economics["estimated_profit"] >= max(50, economics["minimum_profit_required"] * 1.5) else "good"
                     metrics["strongDeals" if status == "strong" else "goodDeals"] += 1
                     reason = "Оценка по актуальной цене нового товара с запасом на торг и расходы"
                 else:
@@ -772,14 +818,14 @@ def run_once(cfg, db, dry=False):
                 discount = 1 - item["price"] / median_price
                 deal_threshold = float(q.get("threshold", 0.25))
                 good_threshold = float(q.get("good_threshold", max(0.12, deal_threshold - 0.08)))
-                if economics and economics["profitable"] and discount >= deal_threshold and economics["profit_roi"] >= max(0.30, float(q.get("strong_min_roi", 0.30))):
+                if economics and economics["profitable"] and economics["estimated_profit"] >= 50 and discount >= deal_threshold and economics["profit_roi"] >= max(0.30, float(q.get("strong_min_roi", 0.30))):
                     status = "strong"
                     metrics["strongDeals"] += 1
-                elif economics and economics["profitable"] and discount >= good_threshold:
+                elif economics and economics["profitable"] and economics["estimated_profit"] >= 50 and discount >= good_threshold:
                     status = "good"
                     metrics["goodDeals"] += 1
                 else:
-                    if not economics or economics["estimated_profit"] < economics["minimum_profit_required"] or economics["profit_roi"] < economics["minimum_roi_required"]:
+                    if not economics or economics["estimated_profit"] < 50 or economics["estimated_profit"] < economics["minimum_profit_required"] or economics["profit_roi"] < economics["minimum_roi_required"]:
                         metrics["rejectedProfit"] += 1
                     else:
                         metrics["rejectedDiscount"] += 1
@@ -828,24 +874,7 @@ def run_once(cfg, db, dry=False):
             listing_age = age_hours(deal.get("detected_at"))
         if listing_age is not None and -5 / 60 <= listing_age <= max_age_hours:
             current_deals.append(deal)
-    verified = [d for d in current_deals if d.get("status", "candidate") in ("strong", "good")]
-    review = [d for d in current_deals if d.get("status") == "candidate"]
-    review.sort(key=lambda d: (
-        d.get("estimated_profit") is not None,
-        float(d.get("estimated_profit") or -1),
-        float(d.get("profit_roi") or -1),
-        d.get("detected_at") or "",
-    ), reverse=True)
-    category_counts = {}
-    selected_review = []
-    for deal in review:
-        key = deal.get("category_key") or "other"
-        if category_counts.get(key, 0) >= 8:
-            continue
-        category_counts[key] = category_counts.get(key, 0) + 1
-        selected_review.append(deal)
-    selected_review = selected_review[:80]
-    fresh_deals = verified + selected_review
+    fresh_deals = [d for d in current_deals if d.get("status") in ("strong", "good")]
     rank = {"strong": 3, "good": 2, "candidate": 1}
     fresh_deals.sort(key=lambda d: (
         -rank.get(d.get("status", "candidate"), 0),
