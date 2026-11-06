@@ -1381,6 +1381,10 @@ def run_once(cfg, db, dry=False):
             candidates[listing_id] = (item, group, flags)
         db.commit()
 
+        # Google Search pricing is cached for 24 hours per exact scanner query.
+        # Marktplaats observations remain primary whenever enough local comparables exist.
+        web_reference = get_ai_market_reference(db, q)
+
         for listing_id, (item, group, flags) in candidates.items():
             metrics["candidates"] += 1
             if group == "unknown":
@@ -1410,6 +1414,30 @@ def run_once(cfg, db, dry=False):
                     valuation_price = new_price
                     reference_type = "new_retail"
                     metrics["retailProxyEvaluated"] += 1
+                elif web_reference and web_reference.get("confidence", 0) >= 0.65:
+                    web_samples = int(web_reference.get("sample_count") or 0)
+                    if web_reference.get("used_price_eur") and web_samples >= candidate_min_n:
+                        valuation_price = float(web_reference["used_price_eur"])
+                        sample_count = max(sample_count, web_samples)
+                        reference_type = "ai_web_used"
+                        reference = {
+                            "source_url": (web_reference.get("sources") or [{}])[0].get("url", ""),
+                            "rationale": web_reference.get("rationale", ""),
+                            "resale_factor": cfg.get("profitability", {}).get("market_resale_factor", 0.95),
+                        }
+                    elif web_reference.get("new_price_eur"):
+                        new_price = float(web_reference["new_price_eur"])
+                        valuation_price = new_price
+                        reference_type = "new_retail"
+                        reference = {
+                            "new_price_eur": new_price,
+                            "source_url": (web_reference.get("sources") or [{}])[0].get("url", ""),
+                            "checked_at": datetime.now(timezone.utc).isoformat(),
+                            "resale_factor": q.get("new_resale_factor", cfg.get("profitability", {}).get("new_resale_factor", 0.62)),
+                            "grounded": True,
+                            "rationale": web_reference.get("rationale", ""),
+                        }
+                        metrics["retailProxyEvaluated"] += 1
             if valuation_price is not None:
                 economics = calculate_resale_economics(q, item["price"], valuation_price, sample_count, reference_type, reference, cfg)
                 market_display_price = economics["expected_resale_price"] if reference_type == "new_retail" else valuation_price
@@ -1426,6 +1454,23 @@ def run_once(cfg, db, dry=False):
                 else:
                     metrics["reviewCandidates"] += 1
                     reason = "Нет достаточной прибыли при консервативной оценке перепродажи от цены нового товара"
+            elif reference_type == "ai_web_used" and valuation_price is not None:
+                discount = 1 - item["price"] / valuation_price
+                deal_threshold = float(q.get("threshold", 0.25))
+                good_threshold = float(q.get("good_threshold", max(0.12, deal_threshold - 0.08)))
+                if sample_count >= min_n and economics and economics["profitable"] and economics["estimated_profit"] >= 50 and discount >= deal_threshold and economics["profit_roi"] >= max(0.30, float(q.get("strong_min_roi", 0.30))):
+                    status = "strong"
+                    metrics["strongDeals"] += 1
+                    reason = "Gemini Google Search: " + str((web_reference or {}).get("rationale") or "оценка по сопоставимым веб-источникам")
+                elif sample_count >= min_n and economics and economics["profitable"] and economics["estimated_profit"] >= 50 and discount >= good_threshold:
+                    status = "good"
+                    metrics["goodDeals"] += 1
+                    reason = "Gemini Google Search: " + str((web_reference or {}).get("rationale") or "оценка по сопоставимым веб-источникам")
+                else:
+                    status = "candidate"
+                    metrics["reviewCandidates"] += 1
+                    metrics["candidatePreliminary"] += 1
+                    reason = "Предварительная оценка Gemini Google Search: " + str((web_reference or {}).get("rationale") or "нужна дополнительная проверка")
             elif sample_count >= min_n and median_price is not None:
                 discount = 1 - item["price"] / median_price
                 deal_threshold = float(q.get("threshold", 0.25))
