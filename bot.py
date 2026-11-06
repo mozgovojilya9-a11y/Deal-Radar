@@ -206,10 +206,56 @@ def age_hours(s):
     return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
 
 def group_of(q, text):
+    """Build comparable product buckets instead of comparing unrelated items."""
+    group_type = q.get("group_type")
+    lowered = text.lower()
+    if group_type == "television":
+        brands = ("samsung", "lg", "sony", "philips", "panasonic", "hisense", "tcl",
+                  "metz", "grundig", "sharp", "toshiba", "loewe")
+        brand = next((item for item in brands if re.search(r"(?<!\w)" + re.escape(item) + r"(?!\w)", lowered)), None)
+        size_match = re.search(
+            r"\b(32|40|42|43|48|49|50|55|58|60|65|70|75|77|80|83|85|86|98)\s*(?:inch(?:es)?|[\"”])",
+            lowered,
+        )
+        if not size_match:
+            size_match = re.search(
+                r"\b(?:ue|qe|qn|kd|oled|pus|qned|tu|du|uq|un)(32|40|42|43|48|49|50|55|58|60|65|70|75|77|80|83|85|86|98)\b",
+                lowered,
+            )
+        size = size_match.group(1) if size_match else None
+        if "neo qled" in lowered:
+            panel = "neo-qled"
+        elif "mini led" in lowered or "mini-led" in lowered:
+            panel = "mini-led"
+        elif "qned" in lowered:
+            panel = "qned"
+        elif "qled" in lowered:
+            panel = "qled"
+        elif "oled" in lowered:
+            panel = "oled"
+        elif re.search(r"\b(led|lcd)\b", lowered):
+            panel = "led-lcd"
+        else:
+            panel = None
+        if re.search(r"\b8k\b", lowered):
+            resolution = "8k"
+        elif re.search(r"\b(4k|uhd|ultra hd)\b", lowered):
+            resolution = "4k"
+        elif re.search(r"\b(full hd|fhd|1080p?)\b", lowered):
+            resolution = "fhd"
+        elif re.search(r"\b(hd ready|720p?)\b", lowered):
+            resolution = "hd"
+        else:
+            resolution = None
+        if not brand or not size:
+            return "unknown"
+        return "-".join((brand, size, panel or "panel-unknown", resolution or "resolution-unknown"))
     rx = q.get("group_regex")
     if not rx:
         return "all"
     found = sorted({norm(m.group(0)) for m in re.finditer(rx, text, re.I)})
+    if group_type == "model_required":
+        return "-".join(found) if found else "unknown"
     return "-".join(found) if found else "other"
 
 def title_matches_query(q, title):
@@ -232,18 +278,23 @@ def title_matches_query(q, title):
     return True
 
 
-def accept(q, it, cfg):
+def primary_rejection(q, it, cfg):
+    """Return the first primary filter that rejects a listing, or None."""
     if not title_matches_query(q, it["title"]):
-        return False
+        return "title"
     if not it["id"] or it["price"] is None or it["price"] <= 0:
-        return False
+        return "invalid"
     if it["ptype"] not in (None, "FIXED"):
-        return False
+        return "price_type"
     if not (q.get("min_price", 0) <= it["price"] <= q.get("max_price", 10**9)):
-        return False
+        return "price_range"
     if it["dist_km"] is not None and it["dist_km"] > cfg["distance_km"] + 1:
-        return False
-    return True
+        return "distance"
+    return None
+
+
+def accept(q, it, cfg):
+    return primary_rejection(q, it, cfg) is None
 
 def risks(it):
     text = NEGATED.sub(" ", it["text"])
@@ -279,50 +330,64 @@ def save_feed(data):
     os.replace(tmp_path, FEED_PATH)
 
 
-def make_feed_deal(q, it, med, discount, flags, grp):
+def make_feed_deal(q, it, med, discount, flags, grp, status, market_samples, reason=None):
+    confidence = "high" if market_samples >= q.get("min_samples", 8) else ("preliminary" if med is not None else "none")
     return {
-        "listing_id": it["id"],
-        "title": it["title"],
+        "listing_id": it["id"], "title": it["title"],
         "description": it.get("description") or "",
         "price": round(float(it["price"]), 2),
-        "market_price": round(float(med), 2),
-        "discount": round(float(discount), 4),
-        "category_key": q["key"],
-        "category_label": q["label"],
-        "model_group": grp,
-        "city": it.get("city") or "",
+        "market_price": round(float(med), 2) if med is not None else None,
+        "discount": round(float(discount), 4) if discount is not None else None,
+        "status": status, "market_confidence": confidence,
+        "market_samples": int(market_samples), "evaluation_reason": reason,
+        "category_key": q["key"], "category_label": q["label"],
+        "model_group": grp, "city": it.get("city") or "",
         "distance_km": round(float(it["dist_km"]), 2) if it.get("dist_km") is not None else None,
-        "listing_url": it["url"],
-        "image_url": it.get("image_url"),
-        "warning_flags": flags,
-        "posted_at": it.get("date") or None,
-        "detected_at": datetime.now(timezone.utc).isoformat(),
-        "active": True,
+        "listing_url": it["url"], "image_url": it.get("image_url"),
+        "warning_flags": flags, "posted_at": it.get("date") or None,
+        "detected_at": datetime.now(timezone.utc).isoformat(), "active": True,
     }
 
 
 def run_once(cfg, db, dry=False):
     now = int(time.time())
     window = now - cfg.get("market_days", 21) * 86400
-    min_n, fails, sent_count = cfg.get("min_samples", 8), 0, 0
-    total_checked = 0
-    total_accepted = 0
-    total_candidates = 0
-    skipped_age = 0
-    skipped_risk = 0
-    skipped_samples = 0
-    skipped_discount = 0
+    min_n = cfg.get("min_samples", 8)
+    candidate_min_n = cfg.get("candidate_min_samples", 3)
+    fails = 0
     feed_doc = load_feed()
+    metrics = {
+        "checked": 0, "unique": 0, "duplicates": 0,
+        "rejectedTitle": 0, "rejectedInvalid": 0, "rejectedPriceType": 0,
+        "rejectedPriceRange": 0, "rejectedDistance": 0,
+        "accepted": 0, "candidates": 0, "strongDeals": 0, "goodDeals": 0,
+        "reviewCandidates": 0, "newDeals": 0, "alreadyPublished": 0,
+        "rejectedAge": 0, "rejectedDateUnknown": 0, "rejectedRisk": 0,
+        "rejectedDiscount": 0, "candidateNoMarket": 0, "candidatePreliminary": 0,
+    }
     queries_by_key = {q["key"]: q for q in cfg["queries"]}
     feed_deals = {}
     for deal in feed_doc.get("deals", []):
         if not isinstance(deal, dict) or not deal.get("listing_id"):
             continue
-        # Remove cached cards that no longer match the active model filters.
         q = queries_by_key.get(str(deal.get("category_key") or ""))
         if not title_matches_query(q, deal.get("title") or ""):
             continue
-        feed_deals[str(deal["listing_id"])] = deal
+        deal_id = str(deal["listing_id"])
+        # Legacy TV cards used one median for every model. Keep them visible,
+        # but mark their old discount as unverified until a model-specific group is collected.
+        if q.get("group_type") == "television" and deal.get("model_group") in (None, "", "all", "unknown"):
+            deal.update({
+                "status": "candidate", "market_price": None, "discount": None,
+                "market_confidence": "none",
+                "evaluation_reason": "Старая общая оценка заменяется сравнением похожих телевизоров",
+                "market_samples": 0,
+            })
+        else:
+            deal.setdefault("status", "strong")
+        feed_deals[deal_id] = deal
+
+    raw_ids_seen = set()
     for q in cfg["queries"]:
         qkey = q["key"]
         existing = db.execute("SELECT COUNT(*) FROM listings WHERE qkey=?", (qkey,)).fetchone()[0]
@@ -330,98 +395,171 @@ def run_once(cfg, db, dry=False):
         pages = cfg.get("seed_pages", 5) if first_run else cfg.get("pages", 2)
         try:
             raw = fetch_query(cfg, q, pages)
-        except Exception as e:
-            log(f"[{qkey}] ошибка запроса: {e}")
+        except Exception as exc:
+            log(f"[{qkey}] ошибка запроса: {exc}")
             fails += 1
             time.sleep(random.uniform(2, 4))
             continue
-        total_checked += len(raw)
+
+        metrics["checked"] += len(raw)
         candidates = {}
-        for l in raw:
-            it = parse_listing(l)
-            if not accept(q, it, cfg):
-                continue
-            total_accepted += 1
-            grp = group_of(q, it["text"])
-            known = db.execute("SELECT 1 FROM listings WHERE id=?", (it["id"],)).fetchone()
-            if known:
-                db.execute("UPDATE listings SET last_seen=?, price=? WHERE id=?", (now, it["price"], it["id"]))
-            else:
-                db.execute("INSERT INTO listings VALUES(?,?,?,?,?,?,?)", (it["id"], qkey, grp, it["title"], it["price"], now, now))
-            # Re-evaluate every currently visible, unsent listing. A listing may
-            # become a genuine deal only after more comparable market samples arrive.
-            candidates[it["id"]] = (it, grp)
-        db.commit()
-        for it, grp in candidates.values():
-            total_candidates += 1
-            age = age_hours(it["date"])
-            if age is None and first_run:
-                skipped_age += 1
-                continue
-            if age is not None and age > cfg.get("max_age_hours", 168):
-                skipped_age += 1
-                continue
-            if db.execute("SELECT 1 FROM sent WHERE id=?", (it["id"],)).fetchone():
-                continue
-            flags = risks(it)
-            if flags is None:
-                skipped_risk += 1
-                continue
-            n, med = market_stats(db, qkey, grp, it["id"], window)
-            kind, need = "model", q.get("threshold", 0.2)
-            if grp == "all" or n < min_n or med is None:
-                n, med = market_stats(db, qkey, None, it["id"], window)
-                kind = "category"
-                need = max(q.get("threshold", 0.2) + 0.15, 0.4) if grp != "all" else q.get("threshold", 0.2)
-                if n < min_n * (2 if grp != "all" else 1) or med is None:
-                    skipped_samples += 1
+        for listing in raw:
+            item = parse_listing(listing)
+            listing_id = item["id"]
+            if listing_id:
+                if listing_id in raw_ids_seen:
+                    metrics["duplicates"] += 1
                     continue
-            discount = 1 - it["price"] / med
-            if discount < need:
-                skipped_discount += 1
+                raw_ids_seen.add(listing_id)
+            metrics["unique"] += 1
+
+            rejection = primary_rejection(q, item, cfg)
+            if rejection:
+                metric = {
+                    "title": "rejectedTitle", "invalid": "rejectedInvalid",
+                    "price_type": "rejectedPriceType", "price_range": "rejectedPriceRange",
+                    "distance": "rejectedDistance",
+                }[rejection]
+                metrics[metric] += 1
                 continue
-            feed_deals[it["id"]] = make_feed_deal(q, it, med, discount, flags, grp)
-            log(f"[{qkey}] добавлено в каталог: -{discount:.0%} €{it['price']:.0f} (рынок ≈ €{med:.0f}, {n} объявл.) {it['title'][:70]}")
-            db.execute("INSERT OR IGNORE INTO sent VALUES(?,?)", (it["id"], now))
-            db.commit()
-            sent_count += 1
+
+            metrics["accepted"] += 1
+            group = group_of(q, item["text"])
+            known = db.execute("SELECT 1 FROM listings WHERE id=?", (listing_id,)).fetchone()
+            if known:
+                db.execute(
+                    "UPDATE listings SET last_seen=?, price=?, qkey=?, grp=?, title=? WHERE id=?",
+                    (now, item["price"], qkey, group, item["title"], listing_id),
+                )
+            else:
+                db.execute(
+                    "INSERT INTO listings VALUES(?,?,?,?,?,?,?)",
+                    (listing_id, qkey, group, item["title"], item["price"], now, now),
+                )
+            candidates[listing_id] = (item, group)
+        db.commit()
+
+        for listing_id, (item, group) in candidates.items():
+            metrics["candidates"] += 1
+            age = age_hours(item["date"])
+            if age is None:
+                metrics["rejectedDateUnknown"] += 1
+                continue
+            if age < -5 / 60 or age > cfg.get("max_age_hours", 720):
+                metrics["rejectedAge"] += 1
+                continue
+            flags = risks(item)
+            if flags is None:
+                metrics["rejectedRisk"] += 1
+                continue
+
+            if group == "unknown":
+                sample_count, median_price = 0, None
+            else:
+                sample_count, median_price = market_stats(db, qkey, group, listing_id, window)
+
+            if group != "all" and not q.get("strict_group") and sample_count < min_n:
+                category_count, category_median = market_stats(db, qkey, None, listing_id, window)
+                if category_count >= min_n and category_median is not None:
+                    sample_count, median_price = category_count, category_median
+
+            status, discount, reason = "candidate", None, None
+            if sample_count >= min_n and median_price is not None:
+                discount = 1 - item["price"] / median_price
+                deal_threshold = float(q.get("threshold", 0.25))
+                good_threshold = float(q.get("good_threshold", max(0.12, deal_threshold - 0.08)))
+                if discount >= deal_threshold:
+                    status = "strong"
+                    metrics["strongDeals"] += 1
+                elif discount >= good_threshold:
+                    status = "good"
+                    metrics["goodDeals"] += 1
+                else:
+                    metrics["rejectedDiscount"] += 1
+                    continue
+            else:
+                metrics["reviewCandidates"] += 1
+                if median_price is not None and sample_count >= candidate_min_n:
+                    discount = 1 - item["price"] / median_price
+                    metrics["candidatePreliminary"] += 1
+                    reason = f"Предварительная оценка по {sample_count} похожим объявлениям; нужно больше данных"
+                else:
+                    metrics["candidateNoMarket"] += 1
+                    reason = "Пока недостаточно похожих объявлений для честной оценки рынка"
+
+            already_published = db.execute("SELECT 1 FROM sent WHERE id=?", (listing_id,)).fetchone()
+            if already_published:
+                metrics["alreadyPublished"] += 1
+            elif status in ("strong", "good"):
+                metrics["newDeals"] += 1
+                db.execute("INSERT OR IGNORE INTO sent VALUES(?,?)", (listing_id, now))
+                db.commit()
+
+            feed_deals[listing_id] = make_feed_deal(
+                q, item, median_price, discount, flags, group, status, sample_count, reason
+            )
+            if status in ("strong", "good"):
+                log(
+                    f"[{qkey}] {status}: {discount:.0%} скидка, €{item['price']:.0f} "
+                    f"(рынок ≈ €{median_price:.0f}, {sample_count} сравнений) {item['title'][:70]}"
+                )
         time.sleep(random.uniform(2, 4))
+
     db.execute("DELETE FROM listings WHERE last_seen<?", (now - 30 * 86400,))
     db.commit()
     if fails == len(cfg["queries"]):
         log("все запросы к Marktplaats не удались — каталог не обновлён")
         return False
-    # Keep listings no older than the configured maximum age.
-    # Prefer the original Marktplaats posted_at timestamp; fall back to detected_at
-    # only for legacy feed entries where the listing date was unavailable.
-    max_age_hours = cfg.get("max_age_hours", 168)
-    fresh_deals = []
+
+    max_age_hours = cfg.get("max_age_hours", 720)
+    current_deals = []
     for deal in feed_deals.values():
         listing_age = age_hours(deal.get("posted_at"))
         if listing_age is None:
             listing_age = age_hours(deal.get("detected_at"))
         if listing_age is not None and -5 / 60 <= listing_age <= max_age_hours:
-            fresh_deals.append(deal)
-    fresh_deals.sort(key=lambda item: item.get("detected_at") or "", reverse=True)
+            current_deals.append(deal)
+
+    verified = [d for d in current_deals if d.get("status", "strong") in ("strong", "good")]
+    review = [d for d in current_deals if d.get("status") == "candidate"]
+    review.sort(key=lambda d: (
+        d.get("discount") is not None,
+        float(d.get("discount") or -1),
+        d.get("detected_at") or "",
+    ), reverse=True)
+    category_counts = {}
+    selected_review = []
+    for deal in review:
+        key = deal.get("category_key") or "other"
+        if category_counts.get(key, 0) >= 8:
+            continue
+        category_counts[key] = category_counts.get(key, 0) + 1
+        selected_review.append(deal)
+    selected_review = selected_review[:80]
+
+    fresh_deals = verified + selected_review
+    rank = {"strong": 3, "good": 2, "candidate": 1}
+    fresh_deals.sort(key=lambda d: (
+        -rank.get(d.get("status", "strong"), 0),
+        -float(d.get("discount") if d.get("discount") is not None else -1),
+        d.get("detected_at") or "",
+    ))
     fresh_deals = fresh_deals[:200]
+
     now_iso = datetime.now(timezone.utc).isoformat()
     changed = fresh_deals != feed_doc.get("deals", [])
+    primary_rejected = sum(metrics[key] for key in (
+        "rejectedTitle", "rejectedInvalid", "rejectedPriceType", "rejectedPriceRange", "rejectedDistance"
+    ))
+    rejected_total = primary_rejected + sum(metrics[key] for key in (
+        "rejectedAge", "rejectedDateUnknown", "rejectedRisk", "rejectedDiscount"
+    ))
     feed_doc = {
         "updatedAt": now_iso if changed or not feed_doc.get("updatedAt") else feed_doc["updatedAt"],
         "scannedAt": now_iso,
         "scannerStats": {
-            "checked": total_checked,
-            "accepted": total_accepted,
-            "candidates": total_candidates,
-            "newDeals": sent_count,
-            "rejectedAge": skipped_age,
-            "rejectedRisk": skipped_risk,
-            "rejectedSamples": skipped_samples,
-            "rejectedDiscount": skipped_discount,
-            "rejectedTotal": skipped_age + skipped_risk + skipped_samples + skipped_discount,
-            "failedQueries": fails,
-            "queryCount": len(cfg["queries"]),
-            "finishedAt": now_iso,
+            **metrics, "primaryRejected": primary_rejected, "rejectedTotal": rejected_total,
+            "queryCount": len(cfg["queries"]), "failedQueries": fails, "finishedAt": now_iso,
         },
         "deals": fresh_deals,
     }
@@ -431,11 +569,11 @@ def run_once(cfg, db, dry=False):
         save_feed(feed_doc)
         log(f"каталог сохранён: {len(fresh_deals)} предложений" + (" (есть изменения)" if changed else ""))
     log(
-        f"готово: проверено объявлений {total_checked}, принято после базовых фильтров {total_accepted}, "
-        f"кандидатов на оценку {total_candidates}, добавлено в каталог {sent_count}, "
-        f"отсечено по возрасту {skipped_age}, рискам {skipped_risk}, "
-        f"недостатку рыночных данных {skipped_samples}, скидке {skipped_discount}, "
-        f"ошибок запросов {fails}"
+        f"готово: результатов {metrics['checked']}, уникальных {metrics['unique']}, "
+        f"повторов {metrics['duplicates']}, первично принято {metrics['accepted']}, "
+        f"кандидатов {metrics['candidates']}, сильных {metrics['strongDeals']}, "
+        f"хороших {metrics['goodDeals']}, на проверке {metrics['reviewCandidates']}, "
+        f"новых выгодных {metrics['newDeals']}, ошибок запросов {fails}"
     )
     return fails < len(cfg["queries"])
 
