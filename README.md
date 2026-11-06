@@ -4,11 +4,11 @@ Deal Radar scans configured Marktplaats categories near a Dutch postcode, estima
 
 ## Architecture — no hosted database
 
-- `bot.py` — Python scanner, model filters, rolling price comparison, and JSON feed generation. It makes no Telegram API calls and needs no secrets.
-- `config.json` — postcode, 50 km radius, search queries, price limits, discount thresholds, up to 5 result pages per query (up to 500 results), and a 30-day maximum listing age.
-- `.github/workflows/deals.yml` — scheduled scan every 5 minutes and manual dispatch.
+- `bot.py` — Python scanner, model-aware filters, rolling price comparison, and JSON feed generation. It counts unique listing IDs and duplicate search hits separately. Listings without enough comparable prices are kept as review candidates without a fabricated discount.
+- `config.json` — postcode, 50 km radius, 34 product searches, price limits, discount thresholds, up to 5 result pages per query (up to 500 results), candidate review rules, and a 30-day maximum listing age.
+- `.github/workflows/deals.yml` — scheduled scan every 10 minutes and manual dispatch.
 - `deals-data` branch — stores `data/deals.json` as a single replaceable commit; the workflow creates the branch on its first run.
-- `web/` — Next.js Mini App deployed on Vercel. `/api/deals` reads the GitHub JSON feed and caches it for one minute.
+- `web/` — Next.js Mini App deployed from GitHub (Vercel and/or Netlify). `/api/deals` reads the GitHub JSON feed and caches it for one minute.
 - Favorites and display filters are stored locally in each browser with `localStorage`.
 - Rolling market comparison is stored in `state.db` and restored with GitHub Actions cache; cache eviction can reset price history.
 
@@ -16,7 +16,7 @@ Supabase is not used or required. Your laptop does not need to be running.
 
 ## GitHub Actions
 
-Open **Actions → deals → Run workflow** to start a manual scan. The scanner needs no GitHub secrets: it reads Marktplaats and publishes the JSON feed. The workflow needs repository Contents read/write permission. It runs about every 5 minutes; GitHub may delay scheduled starts. Each category query scans up to 5 pages × 100 results, not every listing on the entire Marktplaats site. Listings older than 30 days are excluded.
+Open **Actions → deals → Run workflow** to start a manual scan. The scanner needs no GitHub secrets: it reads Marktplaats and publishes the JSON feed. The workflow needs repository Contents read/write permission. It runs about every 10 minutes; GitHub may delay scheduled starts. Each category query scans up to 5 pages × 100 results, not every listing on the entire Marktplaats site. Listings older than 30 days are excluded.
 
 ## Vercel
 
@@ -49,6 +49,9 @@ npm run dev
 ## Features
 
 - Actual Marktplaats listings with photos, asking price, estimated market price, discount, location, and risk flags.
+- Three offer tiers: strong verified deals, good-value deals, and candidates awaiting comparable market data.
+- Scan analytics distinguish raw result rows, unique listings, duplicate matches, and reasons for rejection.
+- Product-aware price groups for televisions (brand, diagonal, panel, resolution) and model-specific matching for drones, microphones, headphones, and Michael Kors bags/backpacks.
 - Direct Marktplaats link on every card.
 - Filters for category, price range, minimum discount, and distance.
 - Catalog refresh every 2 minutes and when the app returns to the foreground.
@@ -56,4 +59,4 @@ npm run dev
 - Server-validated Telegram Mini App authentication.
 - No Supabase and no dependency on your laptop remaining online.
 
-The catalog contains only genuine qualifying offers; no demo listings are generated. The scanner reviews up to 500 results per configured query within 50 km and accepts listings published within the previous 30 days; this is a broad search, not an exhaustive crawl of all Marktplaats listings. Market-price estimates use asking prices, not completed sales. Inspect the item, seller history, and safe payment options before buying.
+The catalog contains only real Marktplaats listings; no demo listings are generated. The homepage ranks strong verified deals first, good-value deals next, and candidates that need more price comparisons in a separate section. The scanner reviews up to 500 results per configured query within 50 km and accepts listings published within the previous 30 days; this is a broad search, not an exhaustive crawl of all Marktplaats listings. Market-price estimates use asking prices, not completed sales. Inspect the item, seller history, and safe payment options before buying.

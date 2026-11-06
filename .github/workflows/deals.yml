@@ -8,7 +8,7 @@ on:
       - "config.json"
       - ".github/workflows/deals.yml"
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -55,7 +55,7 @@ jobs:
           blob="$(git hash-object -w data/deals.json)"
           data_tree="$(printf '100644 blob %s\tdeals.json\n' "$blob" | git mktree)"
           # Keep the Vercel branch-deployment guard in this feed-only branch too.
-          # This prevents every 5-minute JSON update from consuming a Vercel deployment.
+          # This prevents every 10-minute JSON update from consuming a Vercel deployment.
           vercel_config_blob="$(git hash-object -w web/vercel.json)"
           web_tree="$(printf '100644 blob %s\tvercel.json\n' "$vercel_config_blob" | git mktree)"
           root_tree="$(printf '040000 tree %s\tdata\n040000 tree %s\tweb\n' "$data_tree" "$web_tree" | git mktree)"
