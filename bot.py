@@ -119,6 +119,12 @@ def fetch_query(cfg, q, pages):
                 time.sleep(random.uniform(0.6, 1.2))
             if not result:
                 result = fetch_marktplaats_v2(cfg, term, term_pages)
+            elif q.get("search_v2"):
+                # Run both search APIs for difficult model-specific searches and merge their hits.
+                try:
+                    result.extend(fetch_marktplaats_v2(cfg, term, term_pages))
+                except Exception as v2_error:
+                    log(f"[{qkey}] v2 fallback warning for '{term}': {v2_error}")
         except Exception as legacy_error:
             try:
                 result = fetch_marktplaats_v2(cfg, term, term_pages)

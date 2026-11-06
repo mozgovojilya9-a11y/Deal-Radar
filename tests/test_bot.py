@@ -262,6 +262,11 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(parsed["id"],"m123")
         self.assertIn("Wayfarer",parsed["text"])
 
+    def test_rayban_meta_wayfarer_without_rayban_brand_word_is_accepted(self):
+        with open(os.path.join(ROOT,"config.json"),encoding="utf-8") as handle: config=json.load(handle)
+        q=next(q for q in config["queries"] if q["key"]=="rayban")
+        self.assertTrue(bot.title_matches_query(q,"Meta Wayfarer Gen 2 RW4012"))
+
 
 if __name__ == "__main__":
     unittest.main()
