@@ -49,7 +49,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: gemini-3.5-flash-lite
-          AI_REVIEW_MAX_PER_QUERY: "4"
+          AI_REVIEW_MAX_PER_QUERY: "6"
         run: python bot.py
       - name: Publish the feed to the deals-data branch
         run: |
