@@ -216,8 +216,8 @@ function relevance(candidate: string, query: string) {
   if (storage && !new RegExp("\\b" + storage + "\\s?gb\\b", "i").test(candidate)) return 0;
   const generation = query.match(/\b(?:gen(?:eration)?|generatie)\s*[.-]?\s*(\d+)\b/i)?.[1];
   if (generation && !new RegExp("\\b(?:gen(?:eration)?|generatie)\\s*[.-]?\\s*" + generation + "\\b", "i").test(candidate)) return 0;
-  const diagonal = query.match(/\b(32|40|42|43|48|49|50|55|58|60|65|70|75|77|83|85|98)\s?(?:inch|inches|in|")\b/i)?.[1];
-  if (diagonal && !new RegExp("\\b" + diagonal + "\\s?(?:inch|inches|in|")?\\b", "i").test(candidate)) return 0;
+  const diagonal = query.match(/\b(32|40|42|43|48|49|50|55|58|60|65|70|75|77|83|85|98)\s*(?:inch|inches|in)?\b/i)?.[1];
+  if (diagonal && !new RegExp("\\b" + diagonal + "\\b", "i").test(candidate)) return 0;
 
   const tokens = query.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length >= 3);
   if (!tokens.length) return 1;
