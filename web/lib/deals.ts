@@ -6,6 +6,7 @@ export type Deal = {
   description: string | null;
   price: number;
   market_price: number | null;
+  market_median_price?: number | null;
   discount: number | null;
   expected_resale_price?: number | null;
   estimated_profit?: number | null;

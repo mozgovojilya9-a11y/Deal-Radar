@@ -205,6 +205,42 @@ class ScannerTests(unittest.TestCase):
         self.assertNotEqual(bot.group_of(ps5, "PlayStation 5 Slim Console"), "unknown")
         self.assertTrue(ps5["strict_group"])
 
+    def test_market_stats_returns_median_and_lower_quartile(self):
+        db = bot.open_db()
+        try:
+            now = int(datetime.now(timezone.utc).timestamp())
+            for index, price in enumerate((100, 200, 300, 400, 500, 600, 700, 800)):
+                db.execute(
+                    "INSERT INTO listings VALUES(?,?,?,?,?,?,?)",
+                    (f"sample-{index}", "sample-q", "exact-model", "Exact model", price, now, now),
+                )
+            db.commit()
+            count, median_price, lower_quartile = bot.market_stats(db, "sample-q", "exact-model", "target", 0)
+            self.assertEqual(count, 8)
+            self.assertEqual(median_price, 450)
+            self.assertEqual(lower_quartile, 275)
+        finally:
+            db.close()
+
+    def test_ps5_search_accepts_console_models_but_rejects_games(self):
+        with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as handle:
+            config = json.load(handle)
+        ps5 = next(q for q in config["queries"] if q["key"] == "ps5")
+        for title in (
+            "Sony PlayStation 5 Slim Console",
+            "PS5 Disc Edition",
+            "PlayStation 5 Disc versie met 2 controllers",
+            "Sony PS5 CFI-1216A",
+        ):
+            self.assertTrue(bot.title_matches_query(ps5, title), title)
+        for title in (
+            "PlayStation 5 FIFA 25 game",
+            "PS5 God of War Ragnarok",
+            "PlayStation 5 Spider-Man 2 spel",
+            "PS5 games bundle",
+        ):
+            self.assertFalse(bot.title_matches_query(ps5, title), title)
+
     def test_ai_cannot_rescue_a_zero_price_listing(self):
         now = datetime.now(timezone.utc).isoformat()
         free_item = listing("free-item", 0, now, title="Unrelated Bluetooth speaker")

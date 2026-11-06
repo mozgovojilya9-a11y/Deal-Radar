@@ -84,7 +84,6 @@ function groupOf(key: string) {
 const GROUPED_CATEGORIES = CATEGORY_GROUPS
   .map((group) => ({ ...group, items: CATEGORIES.filter((item) => item.key && groupOf(item.key) === group.title) }))
   .filter((group) => group.items.length);
-const DISTANCE_STEPS = [null, 10, 25, 50, 100];
 function finds(n: number) {
   const m = n % 10, h = n % 100;
   return h >= 11 && h <= 14 ? "находок" : m === 1 ? "находка" : m >= 2 && m <= 4 ? "находки" : "находок";
@@ -200,8 +199,17 @@ function matchesSearchIntent(product: string, query: string, title = product): b
       .concat(queryTokens.slice(matchedAlias.start + aliasLength))
       .filter((token) => !SEARCH_STOP_WORDS.has(token));
     const accessoryTerms = [...CONSOLE_ACCESSORIES, ...(intent.accessoryTerms ?? [])];
+    const requestedGames = extraQueryTokens.some((token) => ["game", "games", "spel", "spellen", "videogame", "videogames"].includes(token));
     const requestedAccessory = extraQueryTokens.some((token) => accessoryTerms.includes(token)
-      || ["disc", "drive", "game", "games"].includes(token));
+      || ["disc", "drive", "game", "games", "spel", "spellen"].includes(token));
+    if (intent.console && !requestedGames) {
+      const consoleHardware = titleTokens.includes("console") || titleTokens.includes("slim") || titleTokens.includes("pro")
+        || containsPhrase(titleTokens, "digital edition") || containsPhrase(titleTokens, "disc edition")
+        || containsPhrase(titleTokens, "digital versie") || containsPhrase(titleTokens, "disc versie")
+        || /\bcfi[\s-]?\d{4}\b/i.test(title);
+      const controllerBundle = /(?:\+|met|with|incl(?:uding)?|inclusief).{0,30}\b(?:\d+\s*)?controllers?\b/i.test(title);
+      if (!consoleHardware && !controllerBundle) return false;
+    }
     if (!requestedAccessory) {
       const titleIsAccessory = titleTokens.some((token) => accessoryTerms.includes(token))
         || containsPhrase(titleTokens, "disc drive");
@@ -220,13 +228,13 @@ function matchesSearchIntent(product: string, query: string, title = product): b
 
 function readSettings(raw: unknown): UserSettings {
   const stored = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const positive = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.min(800, value) : null);
+  const positive = (value: unknown, max = 800) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.min(max, value) : null);
   const categories = Array.isArray(stored.categories) ? stored.categories.filter((key): key is string => typeof key === "string")
     .map((key) => key === "airpods-pro" ? "airpods-pro-3" : key === "airpods" ? "airpods-5" : key) : [];
   return {
     categories,
     minDiscount: typeof stored.minDiscount === "number" && Number.isInteger(stored.minDiscount) ? Math.min(90, Math.max(0, stored.minDiscount)) : 0,
-    maxDistanceKm: positive(stored.maxDistanceKm),
+    maxDistanceKm: positive(stored.maxDistanceKm, 100),
     minPrice: positive(stored.minPrice),
     maxPrice: positive(stored.maxPrice)
   };
@@ -259,6 +267,9 @@ function DealCard({ deal, saved, onSave, onOpen }: {
   const candidate = deal.status === "candidate";
   const good = deal.status === "good";
   const hasEstimate = deal.market_price !== null && deal.market_price !== undefined;
+  const marketLabel = deal.market_median_price != null && hasEstimate
+    ? "Осторожная оценка " + euro(deal.market_price) + " · медиана " + euro(deal.market_median_price)
+    : hasEstimate ? "≈ " + euro(deal.market_price) : "Рынок уточняется";
   const discount = deal.discount == null ? null : Math.max(0, Math.round(Number(deal.discount) * 100));
   const statusLabel = candidate ? "Нужно проверить" : good ? "Хорошая цена" : "Очень выгодно";
   return (
@@ -280,7 +291,7 @@ function DealCard({ deal, saved, onSave, onOpen }: {
         <button className="deal-title" onClick={onOpen}>{deal.title}</button>
         <div className="price-row">
           <strong>{euro(deal.price)}</strong>
-          <span className="old-price">{hasEstimate ? "≈ " + euro(deal.market_price) : "Рынок уточняется"}</span>
+          <span className="old-price">{marketLabel}</span>
         </div>
         {deal.estimated_profit != null ? (
           <div className={"saving-line" + (candidate ? " preliminary-saving" : "")}>
@@ -407,8 +418,8 @@ export default function HomePage() {
   const base = useMemo(() => {
     let result = deals;
     if (settings.categories.length) result = result.filter((deal) => settings.categories.includes(deal.category_key));
-    if (settings.minDiscount > 0) result = result.filter((deal) => deal.discount == null || Number(deal.discount) * 100 >= settings.minDiscount);
-    if (settings.maxDistanceKm !== null) result = result.filter((deal) => deal.distance_km === null || Number(deal.distance_km) <= settings.maxDistanceKm!);
+    if (settings.minDiscount > 0) result = result.filter((deal) => deal.discount != null && Number(deal.discount) * 100 >= settings.minDiscount);
+    if (settings.maxDistanceKm !== null) result = result.filter((deal) => deal.distance_km != null && Number(deal.distance_km) <= settings.maxDistanceKm!);
     if (settings.minPrice !== null) result = result.filter((deal) => Number(deal.price) >= settings.minPrice!);
     if (settings.maxPrice !== null) result = result.filter((deal) => Number(deal.price) <= settings.maxPrice!);
     return result;
@@ -479,6 +490,7 @@ export default function HomePage() {
   function updateFilters(patch: Partial<UserSettings>) {
     const safePatch = { ...patch };
     if (typeof safePatch.maxPrice === "number") safePatch.maxPrice = Math.min(800, Math.max(0, safePatch.maxPrice));
+    if (typeof safePatch.maxDistanceKm === "number") safePatch.maxDistanceKm = Math.min(100, Math.max(5, safePatch.maxDistanceKm));
     const next = { ...settings, ...safePatch };
     setSettings(next);
     persistSettings(next);
@@ -497,7 +509,7 @@ export default function HomePage() {
       const response = await fetch("/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData, query, maxPrice, includeUsed: researchIncludeUsed, includeNew: researchIncludeNew })
+        body: JSON.stringify({ initData, query, maxPrice, maxDistanceKm: settings.maxDistanceKm ?? 100, includeUsed: researchIncludeUsed, includeNew: researchIncludeNew })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Не удалось провести исследование.");
@@ -834,9 +846,18 @@ export default function HomePage() {
           {category ? <button type="button" className="cat-clear" onClick={() => setCategory("")} aria-label="Сбросить категорию">✕</button> : null}
         </div>
 
-        <details className="filters-fold">
-          <summary>Фильтры по цене и скидке{settingsCount ? <b>{settingsCount}</b> : null}</summary>
+        <details open className="filters-fold">
+          <summary>Параметры поиска · цена, расстояние и скидка{settingsCount ? <b>{settingsCount}</b> : null}</summary>
         <div className="filter-panel" role="group" aria-label="Фильтры по цене и скидке">
+          <div className="filter-group">
+            <span className="filter-label">Радиус от базы сканера</span>
+            <label className="distance-control">
+              <input type="range" min="5" max="100" step="5" value={settings.maxDistanceKm ?? 100}
+                onChange={(event) => updateFilters({ maxDistanceKm: Number(event.target.value) >= 100 ? null : Number(event.target.value) })} aria-label="Радиус поиска в километрах" />
+              <strong>{settings.maxDistanceKm ?? 100} км</strong>
+            </label>
+            <small className="settings-note">Объявления собираются в радиусе до 100 км от индекса 7671. Здесь можно сузить расстояние.</small>
+          </div>
           <div className="filter-group">
             <span className="filter-label">Цена, €</span>
             <div className="price-range">
@@ -899,8 +920,13 @@ export default function HomePage() {
             <div className="v2-field"><span>Минимальная скидка</span>
               <div className="discount-steps">{DISCOUNT_STEPS.map((step) => <button type="button" key={step} className={"discount-chip" + (settings.minDiscount === step ? " selected" : "")} onClick={() => updateFilters({ minDiscount: step })}>{step === 0 ? "Любая" : "от " + step + "%"}</button>)}</div>
             </div>
-            <div className="v2-field"><span>Расстояние до товара</span>
-              <div className="discount-steps">{DISTANCE_STEPS.map((km) => <button type="button" key={km ?? "any"} className={"discount-chip" + (settings.maxDistanceKm === km ? " selected" : "")} onClick={() => updateFilters({ maxDistanceKm: km })}>{km === null ? "Любое" : "до " + km + " км"}</button>)}</div>
+            <div className="v2-field"><span>Радиус поиска объявлений</span>
+              <label className="distance-control">
+                <input type="range" min="5" max="100" step="5" value={settings.maxDistanceKm ?? 100}
+                  onChange={(event) => updateFilters({ maxDistanceKm: Number(event.target.value) >= 100 ? null : Number(event.target.value) })} aria-label="Радиус поиска в километрах" />
+                <strong>{settings.maxDistanceKm ?? 100} км</strong>
+              </label>
+              <p className="v2-hint">Базовая область сканера — до 100 км от индекса 7671. Выбранный радиус фильтрует ленту и ручной поиск Marktplaats.</p>
             </div>
             <div className="v2-field"><span>Цена, €</span>
               <div className="price-range">
@@ -922,7 +948,7 @@ export default function HomePage() {
           </div>
           <div className="v2-result"><span><strong>{base.length}</strong> {finds(base.length)} подходит под ваши фильтры</span><button type="button" className="primary-button" onClick={() => pickCategory("")}>Показать</button></div>
           <button type="button" className="v2-row" onClick={() => setTab("saved")}><span>Избранное</span><b>{saved.length ? saved.length : "пусто"}</b></button>
-          <p className="v2-hint">Избранное и фильтры хранятся только на этом устройстве. Район поиска задан в самом сервисе, здесь можно только сузить выдачу.</p>
+          <p className="v2-hint">Избранное и фильтры хранятся на этом устройстве. Сканер собирает объявления в пределах 100 км от индекса 7671; здесь можно сузить радиус и диапазон цены.</p>
         </section>
       ) : null}
 

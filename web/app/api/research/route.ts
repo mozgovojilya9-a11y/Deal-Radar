@@ -189,24 +189,36 @@ function parseMarktplaats(data: Record<string, unknown>, maxPrice: number): Offe
   }
   return result;
 }
-async function searchMarktplaats(query: string, maxPrice: number) {
+async function searchMarktplaats(query: string, maxPrice: number, maxDistanceKm: number) {
   const headers = { "User-Agent": "Mozilla/5.0 (compatible; DealRadarResearch/1.0)", Accept: "application/json", "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8" };
   const postcode = process.env.MARKTPLAATS_POSTCODE || "";
-  const params = new URLSearchParams({ query, offset: "0", limit: "100", locale: "nl-NL", searchDescription: "true", sortBy: "default", sortOrder: "descending" });
-  if (/^\d{4}[A-Z]{2}$/i.test(postcode)) { params.set("postCode", postcode.toUpperCase()); params.set("distance", "50000"); }
+  const validFullPostcode = /^\d{4}[A-Z]{2}$/i.test(postcode);
+  const params = new URLSearchParams({ query, offset: "0", limit: "100", locale: "nl-NL", searchDescription: "true", sortBy: "price", sortOrder: "ascending" });
   let data: Record<string, unknown> | null = null;
-  try {
-    const response = await fetch("https://api.marktplaats.nl/v2/search?" + params.toString(), { headers, signal: AbortSignal.timeout(10000), cache: "no-store" });
-    if (response.ok) data = await response.json() as Record<string, unknown>;
-  } catch { /* Fall back below. */ }
+  // API v2 needs a full six-character postcode; with four digits use the local legacy endpoint.
+  if (validFullPostcode) {
+    params.set("postCode", postcode.toUpperCase());
+    params.set("distance", String(Math.round(maxDistanceKm * 1000)));
+    try {
+      const response = await fetch("https://api.marktplaats.nl/v2/search?" + params.toString(), { headers, signal: AbortSignal.timeout(10000), cache: "no-store" });
+      if (response.ok) data = await response.json() as Record<string, unknown>;
+    } catch { /* Fall back below. */ }
+  }
   if (!data) {
-    const legacy = new URLSearchParams({ query, limit: "100", offset: "0", sortBy: "SORT_INDEX", sortOrder: "DECREASING", searchInTitleAndDescription: "true" });
-    if (postcode) { legacy.set("postcode", postcode); legacy.set("distanceMeters", "50000"); }
+    const legacy = new URLSearchParams({ query, limit: "100", offset: "0", sortBy: "PRICE", sortOrder: "INCREASING", searchInTitleAndDescription: "true" });
+    if (postcode) { legacy.set("postcode", postcode); legacy.set("distanceMeters", String(Math.round(maxDistanceKm * 1000))); }
     const response = await fetch("https://www.marktplaats.nl/lrp/api/search?" + legacy.toString(), { headers, signal: AbortSignal.timeout(10000), cache: "no-store" });
     if (!response.ok) throw new Error("Marktplaats API HTTP " + response.status);
     data = await response.json() as Record<string, unknown>;
   }
   return parseMarktplaats(data, maxPrice);
+}
+function isConsoleHardwareOffer(title: string, query: string) {
+  const consoleQuery = /\b(?:ps5|playstation[\s-]*5)\b/i.test(query);
+  const asksForGames = /\b(?:games?|spel|spellen|videogames?)\b/i.test(query);
+  if (!consoleQuery || asksForGames) return true;
+  return /\b(?:console|slim|pro|digital\s+(?:edition|versie)|disc\s+(?:edition|versie)|cfi[\s-]?\d{4})\b/i.test(title)
+    || /(?:\+|met|with|incl(?:uding)?|inclusief).{0,30}\b(?:\d+\s*)?controllers?\b/i.test(title);
 }
 function relevance(candidate: string, query: string) {
   const text = candidate.toLowerCase();
@@ -229,13 +241,14 @@ function relevance(candidate: string, query: string) {
 export async function POST(request: NextRequest) {
   const token = process.env.TELEGRAM_TOKEN;
   if (!token) return NextResponse.json({ error: "TELEGRAM_TOKEN не настроен." }, { status: 503 });
-  let body: { initData?: string; query?: string; maxPrice?: number; includeUsed?: boolean; includeNew?: boolean };
+  let body: { initData?: string; query?: string; maxPrice?: number; maxDistanceKm?: number; includeUsed?: boolean; includeNew?: boolean };
   try { body = await request.json() as typeof body; } catch { return NextResponse.json({ error: "Некорректный JSON." }, { status: 400 }); }
   const userId = verifyInitData(body.initData || "", token);
   if (!userId) return NextResponse.json({ error: "Откройте исследование внутри Telegram." }, { status: 401 });
   if (!rateAllowed(userId)) return NextResponse.json({ error: "Лимит исследований: не более 4 запусков в минуту." }, { status: 429 });
   const query = String(body.query || "").trim().replace(/\s+/g, " ");
   const maxPrice = Math.min(800, Math.max(10, Number(body.maxPrice) || 800));
+  const maxDistanceKm = Math.min(100, Math.max(5, Number(body.maxDistanceKm) || 100));
   const includeUsed = body.includeUsed !== false;
   const includeNew = body.includeNew !== false;
   if (!includeUsed && !includeNew) return NextResponse.json({ error: "Выбери хотя бы один режим: б/у или новый товар." }, { status: 400 });
@@ -245,7 +258,7 @@ export async function POST(request: NextRequest) {
   const usedQuery = 'site:ebay.nl OR site:2dehands.be OR site:tweakers.net "' + query + '" tweedehands used occasion';
   const newQuery = '"' + query + '" prijs nieuw kopen Nederland price';
   const [marketResult, planResult] = await Promise.all([
-    includeUsed ? searchMarktplaats(query, maxPrice).then((value) => ({ status: "fulfilled" as const, value }))
+    includeUsed ? searchMarktplaats(query, maxPrice, maxDistanceKm).then((value) => ({ status: "fulfilled" as const, value }))
       .catch((reason) => ({ status: "rejected" as const, reason }))
       : Promise.resolve({ status: "fulfilled" as const, value: [] as Offer[] }),
     createAiResearchPlan(query, includeUsed, includeNew)
@@ -313,11 +326,13 @@ export async function POST(request: NextRequest) {
   const marketByIndex = new Map(marketAiCandidates.map(({ offer, id }) => [id, annotate(offer, id)]));
   const relevantMarket = marktplaats
     .map((offer, index) => marketByIndex.get("mp_" + index) || annotate(offer, "mp_unreviewed_" + index))
-    .filter((offer) => offer.matchType === "exact" && (offer.matchConfidence ?? 0) >= 0.45);
+    .filter((offer) => offer.matchType === "exact" && (offer.matchConfidence ?? 0) >= 0.45
+      && isConsoleHardwareOffer(offer.title, query));
   const relevantWeb = webAiCandidates
     .map(({ offer, id }) => annotate(offer, id))
     .filter((offer) => ["exact", "variant", "related"].includes(offer.matchType || "unrelated")
-      && (offer.matchConfidence ?? 0) >= 0.45);
+      && (offer.matchConfidence ?? 0) >= 0.45
+      && isConsoleHardwareOffer(offer.title, query));
   const exactWeb = relevantWeb.filter((offer) => offer.matchType === "exact");
   const usedWeb = exactWeb.filter((offer) => offer.condition === "used");
   const newWeb = exactWeb.filter((offer) => offer.condition === "new");
@@ -352,7 +367,7 @@ export async function POST(request: NextRequest) {
   ];
 
   return NextResponse.json({
-    query, maxPrice, includeUsed, includeNew, checkedAt: new Date().toISOString(),
+    query, maxPrice, maxDistanceKm, includeUsed, includeNew, checkedAt: new Date().toISOString(),
     sources: {
       marktplaats: { count: relevantMarket.length, medianPrice: median(relevantMarket.map((offer) => offer.price)) },
       otherUsed: { count: usedWeb.length, medianPrice: median(usedWeb.map((offer) => offer.price)) },

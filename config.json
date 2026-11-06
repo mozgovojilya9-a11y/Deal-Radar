@@ -1,6 +1,6 @@
 {
   "postcode": "7671",
-  "distance_km": 50,
+  "distance_km": 100,
   "pages": 5,
   "seed_pages": 5,
   "min_samples": 8,
@@ -40,7 +40,7 @@
       "group_regex": "\\b(?:console|pro|slim|digital|disc|cfi[\\s-]?\\d{4})\\b",
       "min_profit_eur": 50,
       "strict_group": true,
-      "require_regex": "(?=.*(?:\\bps5\\b|\\bplaystation[\\s-]*5\\b))(?=.*(?:\\bconsole\\b|\\bslim\\b|\\bpro\\b|\\bdigital\\b|\\bdisc\\b|\\bcfi[\\s-]?\\d{4}\\b|\\bbundle\\b))",
+      "require_regex": "(?=.*(?:\\bps5\\b|\\bplaystation[\\s-]*5\\b))(?=.*(?:\\bconsole\\b|\\bslim\\b|\\bpro\\b|\\b(?:digital|disc)\\s+(?:edition|versie)\\b|\\bcfi[\\s-]?\\d{4}\\b))",
       "group_type": "model_required",
       "search_variants": [
         "playstation 5 console",
@@ -49,7 +49,9 @@
         "playstation 5 disc edition",
         "playstation 5 digital edition"
       ],
-      "variant_pages": 1
+      "variant_pages": 1,
+      "search_price_sorted": true,
+      "search_v2": true
     },
     {
       "key": "ps4",
@@ -188,7 +190,7 @@
       ],
       "min_price": 40,
       "max_price": 800,
-      "threshold": 0.25,
+      "threshold": 0.4,
       "group_regex": "\\b(?:wayfarer|rw[\\s-]?4012)\\b",
       "require_regex": "(?:(?=.*\\bRW[\\s-]?4012\\b)|(?=.*\\bray[\\s-]?ban\\b)(?=.*\\bwayfarer\\b)(?=.*\\bgen[\\s.-]*2\\b)|(?=.*\\bmeta\\b)(?=.*\\bwayfarer\\b)(?=.*\\bgen[\\s.-]*2\\b))",
       "search_variants": [
@@ -205,9 +207,11 @@
         "ray-ban wayfarer"
       ],
       "variant_pages": 1,
-      "search_v2": false,
+      "search_v2": true,
       "match_description": true,
-      "strict_group": true
+      "strict_group": true,
+      "search_price_sorted": true,
+      "good_threshold": 0.3
     },
     {
       "key": "watch-diesel",

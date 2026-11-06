@@ -21,7 +21,7 @@ DB_PATH = os.environ.get("DEAL_DB", os.path.join(HERE, "state.db"))
 FEED_PATH = os.environ.get("DEAL_FEED", os.path.join(HERE, "data", "deals.json"))
 RETAIL_PATH = os.environ.get("DEAL_RETAIL_PRICES", os.path.join(HERE, "retail_prices.json"))
 API = "https://www.marktplaats.nl/lrp/api/search"
-SCANNER_DATA_VERSION = "3"
+SCANNER_DATA_VERSION = "4"
 FEED_SCHEMA_VERSION = 2
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
@@ -70,13 +70,21 @@ def open_db():
     return db
 
 def market_stats(db, qkey, grp, exclude_id, since):
+    """Return exact-comparable count, median and lower quartile."""
     sql = "SELECT price FROM listings WHERE qkey=? AND last_seen>=? AND id!=?"
     args = [qkey, since, exclude_id]
     if grp is not None:
         sql += " AND grp=?"
         args.append(grp)
     prices = [r[0] for r in db.execute(sql, args)]
-    return (len(prices), statistics.median(prices)) if prices else (0, None)
+    if not prices:
+        return 0, None, None
+    median_price = statistics.median(prices)
+    lower_quartile = (
+        statistics.quantiles(prices, n=4, method="inclusive")[0]
+        if len(prices) >= 4 else min(prices)
+    )
+    return len(prices), median_price, lower_quartile
 
 def fetch_marktplaats_v2(cfg, query, pages):
     """Fallback to the documented Marktplaats v2 search endpoint."""
@@ -85,12 +93,13 @@ def fetch_marktplaats_v2(cfg, query, pages):
         params = {
             "query": query, "offset": page * 100, "limit": 100, "locale": "nl-NL",
             "searchDescription": "true",
-            "distance": int(cfg.get("distance_km", 50) * 1000),
-            "sortBy": "default", "sortOrder": "descending",
+            "distance": int(cfg.get("distance_km", 100) * 1000),
+            "sortBy": "price", "sortOrder": "ascending",
         }
         postcode = str(cfg.get("postcode") or "").strip().upper()
-        if re.fullmatch(r"\d{4}[A-Z]{2}", postcode):
-            params["postCode"] = postcode
+        if not re.fullmatch(r"\d{4}[A-Z]{2}", postcode):
+            raise ValueError("Marktplaats API v2 needs a full six-character postcode for radius filtering")
+        params["postCode"] = postcode
         req = urllib.request.Request("https://api.marktplaats.nl/v2/search?" + urllib.parse.urlencode(params), headers=HEADERS)
         with urllib.request.urlopen(req, timeout=25) as response:
             data = json.load(response)
@@ -130,14 +139,32 @@ def fetch_query(cfg, q, pages):
                 if len(items) < 100:
                     break
                 time.sleep(random.uniform(0.6, 1.2))
-            if not result:
+            postcode = str(cfg.get("postcode") or "").strip().upper()
+            valid_full_postcode = bool(re.fullmatch(r"\d{4}[A-Z]{2}", postcode))
+            if not result and valid_full_postcode:
                 result = fetch_marktplaats_v2(cfg, term, term_pages)
-            elif q.get("search_v2"):
-                # Run both search APIs for difficult model-specific searches and merge their hits.
+            elif result and q.get("search_price_sorted"):
+                # Supplement relevance-ranked results with the cheapest local listings.
+                try:
+                    price_params = dict(params)
+                    price_params["sortBy"] = "PRICE"
+                    price_params["sortOrder"] = "INCREASING"
+                    for page in range(term_pages):
+                        price_params["offset"] = page * 100
+                        price_req = urllib.request.Request(API + "?" + urllib.parse.urlencode(price_params), headers=HEADERS)
+                        with urllib.request.urlopen(price_req, timeout=25) as response:
+                            price_data = json.load(response)
+                        price_items = price_data.get("listings") or []
+                        result.extend(price_items)
+                        if len(price_items) < 100:
+                            break
+                except Exception as price_error:
+                    log(f"[{q.get('key', 'search')}] price-sorted search warning for '{term}': {price_error}")
+            if result and q.get("search_v2") and valid_full_postcode:
                 try:
                     result.extend(fetch_marktplaats_v2(cfg, term, term_pages))
                 except Exception as v2_error:
-                    log(f"[{q.get('key', 'search')}] v2 fallback warning for '{term}': {v2_error}")
+                    log(f"[{q.get('key', 'search')}] v2 price search warning for '{term}': {v2_error}")
         except Exception as legacy_error:
             try:
                 result = fetch_marktplaats_v2(cfg, term, term_pages)
@@ -867,7 +894,8 @@ def calculate_resale_economics(q, asking_price, reference_price, sample_count, r
 
 
 def make_feed_deal(q, it, med, discount, flags, grp, status, market_samples, reason=None,
-                   economics=None, reference_type="marktplaats", new_price=None, model_year=None):
+                   economics=None, reference_type="marktplaats", new_price=None, model_year=None,
+                   market_median_price=None):
     confidence = "retail_proxy" if reference_type == "new_retail" else ("high" if market_samples >= q.get("min_samples", 8) else ("preliminary" if med is not None else "none"))
     economics = economics or {}
     return {
@@ -875,6 +903,7 @@ def make_feed_deal(q, it, med, discount, flags, grp, status, market_samples, rea
         "description": it.get("description") or "",
         "price": round(float(it["price"]), 2),
         "market_price": round(float(med), 2) if med is not None else None,
+        "market_median_price": round(float(market_median_price), 2) if market_median_price is not None else None,
         "discount": round(float(discount), 4) if discount is not None else None,
         "expected_resale_price": economics.get("expected_resale_price"),
         "estimated_profit": economics.get("estimated_profit"),
@@ -1052,20 +1081,25 @@ def run_once(cfg, db, dry=False):
         for listing_id, (item, group, flags) in candidates.items():
             metrics["candidates"] += 1
             if group == "unknown":
-                sample_count, median_price = 0, None
+                sample_count, median_price, lower_quartile_price = 0, None, None
             else:
-                sample_count, median_price = market_stats(db, qkey, group, listing_id, window)
+                sample_count, median_price, lower_quartile_price = market_stats(db, qkey, group, listing_id, window)
             strict_comparison = bool(q.get("strict_group") or q.get("group_regex")
                                      or q.get("group_type") in ("model_required", "television"))
             if group != "all" and not strict_comparison and sample_count < min_n:
-                category_count, category_median = market_stats(db, qkey, None, listing_id, window)
+                category_count, category_median, category_lower_quartile = market_stats(db, qkey, None, listing_id, window)
                 if category_count >= min_n and category_median is not None:
-                    sample_count, median_price = category_count, category_median
+                    sample_count, median_price, lower_quartile_price = category_count, category_median, category_lower_quartile
             status, discount, reason = "candidate", None, None
             reference_type = "marktplaats" if median_price is not None else "insufficient_data"
             reference = None
             new_price = None
-            valuation_price = median_price
+            # Verified valuations use the lower quartile of exact matches, not the optimistic median.
+            valuation_price = (
+                lower_quartile_price
+                if sample_count >= min_n and lower_quartile_price is not None
+                else median_price
+            )
             if (sample_count < candidate_min_n or median_price is None) and group != "unknown":
                 reference = find_retail_reference(q, group, retail_references, cfg)
                 if reference:
@@ -1131,7 +1165,8 @@ def run_once(cfg, db, dry=False):
                 db.commit()
             feed_deals[listing_id] = make_feed_deal(
                 q, item, market_display_price, discount, flags, group, status, sample_count, reason,
-                economics=economics, reference_type=reference_type, new_price=new_price, model_year=model_year
+                economics=economics, reference_type=reference_type, new_price=new_price, model_year=model_year,
+                market_median_price=median_price if reference_type == "marktplaats" else None
             )
             if ai_decision:
                 feed_deals[listing_id]["ai_review"] = {
