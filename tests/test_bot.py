@@ -17,7 +17,7 @@ import bot  # noqa: E402
 
 CFG = {
     "postcode": "7671", "distance_km": 50, "pages": 1, "seed_pages": 1, "min_samples": 3,
-    "market_days": 21, "max_age_hours": 36,
+    "market_days": 21, "max_age_hours": 168,
     "queries": [{"key": "ps5", "label": "PlayStation 5", "query": "playstation 5",
                  "include_any": ["ps5"], "min_price": 100, "max_price": 800, "threshold": 0.2}],
 }
@@ -77,6 +77,15 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(bot.load_feed()["deals"], [])
         self.run_scan(first + [listing("c", 400, now)])
         self.assertEqual([d["listing_id"] for d in bot.load_feed()["deals"]], ["99"])
+
+    def test_listing_older_than_36_hours_but_under_7_days_is_eligible(self):
+        posted = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=6)).isoformat()
+        seed = [listing(f"old-{i}", 400, date=posted) for i in range(1, 7)]
+        deal = listing("old-deal", 250, date=posted, title="PS5 met 2 controllers")
+        self.assertTrue(self.run_scan(seed + [deal]))
+        feed = bot.load_feed()
+        self.assertEqual([item["listing_id"] for item in feed["deals"]], ["old-deal"])
+        self.assertEqual(feed["deals"][0]["posted_at"], posted)
 
     def test_model_filters_reject_old_generations(self):
         rayban = {

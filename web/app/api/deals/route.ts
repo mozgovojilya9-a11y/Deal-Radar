@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 const FEED_URL = process.env.DEALS_FEED_URL
   || "https://raw.githubusercontent.com/mozgovojilya9-a11y/Deal-Radar/deals-data/data/deals.json";
-const MAX_FEED_AGE_HOURS = 72;
+const MAX_FEED_AGE_HOURS = 168;
 const MAX_DEALS = 200;
 const REVALIDATE_SECONDS = 60;
 
@@ -25,10 +25,13 @@ function isDeal(value: unknown): value is Deal {
 }
 
 function isRecent(deal: Deal) {
+  const postedAt = deal.posted_at ? new Date(deal.posted_at).getTime() : Number.NaN;
   const detectedAt = new Date(deal.detected_at).getTime();
-  return Number.isFinite(detectedAt)
-    && Date.now() - detectedAt <= MAX_FEED_AGE_HOURS * 60 * 60 * 1000
-    && detectedAt <= Date.now() + 5 * 60 * 1000;
+  // Enforce the 7-day limit against the original listing date, not when our scanner found it.
+  const listingTimestamp = Number.isFinite(postedAt) ? postedAt : detectedAt;
+  return Number.isFinite(listingTimestamp)
+    && Date.now() - listingTimestamp <= MAX_FEED_AGE_HOURS * 60 * 60 * 1000
+    && listingTimestamp <= Date.now() + 5 * 60 * 1000;
 }
 
 export async function GET(request: NextRequest) {

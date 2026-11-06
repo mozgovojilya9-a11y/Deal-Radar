@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Marktplaats deal finder -> Telegram. Only the Python standard library."""
+"""Marktplaats deal scanner -> in-app JSON catalog. Only the Python standard library."""
 import argparse
 import json
 import os
@@ -298,7 +298,7 @@ def run_once(cfg, db, dry=False):
             if age is None and first_run:
                 skipped_age += 1
                 continue
-            if age is not None and age > cfg.get("max_age_hours", 36):
+            if age is not None and age > cfg.get("max_age_hours", 168):
                 skipped_age += 1
                 continue
             if db.execute("SELECT 1 FROM sent WHERE id=?", (it["id"],)).fetchone():
@@ -331,18 +331,17 @@ def run_once(cfg, db, dry=False):
     if fails == len(cfg["queries"]):
         log("все запросы к Marktplaats не удались — каталог не обновлён")
         return False
-    # Keep only recent listings; old offers should not remain in the public feed.
-    cutoff = now - 72 * 3600
+    # Keep listings no older than the configured maximum age.
+    # Prefer the original Marktplaats posted_at timestamp; fall back to detected_at
+    # only for legacy feed entries where the listing date was unavailable.
+    max_age_hours = cfg.get("max_age_hours", 168)
     fresh_deals = []
     for deal in feed_deals.values():
-        try:
-            detected = datetime.fromisoformat(str(deal.get("detected_at", "")).replace("Z", "+00:00"))
-            if detected.tzinfo is None:
-                detected = detected.replace(tzinfo=timezone.utc)
-            if detected.timestamp() >= cutoff:
-                fresh_deals.append(deal)
-        except (TypeError, ValueError):
-            continue
+        listing_age = age_hours(deal.get("posted_at"))
+        if listing_age is None:
+            listing_age = age_hours(deal.get("detected_at"))
+        if listing_age is not None and -5 / 60 <= listing_age <= max_age_hours:
+            fresh_deals.append(deal)
     fresh_deals.sort(key=lambda item: item.get("detected_at") or "", reverse=True)
     fresh_deals = fresh_deals[:200]
     now_iso = datetime.now(timezone.utc).isoformat()

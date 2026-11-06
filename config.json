@@ -1,11 +1,11 @@
 {
   "postcode": "7671",
   "distance_km": 50,
-  "pages": 2,
+  "pages": 5,
   "seed_pages": 5,
   "min_samples": 8,
   "market_days": 21,
-  "max_age_hours": 36,
+  "max_age_hours": 168,
   "queries": [
     {
       "key": "ps5",
