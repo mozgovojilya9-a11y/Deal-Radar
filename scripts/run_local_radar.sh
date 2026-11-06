@@ -20,7 +20,7 @@ if ! ollama list | awk 'NR>1 {print $1}' | grep -Fxq "$OLLAMA_MODEL"; then
 fi
 cd "$ROOT"
 git fetch origin deals-data
-if [ ! -d "$FEED_WORKTREE/.git" ]; then
+if [ ! -e "$FEED_WORKTREE/.git" ]; then
   git worktree add --detach "$FEED_WORKTREE" origin/deals-data
 fi
 git -C "$FEED_WORKTREE" fetch origin deals-data
