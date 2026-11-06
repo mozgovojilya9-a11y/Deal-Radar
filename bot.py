@@ -288,7 +288,6 @@ def run_once(cfg, db, dry=False):
             continue
         total_checked += len(raw)
         new_items = []
-        tracked_updates = []
         for l in raw:
             it = parse_listing(l)
             if not accept(q, it, cfg):
@@ -297,8 +296,6 @@ def run_once(cfg, db, dry=False):
             known = db.execute("SELECT 1 FROM listings WHERE id=?", (it["id"],)).fetchone()
             if known:
                 db.execute("UPDATE listings SET last_seen=?, price=? WHERE id=?", (now, it["price"], it["id"]))
-                if db.execute("SELECT 1 FROM sent WHERE id=?", (it["id"],)).fetchone():
-                    tracked_updates.append(it)
             else:
                 db.execute("INSERT INTO listings VALUES(?,?,?,?,?,?,?)", (it["id"], qkey, grp, it["title"], it["price"], now, now))
                 new_items.append((it, grp))
