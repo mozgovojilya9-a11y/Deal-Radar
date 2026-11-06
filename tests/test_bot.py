@@ -408,12 +408,12 @@ class ScannerTests(unittest.TestCase):
         self.assertFalse(bot.title_matches_query(sony,"Sony camera tas"))
         self.assertTrue(bot.title_matches_query(canon,"Canon EOS R6 Mark II body"))
 
-    def test_global_price_ceiling_is_800_euros(self):
-        q={"min_price":1,"max_price":2000}
-        item={"title":"Sony camera body","id":"x","price":801,"ptype":"FIXED","dist_km":1,"external_link":False}
-        self.assertEqual(bot.primary_rejection(q,item,{"distance_km":50,"max_product_price_eur":800}),"price_range")
-        item["price"]=800
-        self.assertIsNone(bot.primary_rejection(q,item,{"distance_km":50,"max_product_price_eur":800}))
+    def test_global_price_ceiling_is_5000_euros(self):
+        q={"min_price":1,"max_price":5000}
+        item={"title":"Sony camera body","id":"x","price":5001,"ptype":"FIXED","dist_km":1,"external_link":False}
+        self.assertEqual(bot.primary_rejection(q,item,{"distance_km":50,"max_product_price_eur":5000}),"price_range")
+        item["price"]=5000
+        self.assertIsNone(bot.primary_rejection(q,item,{"distance_km":50,"max_product_price_eur":5000}))
 
     def test_rayban_gen2_accepts_wayfarer_and_rw4012_variants(self):
         with open(os.path.join(ROOT,"config.json"),encoding="utf-8") as handle: config=json.load(handle)
