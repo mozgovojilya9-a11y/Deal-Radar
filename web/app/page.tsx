@@ -55,6 +55,40 @@ const CATEGORIES = [
   { key: "bag-eastpak", label: "Eastpak", icon: "▱" }
 ];
 
+const CATEGORY_GROUPS: { title: string; icon: string; test: (key: string) => boolean }[] = [
+  { title: "Телефоны", icon: "📱", test: (k) => k.startsWith("iphone") },
+  { title: "Игровые консоли", icon: "🎮", test: (k) => /^ps\d/.test(k) },
+  { title: "Наушники", icon: "🎧", test: (k) => k.startsWith("headphones") || k.startsWith("airpods") },
+  { title: "Микрофоны", icon: "🎙️", test: (k) => k.startsWith("microphone") },
+  { title: "Камеры", icon: "📷", test: (k) => k.startsWith("camera") || k.startsWith("action-camera") },
+  { title: "Техника", icon: "📺", test: (k) => k === "televisions" || k === "drones" },
+  { title: "Часы", icon: "⌚", test: (k) => k.startsWith("watch") },
+  { title: "Сумки и рюкзаки", icon: "🎒", test: (k) => k.startsWith("bag") || k.startsWith("backpack") },
+  { title: "Очки", icon: "🕶️", test: (k) => k === "rayban" },
+  { title: "Другое", icon: "🛍️", test: () => true }
+];
+function groupOf(key: string) {
+  return (CATEGORY_GROUPS.find((group) => group.test(key)) ?? CATEGORY_GROUPS[CATEGORY_GROUPS.length - 1]).title;
+}
+const GROUPED_CATEGORIES = CATEGORY_GROUPS
+  .map((group) => ({ ...group, items: CATEGORIES.filter((item) => item.key && groupOf(item.key) === group.title) }))
+  .filter((group) => group.items.length);
+const DISTANCE_STEPS = [null, 10, 25, 50, 100];
+function finds(n: number) {
+  const m = n % 10, h = n % 100;
+  return h >= 11 && h <= 14 ? "находок" : m === 1 ? "находка" : m >= 2 && m <= 4 ? "находки" : "находок";
+}
+const ICONS = {
+  home: "M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
+  grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+  chart: "M4 20V10M10 20V4M16 20v-7M22 20H2",
+  heart: "M12 21s-8-5.3-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.7-8 11-8 11z",
+  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0"
+};
+function Icon({ name }: { name: keyof typeof ICONS }) {
+  return <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={ICONS[name]} /></svg>;
+}
+
 function euro(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
   return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number(value));
@@ -107,7 +141,7 @@ function DealCard({ deal, saved, onSave, onOpen }: {
   const good = deal.status === "good";
   const hasEstimate = deal.market_price !== null && deal.market_price !== undefined;
   const discount = deal.discount == null ? null : Math.max(0, Math.round(Number(deal.discount) * 100));
-  const statusLabel = candidate ? "ПРОВЕРКА" : good ? "ХОРОШАЯ ЦЕНА" : "СИЛЬНАЯ ВЫГОДА";
+  const statusLabel = candidate ? "Нужно проверить" : good ? "Хорошая цена" : "Очень выгодно";
   return (
     <article className={"deal-card" + (candidate ? " candidate-card" : "") + (good ? " good-card" : "")}>
       <button className="image-button" onClick={onOpen} aria-label={"Открыть " + deal.title}>
@@ -142,7 +176,7 @@ function DealCard({ deal, saved, onSave, onOpen }: {
         ) : <p className="candidate-explanation">{deal.evaluation_reason || "Недостаточно похожих объявлений для подтверждения рыночной цены."}</p>}
         <div className="card-footer">
           <span className="location">⌖ {deal.city || "Нидерланды"}{deal.distance_km != null ? <b className="distance"> · {Math.round(deal.distance_km)} км</b> : null}</span>
-          <button className={"save-button" + (saved ? " active" : "")} onClick={onSave} aria-label="В избранное">{saved ? "♥" : "♡"}</button>
+          <button className={"save-button" + (saved ? " active" : "")} onClick={onSave} aria-label={saved ? "Убрать из избранного" : "В избранное"}>{saved ? "♥" : "♡"}</button>
         </div>
         <a className="card-link" href={deal.listing_url} target="_blank" rel="noopener noreferrer">Открыть на Marktplaats <span>↗</span></a>
       </div>
@@ -165,9 +199,9 @@ export default function HomePage() {
   const [scannerStats, setScannerStats] = useState<ScannerStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const requestId = useRef(0);
+  const [catQuery, setCatQuery] = useState("");
+  const [catGroup, setCatGroup] = useState<string | null>(null);
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
-  const [settingsDraft, setSettingsDraft] = useState<UserSettings>(DEFAULT_SETTINGS);
-  const [settingsMessage, setSettingsMessage] = useState("");
 
   useEffect(() => {
     try {
@@ -182,7 +216,6 @@ export default function HomePage() {
       if (storedSettings && typeof storedSettings === "object") {
         const next = readSettings(storedSettings);
         setSettings(next);
-        setSettingsDraft(next);
       }
     } catch {
       try { localStorage.removeItem(SETTINGS_KEY); } catch { /* storage unavailable */ }
@@ -214,7 +247,6 @@ export default function HomePage() {
     if (silent) setRefreshing(true); else setLoading(true);
     try {
       const params = new URLSearchParams({ sort });
-      if (category) params.set("category", category);
       const response = await fetch("/api/deals?" + params.toString(), { cache: "no-store" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Не удалось загрузить предложения");
@@ -229,7 +261,7 @@ export default function HomePage() {
     } finally {
       if (id === requestId.current) { setLoading(false); setRefreshing(false); }
     }
-  }, [category, sort]);
+  }, [sort]);
 
   useEffect(() => {
     void loadDeals();
@@ -239,20 +271,49 @@ export default function HomePage() {
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
   }, [loadDeals]);
 
-  const filtered = useMemo(() => {
+  const base = useMemo(() => {
     let result = deals;
-    if (tab === "saved") result = result.filter((deal) => saved.includes(deal.listing_id));
     if (settings.categories.length) result = result.filter((deal) => settings.categories.includes(deal.category_key));
     if (settings.minDiscount > 0) result = result.filter((deal) => deal.discount == null || Number(deal.discount) * 100 >= settings.minDiscount);
     if (settings.maxDistanceKm !== null) result = result.filter((deal) => deal.distance_km === null || Number(deal.distance_km) <= settings.maxDistanceKm!);
     if (settings.minPrice !== null) result = result.filter((deal) => Number(deal.price) >= settings.minPrice!);
     if (settings.maxPrice !== null) result = result.filter((deal) => Number(deal.price) <= settings.maxPrice!);
+    return result;
+  }, [deals, settings]);
+
+  const filtered = useMemo(() => {
+    let result = base;
+    if (category.startsWith("group:")) result = result.filter((deal) => groupOf(deal.category_key) === category.slice(6));
+    else if (category) result = result.filter((deal) => deal.category_key === category);
     if (search.trim()) {
       const term = search.trim().toLocaleLowerCase();
       result = result.filter((deal) => (deal.title + " " + (deal.description || "")).toLocaleLowerCase().includes(term));
     }
     return result;
-  }, [deals, saved, search, tab, settings]);
+  }, [base, category, search]);
+
+  const savedDeals = useMemo(() => deals.filter((deal) => saved.includes(deal.listing_id)), [deals, saved]);
+  const missingSaved = updatedAt && !error ? saved.length - savedDeals.length : 0;
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    base.forEach((deal) => { counts[deal.category_key] = (counts[deal.category_key] || 0) + 1; });
+    return counts;
+  }, [base]);
+  const groupStats = useMemo(() => GROUPED_CATEGORIES.map((group) => {
+    const keys = new Set(group.items.map((item) => item.key));
+    const list = base.filter((deal) => keys.has(deal.category_key));
+    const best = list.reduce((top, deal) => Math.max(top, Math.round(Number(deal.discount || 0) * 100)), 0);
+    return { ...group, count: list.length, best };
+  }), [base]);
+  const openGroup = groupStats.find((group) => group.title === catGroup) ?? null;
+  const catMatches = useMemo(() => {
+    const term = catQuery.trim().toLocaleLowerCase();
+    return term ? CATEGORIES.filter((item) => item.key && (item.label + " " + groupOf(item.key)).toLocaleLowerCase().includes(term)) : [];
+  }, [catQuery]);
+  const bestDiscount = base.reduce((top, deal) => Math.max(top, Math.round(Number(deal.discount || 0) * 100)), 0);
+  const settingsCount = (settings.minDiscount > 0 ? 1 : 0) + (settings.minPrice !== null ? 1 : 0) + (settings.maxPrice !== null ? 1 : 0)
+    + (settings.maxDistanceKm !== null ? 1 : 0) + (settings.categories.length ? 1 : 0);
+  function pickCategory(key: string) { setCategory(key); setTab("home"); window.scrollTo({ top: 0 }); }
 
   const strongDeals = useMemo(() => filtered.filter((deal) => !deal.status || deal.status === "strong"), [filtered]);
   const goodDeals = useMemo(() => filtered.filter((deal) => deal.status === "good"), [filtered]);
@@ -267,20 +328,20 @@ export default function HomePage() {
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred("light");
   }
 
-  function persistSettings(next: UserSettings) {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+  function clearUnavailableSaved() {
+    const alive = new Set(deals.map((deal) => deal.listing_id));
+    const next = saved.filter((id) => alive.has(id));
+    setSaved(next);
+    try { localStorage.setItem("deal-radar-favorites", JSON.stringify(next)); } catch { /* storage unavailable */ }
   }
 
-  function saveSettings() {
-    setSettings(settingsDraft);
-    persistSettings(settingsDraft);
-    setSettingsMessage("Настройки сохранены на этом устройстве");
+  function persistSettings(next: UserSettings) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
   }
 
   function updateFilters(patch: Partial<UserSettings>) {
     const next = { ...settings, ...patch };
     setSettings(next);
-    setSettingsDraft((old) => ({ ...old, ...patch }));
     persistSettings(next);
   }
 
@@ -294,7 +355,7 @@ export default function HomePage() {
   }
 
   const strongest = deals.length ? Math.max(...deals.map((deal) => Number(deal.discount) || 0)) : 0;
-  const activeCategory = CATEGORIES.find((item) => item.key === category)?.label || "Все категории";
+  const activeCategory = category.startsWith("group:") ? category.slice(6) : CATEGORIES.find((item) => item.key === category)?.label || "Все категории";
 
   return (
     <main className="app-shell">
@@ -310,13 +371,14 @@ export default function HomePage() {
         </div>
         <div className="top-user">
           <span className="live-dot" />
-          {profile ? <span>{profile.firstName || "Пользователь"}</span> : <span>LIVE SCAN</span>}
+          {profile ? <span>{profile.firstName || "Пользователь"}</span> : <span>Радар включён</span>}
         </div>
       </header>
 
-      <section className={"hero" + (tab === "home" ? "" : " hero-compact")}>
+      {tab === "home" ? (
+      <section className="hero">
         <div className="hero-copy">
-          <div className="eyebrow"><span className="eyebrow-line" /> RADAR IS ACTIVE</div>
+          <div className="eyebrow"><span className="eyebrow-line" /> Радар работает</div>
           <h1>Лови цену.<br /><em>Не переплачивай.</em></h1>
           <p>Находим объявления Marktplaats ниже рыночной цены и показываем, где действительно есть выгода.</p>
           <div className="hero-actions">
@@ -337,18 +399,21 @@ export default function HomePage() {
           <div className="radar-node node-c">−42%</div>
         </div>
       </section>
+      ) : null}
 
+      {tab === "analytics" ? (
       <section className="stats-grid scanner-overview">
         <div className="stat-card"><span className="stat-label">Результатов поиска</span><strong>{scannerStats ? scannerStats.checked.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">включая совпадения между запросами</span></div>
         <div className="stat-card accent-stat"><span className="stat-label">Уникальных объявлений</span><strong>{scannerStats?.unique != null ? scannerStats.unique.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">по ID Marktplaats</span></div>
         <div className="stat-card"><span className="stat-label">Повторных совпадений</span><strong>{scannerStats?.duplicates != null ? scannerStats.duplicates.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">одно объявление найдено в нескольких запросах</span></div>
         <div className="stat-card"><span className="stat-label">В каталоге</span><strong>{deals.length}</strong><span className="stat-caption">выгодные предложения и кандидаты</span></div>
       </section>
+      ) : null}
 
       {tab === "analytics" ? (
         <section className="content-section analytics-section">
           <div className="section-heading">
-            <div><div className="eyebrow">SCANNER PERFORMANCE</div><h2>Аналитика сканера</h2><p>Результаты последнего запуска Marktplaats scanner</p></div>
+            <div><div className="eyebrow">Как работает сканер</div><h2>Аналитика сканера</h2><p>Результаты последнего запуска Marktplaats scanner</p></div>
             <span className="scanner-live"><i /> {scannerStats ? "Данные получены" : "Ожидаем первый отчёт"}</span>
           </div>
           <div className="analytics-summary">
@@ -362,7 +427,7 @@ export default function HomePage() {
             <div className="analytics-card"><span>Ошибки поисковых запросов</span><strong>{scannerStats ? scannerStats.failedQueries + " / " + scannerStats.queryCount : "—"}</strong><small>ошибившиеся запросы из общего числа</small></div>
           </div>
           <div className="rejection-panel">
-            <div className="rejection-heading"><div><div className="eyebrow">FILTER BREAKDOWN</div><h3>Почему объявления отсеялись</h3></div><strong>{scannerStats ? scannerStats.rejectedTotal.toLocaleString("ru-RU") : "—"} <small>всего</small></strong></div>
+            <div className="rejection-heading"><div><div className="eyebrow">Почему объявления отсеиваются</div><h3>Почему объявления отсеялись</h3></div><strong>{scannerStats ? scannerStats.rejectedTotal.toLocaleString("ru-RU") : "—"} <small>всего</small></strong></div>
             {[
               { label: "Не подошли по названию / модели", value: scannerStats?.rejectedTitle ?? 0, color: "age" },
               { label: "В объявлении есть внешний сайт", value: scannerStats?.rejectedExternalLink ?? 0, color: "risk" },
@@ -384,27 +449,81 @@ export default function HomePage() {
       ) : null}
 
       {tab === "categories" ? (
-        <section className="content-section categories-section">
-          <div className="section-heading"><div><div className="eyebrow">BROWSE BY CATEGORY</div><h2>Категории товаров</h2><p>Выбери категорию, чтобы посмотреть подходящие предложения</p></div><span className="category-total">{deals.length} в каталоге</span></div>
-          <div className="category-browser">
-            <button className={"category-tile all-category" + (!category ? " selected" : "")} onClick={() => { setCategory(""); setTab("home"); }}><span className="category-symbol">✦</span><span><strong>Все категории</strong><small>{deals.length} предложений</small></span><b>↗</b></button>
-            {CATEGORIES.filter((item) => item.key).map((item) => {
-              const count = deals.filter((deal) => deal.category_key === item.key).length;
-              return <button className="category-tile" key={item.key} onClick={() => { setCategory(item.key); setTab("home"); }}><span className="category-symbol">{item.icon}</span><span><strong>{item.label}</strong><small>{count} {count === 1 ? "предложение" : "предложений"}</small></span><b>↗</b></button>;
-            })}
-          </div>
+        <section className="content-section v2-section">
+          {openGroup && !catQuery.trim() ? (
+            <>
+              <button type="button" className="cg-back" onClick={() => setCatGroup(null)}>← Все категории</button>
+              <div className="v2-head"><h2><span aria-hidden="true">{openGroup.icon}</span> {openGroup.title}</h2><p>{openGroup.count ? openGroup.count + " " + finds(openGroup.count) + " сейчас" : "Находок пока нет, сканер продолжает поиск"}</p></div>
+              <button type="button" className="v2-all" onClick={() => pickCategory("group:" + openGroup.title)}><strong>Показать всё: {openGroup.title}</strong><span>{openGroup.count}</span></button>
+              <div className="cg-list">
+                {[...openGroup.items].sort((a, b) => (categoryCounts[b.key] || 0) - (categoryCounts[a.key] || 0)).map((item) => {
+                  const count = categoryCounts[item.key] || 0;
+                  return <button type="button" key={item.key} className={"cg-row" + (count ? "" : " empty") + (category === item.key ? " on" : "")} onClick={() => pickCategory(item.key)}><span>{item.label}</span><b>{count ? count + " " + finds(count) : "нет находок"}</b><i aria-hidden="true">›</i></button>;
+                })}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="v2-head"><h2>Что ищем?</h2><p>Выберите группу товаров, потом конкретный бренд или модель.</p></div>
+              <label className="search-box"><span aria-hidden="true">⌕</span><input value={catQuery} onChange={(event) => setCatQuery(event.target.value)} placeholder="Например: iPhone, Sony, часы" aria-label="Поиск по категориям" /></label>
+              {catQuery.trim() ? (
+                catMatches.length ? (
+                  <div className="cg-list">{catMatches.map((item) => {
+                    const count = categoryCounts[item.key] || 0;
+                    return <button type="button" key={item.key} className={"cg-row" + (count ? "" : " empty")} onClick={() => pickCategory(item.key)}><span>{item.label}<small>{groupOf(item.key)}</small></span><b>{count ? count + " " + finds(count) : "нет находок"}</b><i aria-hidden="true">›</i></button>;
+                  })}</div>
+                ) : <div className="state-panel"><h3>Ничего не нашли</h3><p>Попробуйте другое слово или очистите поиск.</p><button className="secondary-button" onClick={() => setCatQuery("")}>Очистить поиск</button></div>
+              ) : (
+                <>
+                  <button type="button" className={"v2-all" + (!category ? " on" : "")} onClick={() => pickCategory("")}><strong>Показать все находки</strong><span>{base.length}</span></button>
+                  <div className="cg-grid">
+                    {groupStats.map((group) => (
+                      <button type="button" key={group.title} className={"cg-card" + (group.count ? "" : " empty")} onClick={() => setCatGroup(group.title)}>
+                        <span className="cg-ico" aria-hidden="true">{group.icon}</span>
+                        <strong>{group.title}</strong>
+                        <small>{group.count ? group.count + " " + finds(group.count) : "пока пусто"}</small>
+                        {group.best ? <em>до −{group.best}%</em> : null}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </section>
       ) : null}
 
-      {(tab === "home" || tab === "saved") ? (
+      {tab === "saved" ? (
+        <section className="content-section v2-section" id="deals">
+          <div className="v2-head"><h2>Избранное<span className="heading-count">{savedDeals.length}</span></h2><p>Нажимайте ♡ на карточке, чтобы сохранить объявление. Оно будет ждать вас здесь.</p></div>
+          {missingSaved > 0 ? <div className="v2-note"><span>{missingSaved} {missingSaved === 1 ? "сохранённого объявления" : "сохранённых объявлений"} больше нет в ленте. Возможно, товар уже продали.</span><button type="button" onClick={clearUnavailableSaved}>Убрать из списка</button></div> : null}
+          {error && deals.length === 0 ? (
+            <div className="state-panel error-panel"><h3>Не удалось загрузить объявления</h3><p>{error}</p><button className="secondary-button" onClick={() => void loadDeals()}>Попробовать снова</button></div>
+          ) : loading && savedDeals.length === 0 ? (
+            <div className="deal-grid">{Array.from({ length: 3 }).map((_, index) => <div className="skeleton-card" key={index}><div /><span /><span /><span /></div>)}</div>
+          ) : savedDeals.length === 0 ? (
+            <div className="state-panel"><div className="state-icon">♡</div><h3>{saved.length ? "Сохранённых объявлений больше нет в ленте" : "Пока ничего не сохранено"}</h3><p>{saved.length ? "Их могли продать или снять. Посмотрите свежие находки." : "Откройте любое объявление и нажмите ♡. Оно появится здесь."}</p><button className="secondary-button" onClick={() => setTab("home")}>Смотреть находки</button></div>
+          ) : (
+            <div className="deal-grid">{savedDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div>
+          )}
+        </section>
+      ) : null}
+
+      {tab === "home" ? (
       <section className="content-section" id="deals">
         <div className="section-heading">
           <div>
-            <div className="eyebrow">CURATED DEALS</div>
-            <h2>{tab === "saved" ? "Избранное" : "Свежие находки"}<span className="heading-count">{filtered.length}</span></h2>
-            <p>{tab === "saved" ? "Сохранённые тобой объявления" : "Только то, что прошло проверку выгодности"}</p>
+            
+            <h2>Свежие находки<span className="heading-count">{filtered.length}</span></h2>
+            <p>Только то, что прошло проверку выгодности</p>
           </div>
           <button className="refresh-button" onClick={() => void loadDeals(true)} disabled={loading || refreshing}><span className={loading || refreshing ? "spin" : ""}>↻</span> Обновить</button>
+        </div>
+
+        <div className="summary-strip">
+          <span><strong>{base.length}</strong> {finds(base.length)}</span>
+          {bestDiscount ? <span>лучшая скидка <strong>−{bestDiscount}%</strong></span> : null}
+          {updatedAt ? <span>обновлено {dateLabel(updatedAt)}</span> : null}
         </div>
 
         <div className="toolbar">
@@ -412,14 +531,14 @@ export default function HomePage() {
           <label className="sort-select"><span>Сортировка</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="profit">По прибыли</option><option value="discount">По скидке</option><option value="newest">Сначала новые</option><option value="price">Сначала дешевле</option></select></label>
         </div>
 
-        <div className="category-strip">
-          {CATEGORIES.map((item) => (
-            <button key={item.key || "all"} className={"category-chip" + (category === item.key ? " selected" : "")} onClick={() => { setCategory(item.key); setTab("home"); }}>
-              <span>{item.icon}</span>{item.label}
-            </button>
-          ))}
+        <div className="cat-bar">
+          <span>Категория</span>
+          <button type="button" className="cat-pick" onClick={() => setTab("categories")}><strong>{activeCategory}</strong><i>Выбрать</i></button>
+          {category ? <button type="button" className="cat-clear" onClick={() => setCategory("")} aria-label="Сбросить категорию">✕</button> : null}
         </div>
 
+        <details className="filters-fold">
+          <summary>Фильтры по цене и скидке{settingsCount ? <b>{settingsCount}</b> : null}</summary>
         <div className="filter-panel" role="group" aria-label="Фильтры по цене и скидке">
           <div className="filter-group">
             <span className="filter-label">Цена, €</span>
@@ -439,6 +558,7 @@ export default function HomePage() {
           </div>
           {activeFilters ? <button type="button" className="reset-filters" onClick={resetFilters}>Сбросить · {activeFilters}</button> : null}
         </div>
+        </details>
 
         {error && deals.length === 0 ? (
           <div className="state-panel error-panel"><div className="state-icon">!</div><h3>Лента пока не подключена</h3><p>{error}</p>
@@ -449,28 +569,64 @@ export default function HomePage() {
           <div className="deal-grid">{Array.from({ length: 6 }).map((_, index) => <div className="skeleton-card" key={index}><div /><span /><span /><span /></div>)}</div>
         ) : filtered.length === 0 ? (
           <div className="state-panel"><div className="state-icon">⌁</div>
-            <h3>{tab === "saved" ? "Пока ничего не сохранено" : "Пока нет подходящих предложений"}</h3>
-            <p>{tab === "saved" ? "Нажимай на сердечко в карточке, чтобы сохранить товар." : "Сканер продолжает искать хорошие цены. Подходящие объявления появятся здесь после проверки."}</p>
-            {tab === "saved" ? <button className="secondary-button" onClick={() => setTab("home")}>К предложениям</button> : null}
-            {tab !== "saved" && activeFilters ? <button className="secondary-button" onClick={resetFilters}>Сбросить фильтры</button> : null}
+            <h3>Пока нет подходящих предложений</h3>
+            <p>Сканер продолжает искать хорошие цены. Подходящие объявления появятся здесь после проверки.</p>
+            {activeFilters ? <button className="secondary-button" onClick={resetFilters}>Сбросить фильтры</button> : null}
           </div>
-        ) : tab === "saved" ? (
-          <div className="deal-grid">{filtered.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div>
         ) : (
           <div className="deal-tiers">
-            <section className="deal-tier strong-tier"><div className="tier-heading"><div><div className="eyebrow">TOP OPPORTUNITIES</div><h3>Самые выгодные <span>{strongDeals.length}</span></h3><p>Лучшее подтверждённое соотношение цены и рынка</p></div></div>
+            <section className="deal-tier strong-tier"><div className="tier-heading"><div><div className="eyebrow">Лучшее</div><h3>Самые выгодные <span>{strongDeals.length}</span></h3><p>Лучшее подтверждённое соотношение цены и рынка</p></div></div>
               {strongDeals.length ? <div className="deal-grid">{strongDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div> : <p className="tier-empty">Пока нет сделок, которые прошли полный порог проверки.</p>}
             </section>
-            <section className="deal-tier good-tier"><div className="tier-heading"><div><div className="eyebrow">GOOD VALUE</div><h3>Тоже хорошие предложения <span>{goodDeals.length}</span></h3><p>Скидка ниже максимального порога, но цена всё ещё привлекательная</p></div></div>
+            <section className="deal-tier good-tier"><div className="tier-heading"><div><div className="eyebrow">Хорошая цена</div><h3>Тоже хорошие предложения <span>{goodDeals.length}</span></h3><p>Скидка ниже максимального порога, но цена всё ещё привлекательная</p></div></div>
               {goodDeals.length ? <div className="deal-grid">{goodDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div> : <p className="tier-empty">В этом проходе не нашлось предложений в среднем диапазоне выгоды.</p>}
             </section>
-            <section className="deal-tier review-tier"><div className="tier-heading"><div><div className="eyebrow">NEEDS A SECOND LOOK</div><h3>Кандидаты на проверку <span>{reviewDeals.length}</span></h3><p>Не скрываем из-за нехватки сравнений. Скидка здесь не подтверждена.</p></div></div>
+            <section className="deal-tier review-tier"><div className="tier-heading"><div><div className="eyebrow">Требует проверки</div><h3>Кандидаты на проверку <span>{reviewDeals.length}</span></h3><p>Не скрываем из-за нехватки сравнений. Скидка здесь не подтверждена.</p></div></div>
               {reviewDeals.length ? <div className="deal-grid">{reviewDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div> : <p className="tier-empty">Кандидатов пока нет.</p>}
             </section>
           </div>
         )}
       </section>
 
+      ) : null}
+
+      {tab === "profile" ? (
+        <section className="content-section v2-section" aria-label="Профиль и фильтры">
+          <div className="v2-me">
+            <div className="v2-ava" aria-hidden="true">{(profile?.firstName || "D").slice(0, 1).toUpperCase()}</div>
+            <div><strong>{profile ? profile.firstName + (profile.lastName ? " " + profile.lastName : "") : "Гость"}</strong><span>{profile?.username ? "@" + profile.username : profile ? "Вход через Telegram выполнен" : "Откройте приложение из Telegram, чтобы увидеть своё имя"}</span></div>
+          </div>
+          <div className="v2-card">
+            <div className="v2-card-head"><h3>Мои фильтры</h3>{settingsCount ? <button type="button" className="v2-link" onClick={() => updateFilters({ ...DEFAULT_SETTINGS })}>Сбросить ({settingsCount})</button> : null}</div>
+            <p className="v2-hint">Изменения применяются сразу, сохранять ничего не нужно.</p>
+            <div className="v2-field"><span>Минимальная скидка</span>
+              <div className="discount-steps">{DISCOUNT_STEPS.map((step) => <button type="button" key={step} className={"discount-chip" + (settings.minDiscount === step ? " selected" : "")} onClick={() => updateFilters({ minDiscount: step })}>{step === 0 ? "Любая" : "от " + step + "%"}</button>)}</div>
+            </div>
+            <div className="v2-field"><span>Расстояние до товара</span>
+              <div className="discount-steps">{DISTANCE_STEPS.map((km) => <button type="button" key={km ?? "any"} className={"discount-chip" + (settings.maxDistanceKm === km ? " selected" : "")} onClick={() => updateFilters({ maxDistanceKm: km })}>{km === null ? "Любое" : "до " + km + " км"}</button>)}</div>
+            </div>
+            <div className="v2-field"><span>Цена, €</span>
+              <div className="price-range">
+                <input type="number" inputMode="numeric" min="0" placeholder="от" aria-label="Минимальная цена" value={settings.minPrice ?? ""} onChange={(event) => updateFilters({ minPrice: priceValue(event.target.value) })} />
+                <i>—</i>
+                <input type="number" inputMode="numeric" min="0" placeholder="до" aria-label="Максимальная цена" value={settings.maxPrice ?? ""} onChange={(event) => updateFilters({ maxPrice: priceValue(event.target.value) })} />
+              </div>
+            </div>
+            <details className="v2-cats">
+              <summary>Только некоторые категории<b>{settings.categories.length ? "Выбрано: " + settings.categories.length : "Все категории"}</b></summary>
+              <p className="v2-hint">Отметьте то, что вам интересно. Если ничего не выбрано, показываем всё.</p>
+              {GROUPED_CATEGORIES.map((group) => (
+                <div className="v2-pick" key={group.title}>
+                  <span>{group.icon} {group.title}</span>
+                  <div>{group.items.map((item) => <button type="button" key={item.key} aria-pressed={settings.categories.includes(item.key)} className={"preference-chip" + (settings.categories.includes(item.key) ? " active" : "")} onClick={() => updateFilters({ categories: settings.categories.includes(item.key) ? settings.categories.filter((key) => key !== item.key) : [...settings.categories, item.key] })}>{item.label}</button>)}</div>
+                </div>
+              ))}
+            </details>
+          </div>
+          <div className="v2-result"><span><strong>{base.length}</strong> {finds(base.length)} подходит под ваши фильтры</span><button type="button" className="primary-button" onClick={() => pickCategory("")}>Показать</button></div>
+          <button type="button" className="v2-row" onClick={() => setTab("saved")}><span>Избранное</span><b>{saved.length ? saved.length : "пусто"}</b></button>
+          <p className="v2-hint">Избранное и фильтры хранятся только на этом устройстве. Район поиска задан в самом сервисе, здесь можно только сузить выдачу.</p>
+        </section>
       ) : null}
 
       <footer className="app-footer">
@@ -480,33 +636,12 @@ export default function HomePage() {
       </footer>
 
       <nav className="bottom-nav" aria-label="Основная навигация">
-        <button className={tab === "home" ? "nav-active" : ""} onClick={() => setTab("home")}><span>⌂</span>Главная</button>
-        <button className={tab === "categories" ? "nav-active" : ""} onClick={() => setTab("categories")}><span>▦</span>Категории</button>
-        <button className={tab === "analytics" ? "nav-active" : ""} onClick={() => setTab("analytics")}><span>▥</span>Аналитика</button>
-        <button className={tab === "saved" ? "nav-active" : ""} onClick={() => setTab("saved")}><span>♡</span>Избранное{saved.length ? <i>{saved.length}</i> : null}</button>
-        <button className={tab === "profile" ? "nav-active" : ""} onClick={() => setTab("profile")}><span>◉</span>Профиль</button>
+        <button className={tab === "home" ? "nav-active" : ""} onClick={() => setTab("home")}><Icon name="home" />Главная</button>
+        <button className={tab === "categories" ? "nav-active" : ""} onClick={() => setTab("categories")}><Icon name="grid" />Категории</button>
+        <button className={tab === "analytics" ? "nav-active" : ""} onClick={() => setTab("analytics")}><Icon name="chart" />Аналитика</button>
+        <button className={tab === "saved" ? "nav-active" : ""} onClick={() => setTab("saved")}><Icon name="heart" />Избранное{saved.length ? <i>{saved.length}</i> : null}</button>
+        <button className={tab === "profile" ? "nav-active" : ""} onClick={() => setTab("profile")}><Icon name="user" />Профиль</button>
       </nav>
-
-      {tab === "profile" ? (
-        <div className="profile-toast settings-panel" role="region" aria-label="Настройки Deal Radar">
-          <div className="settings-head"><div><strong>{profile ? profile.firstName + (profile.lastName ? " " + profile.lastName : "") : "Гость Deal Radar"}</strong><span>{profile?.username ? "@" + profile.username : profile ? "Telegram подтверждён" : "Откройте приложение из Telegram"}</span></div><button onClick={() => setTab("home")}>×</button></div>
-          <label className="settings-field">Минимальная скидка: <b>{settingsDraft.minDiscount}%</b>
-            <input type="range" min="0" max="70" step="5" value={settingsDraft.minDiscount} onChange={(event) => setSettingsDraft((old) => ({ ...old, minDiscount: Number(event.target.value) }))} />
-          </label>
-          <label className="settings-field">Максимальное расстояние
-            <select value={settingsDraft.maxDistanceKm ?? 0} onChange={(event) => setSettingsDraft((old) => ({ ...old, maxDistanceKm: Number(event.target.value) || null }))}>
-              <option value="0">Без ограничения</option><option value="10">10 км</option><option value="25">25 км</option><option value="50">50 км</option><option value="100">100 км</option><option value="150">150 км</option>
-            </select>
-          </label>
-          <div className="settings-field">Категории <span className="settings-hint">Пустой выбор = все категории</span>
-            <div className="settings-category-grid">
-              {CATEGORIES.filter((item) => item.key).map((item) => <button type="button" key={item.key} className={settingsDraft.categories.includes(item.key) ? "preference-chip active" : "preference-chip"} onClick={() => setSettingsDraft((old) => ({ ...old, categories: old.categories.includes(item.key) ? old.categories.filter((key) => key !== item.key) : [...old.categories, item.key] }))}>{item.label}</button>)}
-            </div>
-          </div>
-          <div className="settings-actions"><span>{settingsMessage}</span><button className="secondary-button" onClick={saveSettings}>Сохранить настройки</button></div>
-          <p className="settings-note">Эти фильтры влияют на ленту приложения. Базовый регион и радиус сканера задаются в config.json.</p>
-        </div>
-      ) : null}
 
       {selected ? (
         <div className="modal-backdrop" onClick={() => setSelected(null)}>
