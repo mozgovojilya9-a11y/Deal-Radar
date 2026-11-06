@@ -242,6 +242,43 @@ class ScannerTests(unittest.TestCase):
         ):
             self.assertFalse(bot.title_matches_query(ps5, title), title)
 
+    def test_ai_search_variants_are_anchored_to_target_product(self):
+        q = {
+            "key": "rayban", "query": "ray-ban meta wayfarer",
+            "include_any": ["ray-ban", "rayban", "wayfarer", "rw4012"],
+            "search_variants": ["ray-ban meta wayfarer gen 2", "RW4012"],
+        }
+        values = [
+            "Ray-Ban Meta Wayfarer RW4012",
+            "Meta Wayfarer Gen 1",
+            "Sony camera second hand",
+            "site:marktplaats.nl ray-ban",
+            "Ray Ban Meta Wayfarer",
+        ]
+        self.assertEqual(
+            bot.clean_ai_search_variants(q, values),
+            ["Ray-Ban Meta Wayfarer RW4012", "Ray Ban Meta Wayfarer"],
+        )
+
+    def test_ai_search_plan_is_cached_for_seven_days(self):
+        q = {
+            "key": "rayban", "query": "ray-ban meta wayfarer", "label": "Ray-Ban Meta Wayfarer",
+            "include_any": ["ray-ban", "rayban", "wayfarer", "rw4012"],
+            "search_variants": ["ray-ban meta wayfarer gen 2"],
+            "ai_discovery": True,
+        }
+        db = bot.open_db()
+        try:
+            with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
+                with mock.patch.object(bot, "request_ai_search_plan", return_value=["Ray-Ban Meta Wayfarer RW4012"]) as planner:
+                    first = bot.get_ai_search_variants(db, q)
+                    second = bot.get_ai_search_variants(db, q)
+            self.assertEqual(first, ["Ray-Ban Meta Wayfarer RW4012"])
+            self.assertEqual(second, first)
+            planner.assert_called_once()
+        finally:
+            db.close()
+
     def test_ai_cannot_rescue_a_zero_price_listing(self):
         now = datetime.now(timezone.utc).isoformat()
         free_item = listing("free-item", 0, now, title="Unrelated Bluetooth speaker")
