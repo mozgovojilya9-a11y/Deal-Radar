@@ -20,7 +20,7 @@ CFG = {
     "postcode": "7671", "distance_km": 50, "pages": 1, "seed_pages": 1, "min_samples": 3,
     "market_days": 21, "max_age_hours": 720,
     "queries": [{"key": "ps5", "label": "PlayStation 5", "query": "playstation 5",
-                 "include_any": ["ps5"], "min_price": 100, "max_price": 800, "threshold": 0.2}],
+                 "include_any": ["ps5"], "min_price": 100, "threshold": 0.2}],
 }
 
 
@@ -408,12 +408,10 @@ class ScannerTests(unittest.TestCase):
         self.assertFalse(bot.title_matches_query(sony,"Sony camera tas"))
         self.assertTrue(bot.title_matches_query(canon,"Canon EOS R6 Mark II body"))
 
-    def test_global_price_ceiling_is_5000_euros(self):
-        q={"min_price":1,"max_price":5000}
-        item={"title":"Sony camera body","id":"x","price":5001,"ptype":"FIXED","dist_km":1,"external_link":False}
-        self.assertEqual(bot.primary_rejection(q,item,{"distance_km":50,"max_product_price_eur":5000}),"price_range")
-        item["price"]=5000
-        self.assertIsNone(bot.primary_rejection(q,item,{"distance_km":50,"max_product_price_eur":5000}))
+    def test_prices_above_5000_are_not_blocked_by_a_global_cap(self):
+        q={"min_price":1}
+        item={"title":"Sony camera body","id":"x","price":25000,"ptype":"FIXED","dist_km":1,"external_link":False}
+        self.assertIsNone(bot.primary_rejection(q,item,{"distance_km":50}))
 
     def test_rayban_gen2_accepts_wayfarer_and_rw4012_variants(self):
         with open(os.path.join(ROOT,"config.json"),encoding="utf-8") as handle: config=json.load(handle)
@@ -498,7 +496,7 @@ class ScannerTests(unittest.TestCase):
         row["description"]="Modelnummer RW4012, Meta Wayfarer Gen 2"
         item=bot.parse_listing(row)
         self.assertIsNone(bot.primary_rejection(q, item, {
-            "distance_km":50, "max_product_price_eur":800
+            "distance_km":50
         }))
         self.assertEqual(bot.group_of(q, item["text"]), "wayfarer-gen-2")
 
@@ -511,12 +509,13 @@ class ScannerTests(unittest.TestCase):
         self.assertFalse(bot.title_matches_query(q, "Ray-Ban Wayfarer Gen 1 RW4006"))
         self.assertEqual(bot.group_of(q, "Ray-Ban Wayfarer Gen 2 RW4012"), "wayfarer-gen-2")
 
-    def test_existing_feed_drops_cached_products_over_800_euros(self):
+    def test_existing_feed_keeps_cached_products_over_800_euros(self):
         os.makedirs(os.path.dirname(os.environ["DEAL_FEED"]), exist_ok=True)
         old_deal = {
             "listing_id": "old-900", "category_key": "ps5", "title": "PS5 console",
             "description": "", "price": 900, "listing_url": "https://www.marktplaats.nl/v/old-900",
             "status": "strong", "estimated_profit": 100, "profit_roi": 0.4,
+            "detected_at": datetime.now(timezone.utc).isoformat(),
         }
         zero_deal = {
             "listing_id": "old-zero", "category_key": "ps5", "title": "PS5 console",
@@ -526,9 +525,11 @@ class ScannerTests(unittest.TestCase):
         }
         with open(os.environ["DEAL_FEED"], "w", encoding="utf-8") as handle:
             json.dump({"deals": [old_deal, zero_deal], "updatedAt": None,
-                       "valuationVersion": bot.FEED_SCHEMA_VERSION}, handle)
+                       "valuationVersion": bot.FEED_SCHEMA_VERSION,
+                       "scannerVersion": bot.SCANNER_DATA_VERSION}, handle)
         self.assertTrue(self.run_scan([]))
-        self.assertEqual(bot.load_feed()["deals"], [])
+        deals = bot.load_feed()["deals"]
+        self.assertEqual([deal["listing_id"] for deal in deals], ["old-900"])
 
 
 if __name__ == "__main__":
