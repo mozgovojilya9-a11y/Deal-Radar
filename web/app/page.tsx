@@ -108,8 +108,28 @@ export default function HomePage() {
   const [settingsMessage, setSettingsMessage] = useState("");
 
   useEffect(() => {
-    try { setSaved(JSON.parse(localStorage.getItem("deal-radar-favorites") || "[]") as string[]); }
-    catch { setSaved([]); }
+    try {
+      const storedFavorites = JSON.parse(localStorage.getItem("deal-radar-favorites") || "[]");
+      setSaved(Array.isArray(storedFavorites) ? storedFavorites.filter((id) => typeof id === "string") : []);
+    } catch {
+      setSaved([]);
+    }
+
+    try {
+      const storedSettings = JSON.parse(localStorage.getItem("deal-radar-settings") || "null");
+      if (storedSettings && typeof storedSettings === "object") {
+        const next = {
+          categories: Array.isArray(storedSettings.categories) ? storedSettings.categories.filter((key) => typeof key === "string") : [],
+          minDiscount: Number.isInteger(storedSettings.minDiscount) ? Math.min(90, Math.max(0, Number(storedSettings.minDiscount))) : 0,
+          maxDistanceKm: typeof storedSettings.maxDistanceKm === "number" && storedSettings.maxDistanceKm > 0 ? storedSettings.maxDistanceKm : null
+        };
+        setSettings(next);
+        setSettingsDraft(next);
+      }
+    } catch {
+      localStorage.removeItem("deal-radar-settings");
+    }
+
     const webApp = window.Telegram?.WebApp;
     if (!webApp) return;
     webApp.ready();
@@ -117,42 +137,18 @@ export default function HomePage() {
     webApp.setHeaderColor?.("#0a0d12");
     webApp.setBackgroundColor?.("#0a0d12");
     if (!webApp.initData) return;
-    setTelegramInitData(webApp.initData);
-    const headers = { Authorization: `tma ${webApp.initData}` };
-    void (async () => {
-      try {
-        const authResponse = await fetch("/api/auth", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ initData: webApp.initData })
-        });
-        if (!authResponse.ok) return;
-        const authData = await authResponse.json();
-        if (!authData.authenticated || !authData.user) return;
-        setProfile(authData.user as TelegramProfile);
-        const [favoritesResponse, settingsResponse, statsResponse] = await Promise.all([
-          fetch("/api/favorites", { headers, cache: "no-store" }),
-          fetch("/api/settings", { headers, cache: "no-store" }),
-          fetch("/api/stats", { headers, cache: "no-store" })
-        ]);
-        if (favoritesResponse.ok) {
-          const data = await favoritesResponse.json();
-          const ids = Array.isArray(data.ids) ? data.ids as string[] : [];
-          setSaved(ids);
-          localStorage.setItem("deal-radar-favorites", JSON.stringify(ids));
-        }
-        if (settingsResponse.ok) {
-          const data = await settingsResponse.json();
-          const next = data.settings as UserSettings;
-          setSettings(next);
-          setSettingsDraft(next);
-        }
-        if (statsResponse.ok) {
-          const data = await statsResponse.json();
-          setBotStats(data.status as BotStats | null);
-        }
-      } catch { /* Personal features may be temporarily unavailable; keep the public feed usable. */ }
-    })();
+
+    void fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ initData: webApp.initData })
+    })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data.authenticated && data.user) setProfile(data.user);
+      })
+      .catch(() => undefined);
   }, []);
 
   const loadDeals = useCallback(async () => {
@@ -161,7 +157,7 @@ export default function HomePage() {
     try {
       const params = new URLSearchParams({ sort });
       if (category) params.set("category", category);
-      const response = await fetch("/api/deals?" + params.toString(), { cache: "no-store" });
+      const response = await fetch("/api/deals?" + params.toString(), { cache: "default" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Не удалось загрузить предложения");
       setDeals(Array.isArray(data.deals) ? data.deals as Deal[] : []);
@@ -175,7 +171,7 @@ export default function HomePage() {
 
   useEffect(() => {
     void loadDeals();
-    const timer = window.setInterval(() => void loadDeals(), 90_000);
+    const timer = window.setInterval(() => void loadDeals(), 300_000);
     return () => window.clearInterval(timer);
   }, [loadDeals]);
 
