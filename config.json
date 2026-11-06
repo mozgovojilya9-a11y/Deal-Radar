@@ -35,7 +35,7 @@
         "^(?!.*(\\+|\\bmet\\b|\\binclusief\\b|\\bincl\\b|\\bconsole\\b)).*\\b(controller|dualsense)\\b"
       ],
       "min_price": 150,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.2,
       "group_regex": "\\b(?:console|pro|slim|digital|disc|cfi[\\s-]?\\d{4}[a-z]?)\\b",
       "min_profit_eur": 50,
@@ -79,7 +79,7 @@
         "^(?!.*(\\+|\\bmet\\b|\\binclusief\\b|\\bincl\\b|\\bconsole\\b)).*\\b(controller|dualshock)\\b"
       ],
       "min_price": 60,
-      "max_price": 350,
+      "max_price": 5000,
       "threshold": 0.25,
       "group_regex": "\\b(?:console|pro|slim|disc)\\b",
       "min_profit_eur": 50,
@@ -116,7 +116,7 @@
         "oortje"
       ],
       "min_price": 60,
-      "max_price": 300,
+      "max_price": 5000,
       "threshold": 0.2,
       "require_regex": "(?=.*\\bairpods[\\s-]*pro\\b)(?=.*(?:\\bpro[\\s-]*3\\b|\\b3(?:rd)?[\\s.-]*(?:gen(?:eration)?|e[\\s-]*generatie)\\b|\\bgen(?:eration)?[\\s.-]*3\\b|\\bthird[\\s-]*generation\\b))",
       "ai_discovery": true,
@@ -136,7 +136,7 @@
         "kussentjes"
       ],
       "min_price": 150,
-      "max_price": 600,
+      "max_price": 5000,
       "threshold": 0.2,
       "require_regex": "(?=.*\\bairpods[\\s-]*max\\b)(?=.*(?:\\bmax[\\s-]*2\\b|\\b2(?:nd)?[\\s.-]*(?:gen(?:eration)?|e[\\s-]*generatie)\\b|\\bgen(?:eration)?[\\s.-]*2\\b))",
       "group_type": "model_required",
@@ -170,7 +170,7 @@
         "oortje"
       ],
       "min_price": 40,
-      "max_price": 260,
+      "max_price": 5000,
       "threshold": 0.25
     },
     {
@@ -195,7 +195,7 @@
         "case only"
       ],
       "min_price": 40,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.4,
       "group_regex": "\\b(?:wayfarer|rw[\\s-]?4012)\\b",
       "require_regex": "(?:(?=.*\\bRW[\\s-]?4012\\b)|(?=.*\\bray[\\s-]?ban\\b)(?=.*\\bwayfarer\\b)(?=.*\\bgen[\\s.-]*2\\b)|(?=.*\\bmeta\\b)(?=.*\\bwayfarer\\b)(?=.*\\bgen[\\s.-]*2\\b))",
@@ -248,7 +248,7 @@
         "broek"
       ],
       "min_price": 40,
-      "max_price": 600,
+      "max_price": 5000,
       "threshold": 0.3,
       "group_regex": "\\bDZ ?\\d{4}\\b",
       "strict_group": true
@@ -282,7 +282,7 @@
         "eau de"
       ],
       "min_price": 50,
-      "max_price": 700,
+      "max_price": 5000,
       "threshold": 0.3,
       "group_regex": "\\bHB ?\\d{6,10}\\b|\\b15\\d{5}\\b",
       "strict_group": true
@@ -314,7 +314,7 @@
         "broek"
       ],
       "min_price": 40,
-      "max_price": 400,
+      "max_price": 5000,
       "threshold": 0.3,
       "group_regex": "\\b17\\d{8}\\b|\\b179\\d{4}\\b",
       "strict_group": true
@@ -344,7 +344,7 @@
         "kassa"
       ],
       "min_price": 25,
-      "max_price": 600,
+      "max_price": 5000,
       "threshold": 0.3,
       "group_regex": "\\b[A-Z]{1,3}-?\\d{2,4}[A-Z]{0,3}\\b",
       "strict_group": true
@@ -364,7 +364,7 @@
         "batterij"
       ],
       "min_price": 80,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.3,
       "group_regex": "\\b(PRX|Gentleman|Seastar|Le Locle|Supersport|T-?Race|PRC ?200|PR ?100|Couturier|Everytime|Classic Dream|Heritage|Chrono XL)\\b",
       "strict_group": true
@@ -384,7 +384,7 @@
         "hoesje"
       ],
       "min_price": 25,
-      "max_price": 200,
+      "max_price": 5000,
       "threshold": 0.3,
       "group_regex": "\\b(re-?kanken|laptop ?\\d{2}|mini|no\\.? ?2|big)\\b",
       "min_profit_eur": 35,
@@ -413,7 +413,7 @@
         "slaapzak"
       ],
       "min_price": 25,
-      "max_price": 250,
+      "max_price": 5000,
       "threshold": 0.3,
       "min_profit_eur": 35
     },
@@ -428,7 +428,7 @@
         "hoesje"
       ],
       "min_price": 40,
-      "max_price": 300,
+      "max_price": 5000,
       "threshold": 0.3,
       "min_profit_eur": 35
     },
@@ -443,7 +443,7 @@
         "hoesje"
       ],
       "min_price": 30,
-      "max_price": 250,
+      "max_price": 5000,
       "threshold": 0.3,
       "min_profit_eur": 35
     },
@@ -458,7 +458,7 @@
         "hoesje"
       ],
       "min_price": 15,
-      "max_price": 120,
+      "max_price": 5000,
       "threshold": 0.35,
       "min_profit_eur": 35
     },
@@ -482,7 +482,7 @@
         "behuizing"
       ],
       "min_price": 350,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.25,
       "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b",
       "exclude_regex": [
@@ -516,7 +516,7 @@
         "behuizing"
       ],
       "min_price": 300,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.25,
       "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b",
       "exclude_regex": [
@@ -548,7 +548,7 @@
         "behuizing"
       ],
       "min_price": 250,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.25,
       "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b",
       "exclude_regex": [
@@ -580,7 +580,7 @@
         "behuizing"
       ],
       "min_price": 200,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.25,
       "group_regex": "\\b(pro ?max|pro ?max|pro|mini|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b",
       "exclude_regex": [
@@ -612,7 +612,7 @@
         "behuizing"
       ],
       "min_price": 150,
-      "max_price": 700,
+      "max_price": 5000,
       "threshold": 0.25,
       "group_regex": "\\b(pro ?max|pro|mini|64 ?gb|128 ?gb|256 ?gb)\\b",
       "exclude_regex": [
@@ -666,7 +666,7 @@
         "tv box"
       ],
       "min_price": 60,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.26,
       "group_type": "television",
       "strict_group": true,
@@ -712,7 +712,7 @@
       "group_regex": "\\b(?:mini\\s*[234](?:\\s*pro)?|mavic\\s*(?:2|3)(?:\\s*(?:pro|max|classic))?|air\\s*[23](?:\\s*s)?|avata\\s*[12]|neo|fpv)\\b",
       "strict_group": true,
       "min_price": 100,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 90,
@@ -748,7 +748,7 @@
       "group_regex": "\\b(?:jet\\s*set|sloan|mercer|soho|emilia|cece|voyager|hamilton|manhattan|mott|carmen|lillie|carson)\\b",
       "strict_group": true,
       "min_price": 25,
-      "max_price": 500,
+      "max_price": 5000,
       "threshold": 0.3,
       "good_threshold": 0.2,
       "min_profit_eur": 35
@@ -781,7 +781,7 @@
       "group_regex": "\\b(?:rhea|slater|erin|abbey|hudson|kent|jaycee|cooper|bex|mott)\\b",
       "strict_group": true,
       "min_price": 35,
-      "max_price": 450,
+      "max_price": 5000,
       "threshold": 0.3,
       "good_threshold": 0.2,
       "min_profit_eur": 35
@@ -814,7 +814,7 @@
       "group_regex": "\\b(?:sm7b|sm7db|sm58|sm57|mv7\\+?|beta\\s*58)\\b",
       "strict_group": true,
       "min_price": 35,
-      "max_price": 700,
+      "max_price": 5000,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 35
@@ -847,7 +847,7 @@
       "group_regex": "\\b(?:podmic|nt-?1|nt-usb(?:\\+)?|wireless\\s*(?:go(?:\\s*ii)?|me|pro)|videomic(?:\\s*ntg)?)\\b",
       "strict_group": true,
       "min_price": 35,
-      "max_price": 650,
+      "max_price": 5000,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 35
@@ -878,7 +878,7 @@
       "group_regex": "\\b(?:mic\\s*2|mic\\s*mini|mic)\\b",
       "strict_group": true,
       "min_price": 35,
-      "max_price": 450,
+      "max_price": 5000,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 35
@@ -909,7 +909,7 @@
       "group_regex": "\\b(?:mke\\s*600|mke\\s*400|profile|ew-?d|avx|xs\\s*wireless)\\b",
       "strict_group": true,
       "min_price": 40,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 35
@@ -942,7 +942,7 @@
       "group_regex": "\\b(?:wh-?1000xm[456]|wh-?xb910n|ult\\s*wear|wh-?ch720n|wf-?1000xm[45])\\b",
       "strict_group": true,
       "min_price": 35,
-      "max_price": 550,
+      "max_price": 5000,
       "threshold": 0.27,
       "good_threshold": 0.18,
       "min_profit_eur": 35
@@ -975,7 +975,7 @@
       "group_regex": "\\b(?:quietcomfort\\s*ultra|quietcomfort\\s*45|quietcomfort\\s*35|qc\\s*ultra|qc45|qc35|700)\\b",
       "strict_group": true,
       "min_price": 45,
-      "max_price": 650,
+      "max_price": 5000,
       "threshold": 0.27,
       "good_threshold": 0.18,
       "min_profit_eur": 35
@@ -1005,7 +1005,7 @@
       "group_regex": "\\b(?:momentum\\s*[34]|hd\\s*(?:560s|600|650|660s|450|458bt)|accentum(?:\\s*plus)?)\\b",
       "strict_group": true,
       "min_price": 35,
-      "max_price": 650,
+      "max_price": 5000,
       "threshold": 0.27,
       "good_threshold": 0.18,
       "min_profit_eur": 35
@@ -1036,7 +1036,7 @@
       "group_regex": "\\b(?:tour\\s*one(?:\\s*m2)?|live\\s*(?:770nc|660nc|650btnc)|tune\\s*(?:770nc|760nc|710bt)|club\\s*one)\\b",
       "strict_group": true,
       "min_price": 25,
-      "max_price": 400,
+      "max_price": 5000,
       "threshold": 0.27,
       "good_threshold": 0.18,
       "min_profit_eur": 35
@@ -1067,7 +1067,7 @@
       "group_regex": "\\b(?:studio\\s*(?:pro|3)|solo\\s*(?:4|3)|fit\\s*pro|powerbeats\\s*pro)\\b",
       "strict_group": true,
       "min_price": 35,
-      "max_price": 450,
+      "max_price": 5000,
       "threshold": 0.27,
       "good_threshold": 0.18,
       "min_profit_eur": 35
@@ -1109,7 +1109,7 @@
       "group_regex": "\\b(?:a7\\s*(?:iv|v|c\\s*ii|iii)|a6700|a6400|zv-e10\\s*(?:ii)?|zv-1\\s*(?:ii)?)\\b",
       "strict_group": true,
       "min_price": 180,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 100,
@@ -1156,7 +1156,7 @@
       "group_regex": "\\b(?:eos\\s*r(?:50|10|7|8|6\\s*ii|5\\s*ii|6|5)|r50|r10|r7|r8|r6\\s*(?:mark\\s*)?ii|r5\\s*(?:mark\\s*)?ii|g7x\\s*(?:ii|iii))\\b",
       "strict_group": true,
       "min_price": 150,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 100,
@@ -1200,7 +1200,7 @@
       "group_regex": "\\b(?:z\\s*(?:5\\s*ii|6\\s*iii|f|8|9|50\\s*ii|30))\\b",
       "strict_group": true,
       "min_price": 180,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 100,
@@ -1245,7 +1245,7 @@
       "group_regex": "\\b(?:x100\\s*vi|x-t\\s*(?:5|50|6)|x-s\\s*20|x-h\\s*2(?:s)?)\\b",
       "strict_group": true,
       "min_price": 200,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 100,
@@ -1290,7 +1290,7 @@
       "group_regex": "\\b(?:s5\\s*ii\\s*x?|s9|gh\\s*7|g9\\s*ii)\\b",
       "strict_group": true,
       "min_price": 180,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 100,
@@ -1335,7 +1335,7 @@
       "group_regex": "\\b(?:hero\\s*(?:11|12|13|14)|max\\s*2)\\b",
       "strict_group": true,
       "min_price": 70,
-      "max_price": 800,
+      "max_price": 5000,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 45,
@@ -1358,5 +1358,5 @@
     "retail_proxy_min_roi": 0.35,
     "retail_reference_max_age_days": 45
   },
-  "max_product_price_eur": 800
+  "max_product_price_eur": 5000
 }
