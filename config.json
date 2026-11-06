@@ -7,26 +7,489 @@
   "market_days": 21,
   "max_age_hours": 36,
   "queries": [
-    {"key":"ps5","label":"PlayStation 5","query":"playstation 5","include_any":["ps5","playstation 5","playstation5"],"exclude":["hoesje","skin","sticker","koffer"],"exclude_regex":["^(?!.*(\\+|\\bmet\\b|\\binclusief\\b|\\bincl\\b|\\bconsole\\b)).*\\b(controller|dualsense)\\b"],"min_price":150,"max_price":800,"threshold":0.2,"group_regex":"\\b(pro|slim|digital|disc)\\b"},
-    {"key":"ps4","label":"PlayStation 4","query":"playstation 4","include_any":["ps4","playstation 4","playstation4"],"exclude":["hoesje","skin","sticker","koffer"],"exclude_regex":["^(?!.*(\\+|\\bmet\\b|\\binclusief\\b|\\bincl\\b|\\bconsole\\b)).*\\b(controller|dualshock)\\b"],"min_price":60,"max_price":350,"threshold":0.25,"group_regex":"\\b(pro|slim)\\b"},
-    {"key":"airpods-pro","label":"AirPods Pro","query":"airpods pro","include_any":["airpods pro","airpods-pro"],"exclude":["hoesje","case alleen","cover","losse","linker","rechter","oordopje","oortje"],"min_price":60,"max_price":300,"threshold":0.2,"group_regex":"\\b(pro ?2|2e generatie|2nd gen\\w*|usb-?c|1e generatie|1st gen\\w*)\\b"},
-    {"key":"airpods-max","label":"AirPods Max","query":"airpods max","include_any":["airpods max"],"exclude":["hoesje","cover","kussen","kussentjes"],"min_price":150,"max_price":600,"threshold":0.2},
-    {"key":"airpods","label":"AirPods","query":"airpods","include_any":["airpods"],"exclude":["pro","max","hoesje","case","cover","losse","linker","rechter","oordopje","oortje"],"min_price":40,"max_price":220,"threshold":0.25,"group_regex":"\\b(2e generatie|3e generatie|4e generatie|gen ?[1-4]|generatie ?[1-4]|2nd gen\\w*|3rd gen\\w*|4th gen\\w*)\\b"},
-    {"key":"rayban","label":"Ray-Ban","query":"ray-ban","include_any":["ray-ban","rayban","ray ban"],"exclude":["hoesje","kinder","etui","doekje","poster"],"min_price":40,"max_price":450,"threshold":0.25,"group_regex":"\\b(wayfarer|aviator|clubmaster|meta|round|erika|justin|hexagonal|caravan|stories|new wayfarer)\\b"},
-    {"key":"watch-diesel","label":"Часы Diesel","query":"diesel horloge","include_any":["diesel"],"exclude":["band","bandje","armband","glas","batterij","parfum","jeans","jas","riem","zonnebril","tas","hoodie","trui","shirt","schoenen","sneakers","broek"],"min_price":40,"max_price":600,"threshold":0.3,"group_regex":"\\bDZ ?\\d{4}\\b"},
-    {"key":"watch-boss","label":"Часы Hugo Boss","query":"hugo boss horloge","include_any":["boss"],"exclude":["band","bandje","armband","glas","batterij","parfum","jeans","jas","riem","zonnebril","tas","hoodie","trui","shirt","schoenen","sneakers","broek","aftershave","eau de"],"min_price":50,"max_price":700,"threshold":0.3,"group_regex":"\\bHB ?\\d{6,10}\\b|\\b15\\d{5}\\b"},
-    {"key":"watch-tommy","label":"Часы Tommy Hilfiger","query":"tommy hilfiger horloge","include_any":["tommy"],"exclude":["band","bandje","armband","glas","batterij","parfum","jeans","jas","riem","zonnebril","tas","hoodie","trui","shirt","schoenen","sneakers","broek"],"min_price":40,"max_price":400,"threshold":0.3,"group_regex":"\\b17\\d{8}\\b|\\b179\\d{4}\\b"},
-    {"key":"watch-casio","label":"Часы Casio","query":"casio horloge","include_any":["casio","g-shock","gshock"],"exclude":["band","bandje","armband","glas","batterij","keyboard","piano","rekenmachine","calculator","synthesizer","privia","cdp","kassa"],"min_price":25,"max_price":600,"threshold":0.3,"group_regex":"\\b[A-Z]{1,3}-?\\d{2,4}[A-Z]{0,3}\\b"},
-    {"key":"watch-tissot","label":"Часы Tissot","query":"tissot horloge","include_any":["tissot"],"exclude":["band","bandje","armband","glas","batterij"],"min_price":80,"max_price":1500,"threshold":0.3,"group_regex":"\\b(PRX|Gentleman|Seastar|Le Locle|Supersport|T-?Race|PRC ?200|PR ?100|Couturier|Everytime|Classic Dream|Heritage|Chrono XL)\\b"},
-    {"key":"bag-fjallraven","label":"Рюкзак Fjällräven","query":"fjallraven kanken rugzak","include_any":["fjällräven","fjallraven","kånken","kanken"],"exclude":["portemonnee","hoesje"],"min_price":25,"max_price":200,"threshold":0.3,"group_regex":"\\b(re-?kanken|laptop ?\\d{2}|mini|no\\.? ?2|big)\\b"},
-    {"key":"bag-northface","label":"Рюкзак The North Face","query":"the north face rugzak","include_any":["north face","northface"],"exclude":["jas","jack","vest","trui","hoodie","fleece","broek","schoenen","muts","handschoenen","tent","slaapzak"],"min_price":25,"max_price":250,"threshold":0.3},
-    {"key":"bag-osprey","label":"Рюкзак Osprey","query":"osprey rugzak","include_any":["osprey"],"exclude":["hoesje"],"min_price":40,"max_price":300,"threshold":0.3},
-    {"key":"bag-deuter","label":"Рюкзак Deuter","query":"deuter rugzak","include_any":["deuter"],"exclude":["hoesje"],"min_price":30,"max_price":250,"threshold":0.3},
-    {"key":"bag-eastpak","label":"Рюкзак Eastpak","query":"eastpak rugzak","include_any":["eastpak"],"exclude":["hoesje"],"min_price":15,"max_price":120,"threshold":0.35},
-    {"key":"iphone-16","label":"iPhone 16","query":"iphone 16","include_any":["iphone 16","iphone16"],"exclude":["hoesje","case","cover","screenprotector","glas","lader","kabel","onderdelen","behuizing"],"min_price":350,"max_price":1300,"threshold":0.25,"group_regex":"\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b"},
-    {"key":"iphone-15","label":"iPhone 15","query":"iphone 15","include_any":["iphone 15","iphone15"],"exclude":["hoesje","case","cover","screenprotector","glas","lader","kabel","onderdelen","behuizing"],"min_price":300,"max_price":1200,"threshold":0.25,"group_regex":"\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b"},
-    {"key":"iphone-14","label":"iPhone 14","query":"iphone 14","include_any":["iphone 14","iphone14"],"exclude":["hoesje","case","cover","screenprotector","glas","lader","kabel","onderdelen","behuizing"],"min_price":250,"max_price":1000,"threshold":0.25,"group_regex":"\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b"},
-    {"key":"iphone-13","label":"iPhone 13","query":"iphone 13","include_any":["iphone 13","iphone13"],"exclude":["hoesje","case","cover","screenprotector","glas","lader","kabel","onderdelen","behuizing"],"min_price":200,"max_price":900,"threshold":0.25,"group_regex":"\\b(pro ?max|pro ?max|pro|mini|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b"},
-    {"key":"iphone-12","label":"iPhone 12","query":"iphone 12","include_any":["iphone 12","iphone12"],"exclude":["hoesje","case","cover","screenprotector","glas","lader","kabel","onderdelen","behuizing"],"min_price":150,"max_price":700,"threshold":0.25,"group_regex":"\\b(pro ?max|pro|mini|64 ?gb|128 ?gb|256 ?gb)\\b"}
+    {
+      "key": "ps5",
+      "label": "PlayStation 5",
+      "query": "playstation 5",
+      "include_any": [
+        "ps5",
+        "playstation 5",
+        "playstation5"
+      ],
+      "exclude": [
+        "hoesje",
+        "skin",
+        "sticker",
+        "koffer"
+      ],
+      "exclude_regex": [
+        "^(?!.*(\\+|\\bmet\\b|\\binclusief\\b|\\bincl\\b|\\bconsole\\b)).*\\b(controller|dualsense)\\b"
+      ],
+      "min_price": 150,
+      "max_price": 800,
+      "threshold": 0.2,
+      "group_regex": "\\b(pro|slim|digital|disc)\\b"
+    },
+    {
+      "key": "ps4",
+      "label": "PlayStation 4",
+      "query": "playstation 4",
+      "include_any": [
+        "ps4",
+        "playstation 4",
+        "playstation4"
+      ],
+      "exclude": [
+        "hoesje",
+        "skin",
+        "sticker",
+        "koffer"
+      ],
+      "exclude_regex": [
+        "^(?!.*(\\+|\\bmet\\b|\\binclusief\\b|\\bincl\\b|\\bconsole\\b)).*\\b(controller|dualshock)\\b"
+      ],
+      "min_price": 60,
+      "max_price": 350,
+      "threshold": 0.25,
+      "group_regex": "\\b(pro|slim)\\b"
+    },
+    {
+      "key": "airpods-pro-3",
+      "label": "AirPods Pro 3",
+      "query": "airpods pro 3",
+      "include_any": [
+        "airpods pro",
+        "airpods-pro"
+      ],
+      "exclude": [
+        "hoesje",
+        "case alleen",
+        "cover",
+        "losse",
+        "linker",
+        "rechter",
+        "oordopje",
+        "oortje"
+      ],
+      "min_price": 60,
+      "max_price": 300,
+      "threshold": 0.2,
+      "require_regex": "(?=.*\\\\bairpods[\\\\s-]*pro\\\\b)(?=.*(?:\\\\bpro[\\\\s-]*3\\\\b|\\\\b3(?:rd)?[\\\\s.-]*(?:gen(?:eration)?|e[\\\\s-]*generatie)\\\\b|\\\\bthird[\\\\s-]*generation\\\\b))"
+    },
+    {
+      "key": "airpods-max",
+      "label": "AirPods Max",
+      "query": "airpods max",
+      "include_any": [
+        "airpods max"
+      ],
+      "exclude": [
+        "hoesje",
+        "cover",
+        "kussen",
+        "kussentjes"
+      ],
+      "min_price": 150,
+      "max_price": 600,
+      "threshold": 0.2
+    },
+    {
+      "key": "airpods-5",
+      "label": "AirPods 5",
+      "query": "airpods 5",
+      "include_any": [
+        "airpods"
+      ],
+      "require_regex": "(?=.*\\\\bairpods\\\\b)(?=.*(?:\\\\bairpods[\\\\s-]*5\\\\b|\\\\b5(?:th)?[\\\\s.-]*(?:gen(?:eration)?|e[\\\\s-]*generatie)\\\\b|\\\\bfifth[\\\\s-]*generation\\\\b))",
+      "exclude": [
+        "pro",
+        "max",
+        "hoesje",
+        "case",
+        "cover",
+        "losse",
+        "linker",
+        "rechter",
+        "oordopje",
+        "oortje"
+      ],
+      "min_price": 40,
+      "max_price": 260,
+      "threshold": 0.25
+    },
+    {
+      "key": "rayban",
+      "label": "Ray-Ban",
+      "query": "ray-ban meta wayfarer",
+      "include_any": [
+        "ray-ban",
+        "rayban",
+        "ray ban"
+      ],
+      "exclude": [
+        "hoesje",
+        "kinder",
+        "etui",
+        "doekje",
+        "poster",
+        "case",
+        "onderdelen"
+      ],
+      "min_price": 40,
+      "max_price": 450,
+      "threshold": 0.25,
+      "group_regex": "\\\\b(wayfarer)\\\\b",
+      "require_regex": "(?=.*\\\\bray[\\\\s-]?ban\\\\b)(?=.*\\\\bmeta\\\\b)(?=.*\\\\bwayfarer\\\\b)(?=.*(?:\\\\bgen(?:eration)?[\\\\s.-]*(?:[2-9]\\\\d*|1\\\\d+)\\\\b|\\\\b(?:[2-9]\\\\d*|1\\\\d+)(?:st|nd|rd|th)?[\\\\s.-]*gen(?:eration)?\\\\b|\\\\b(?:[2-9]\\\\d*|1\\\\d+)(?:e|de)[\\\\s.-]*generatie\\\\b))"
+    },
+    {
+      "key": "watch-diesel",
+      "label": "Часы Diesel",
+      "query": "diesel horloge",
+      "include_any": [
+        "diesel"
+      ],
+      "exclude": [
+        "band",
+        "bandje",
+        "armband",
+        "glas",
+        "batterij",
+        "parfum",
+        "jeans",
+        "jas",
+        "riem",
+        "zonnebril",
+        "tas",
+        "hoodie",
+        "trui",
+        "shirt",
+        "schoenen",
+        "sneakers",
+        "broek"
+      ],
+      "min_price": 40,
+      "max_price": 600,
+      "threshold": 0.3,
+      "group_regex": "\\bDZ ?\\d{4}\\b"
+    },
+    {
+      "key": "watch-boss",
+      "label": "Часы Hugo Boss",
+      "query": "hugo boss horloge",
+      "include_any": [
+        "boss"
+      ],
+      "exclude": [
+        "band",
+        "bandje",
+        "armband",
+        "glas",
+        "batterij",
+        "parfum",
+        "jeans",
+        "jas",
+        "riem",
+        "zonnebril",
+        "tas",
+        "hoodie",
+        "trui",
+        "shirt",
+        "schoenen",
+        "sneakers",
+        "broek",
+        "aftershave",
+        "eau de"
+      ],
+      "min_price": 50,
+      "max_price": 700,
+      "threshold": 0.3,
+      "group_regex": "\\bHB ?\\d{6,10}\\b|\\b15\\d{5}\\b"
+    },
+    {
+      "key": "watch-tommy",
+      "label": "Часы Tommy Hilfiger",
+      "query": "tommy hilfiger horloge",
+      "include_any": [
+        "tommy"
+      ],
+      "exclude": [
+        "band",
+        "bandje",
+        "armband",
+        "glas",
+        "batterij",
+        "parfum",
+        "jeans",
+        "jas",
+        "riem",
+        "zonnebril",
+        "tas",
+        "hoodie",
+        "trui",
+        "shirt",
+        "schoenen",
+        "sneakers",
+        "broek"
+      ],
+      "min_price": 40,
+      "max_price": 400,
+      "threshold": 0.3,
+      "group_regex": "\\b17\\d{8}\\b|\\b179\\d{4}\\b"
+    },
+    {
+      "key": "watch-casio",
+      "label": "Часы Casio",
+      "query": "casio horloge",
+      "include_any": [
+        "casio",
+        "g-shock",
+        "gshock"
+      ],
+      "exclude": [
+        "band",
+        "bandje",
+        "armband",
+        "glas",
+        "batterij",
+        "keyboard",
+        "piano",
+        "rekenmachine",
+        "calculator",
+        "synthesizer",
+        "privia",
+        "cdp",
+        "kassa"
+      ],
+      "min_price": 25,
+      "max_price": 600,
+      "threshold": 0.3,
+      "group_regex": "\\b[A-Z]{1,3}-?\\d{2,4}[A-Z]{0,3}\\b"
+    },
+    {
+      "key": "watch-tissot",
+      "label": "Часы Tissot",
+      "query": "tissot horloge",
+      "include_any": [
+        "tissot"
+      ],
+      "exclude": [
+        "band",
+        "bandje",
+        "armband",
+        "glas",
+        "batterij"
+      ],
+      "min_price": 80,
+      "max_price": 1500,
+      "threshold": 0.3,
+      "group_regex": "\\b(PRX|Gentleman|Seastar|Le Locle|Supersport|T-?Race|PRC ?200|PR ?100|Couturier|Everytime|Classic Dream|Heritage|Chrono XL)\\b"
+    },
+    {
+      "key": "bag-fjallraven",
+      "label": "Рюкзак Fjällräven",
+      "query": "fjallraven kanken rugzak",
+      "include_any": [
+        "fjällräven",
+        "fjallraven",
+        "kånken",
+        "kanken"
+      ],
+      "exclude": [
+        "portemonnee",
+        "hoesje"
+      ],
+      "min_price": 25,
+      "max_price": 200,
+      "threshold": 0.3,
+      "group_regex": "\\b(re-?kanken|laptop ?\\d{2}|mini|no\\.? ?2|big)\\b"
+    },
+    {
+      "key": "bag-northface",
+      "label": "Рюкзак The North Face",
+      "query": "the north face rugzak",
+      "include_any": [
+        "north face",
+        "northface"
+      ],
+      "exclude": [
+        "jas",
+        "jack",
+        "vest",
+        "trui",
+        "hoodie",
+        "fleece",
+        "broek",
+        "schoenen",
+        "muts",
+        "handschoenen",
+        "tent",
+        "slaapzak"
+      ],
+      "min_price": 25,
+      "max_price": 250,
+      "threshold": 0.3
+    },
+    {
+      "key": "bag-osprey",
+      "label": "Рюкзак Osprey",
+      "query": "osprey rugzak",
+      "include_any": [
+        "osprey"
+      ],
+      "exclude": [
+        "hoesje"
+      ],
+      "min_price": 40,
+      "max_price": 300,
+      "threshold": 0.3
+    },
+    {
+      "key": "bag-deuter",
+      "label": "Рюкзак Deuter",
+      "query": "deuter rugzak",
+      "include_any": [
+        "deuter"
+      ],
+      "exclude": [
+        "hoesje"
+      ],
+      "min_price": 30,
+      "max_price": 250,
+      "threshold": 0.3
+    },
+    {
+      "key": "bag-eastpak",
+      "label": "Рюкзак Eastpak",
+      "query": "eastpak rugzak",
+      "include_any": [
+        "eastpak"
+      ],
+      "exclude": [
+        "hoesje"
+      ],
+      "min_price": 15,
+      "max_price": 120,
+      "threshold": 0.35
+    },
+    {
+      "key": "iphone-16",
+      "label": "iPhone 16",
+      "query": "iphone 16",
+      "include_any": [
+        "iphone 16",
+        "iphone16"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "cover",
+        "screenprotector",
+        "glas",
+        "lader",
+        "kabel",
+        "onderdelen",
+        "behuizing"
+      ],
+      "min_price": 350,
+      "max_price": 1300,
+      "threshold": 0.25,
+      "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b"
+    },
+    {
+      "key": "iphone-15",
+      "label": "iPhone 15",
+      "query": "iphone 15",
+      "include_any": [
+        "iphone 15",
+        "iphone15"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "cover",
+        "screenprotector",
+        "glas",
+        "lader",
+        "kabel",
+        "onderdelen",
+        "behuizing"
+      ],
+      "min_price": 300,
+      "max_price": 1200,
+      "threshold": 0.25,
+      "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b"
+    },
+    {
+      "key": "iphone-14",
+      "label": "iPhone 14",
+      "query": "iphone 14",
+      "include_any": [
+        "iphone 14",
+        "iphone14"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "cover",
+        "screenprotector",
+        "glas",
+        "lader",
+        "kabel",
+        "onderdelen",
+        "behuizing"
+      ],
+      "min_price": 250,
+      "max_price": 1000,
+      "threshold": 0.25,
+      "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b"
+    },
+    {
+      "key": "iphone-13",
+      "label": "iPhone 13",
+      "query": "iphone 13",
+      "include_any": [
+        "iphone 13",
+        "iphone13"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "cover",
+        "screenprotector",
+        "glas",
+        "lader",
+        "kabel",
+        "onderdelen",
+        "behuizing"
+      ],
+      "min_price": 200,
+      "max_price": 900,
+      "threshold": 0.25,
+      "group_regex": "\\b(pro ?max|pro ?max|pro|mini|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b"
+    },
+    {
+      "key": "iphone-12",
+      "label": "iPhone 12",
+      "query": "iphone 12",
+      "include_any": [
+        "iphone 12",
+        "iphone12"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "cover",
+        "screenprotector",
+        "glas",
+        "lader",
+        "kabel",
+        "onderdelen",
+        "behuizing"
+      ],
+      "min_price": 150,
+      "max_price": 700,
+      "threshold": 0.25,
+      "group_regex": "\\b(pro ?max|pro|mini|64 ?gb|128 ?gb|256 ?gb)\\b"
+    }
   ]
 }

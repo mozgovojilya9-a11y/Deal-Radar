@@ -158,6 +158,9 @@ def accept(q, it, cfg):
     inc = q.get("include_any")
     if inc and not any(w.lower() in title for w in inc):
         return False
+    required = q.get("require_regex")
+    if required and not re.search(required, it["title"], re.I):
+        return False
     for w in q.get("exclude", []):
         if re.search(r"(?<!\w)" + re.escape(w.lower()) + r"(?!\w)", title):
             return False
