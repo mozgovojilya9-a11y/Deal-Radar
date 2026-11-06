@@ -1,4 +1,5 @@
 """Offline scanner tests: no network, no Telegram. Run: python -m unittest discover -s tests"""
+import json
 import os
 import sys
 import tempfile
