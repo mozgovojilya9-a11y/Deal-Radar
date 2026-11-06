@@ -413,6 +413,12 @@ class ScannerTests(unittest.TestCase):
         item={"title":"Sony camera body","id":"x","price":25000,"ptype":"FIXED","dist_km":1,"external_link":False}
         self.assertIsNone(bot.primary_rejection(q,item,{"distance_km":50}))
 
+    def test_nationwide_search_does_not_reject_listings_by_old_centre_distance(self):
+        q={"min_price":1}
+        item={"title":"Sony camera body","id":"x","price":25000,"ptype":"FIXED","dist_km":340,"external_link":False}
+        self.assertIsNone(bot.primary_rejection(q,item,{"distance_km":50,"nationwide_search":True}))
+        self.assertEqual(bot.primary_rejection(q,item,{"distance_km":50,"nationwide_search":False}),"distance")
+
     def test_rayban_gen2_accepts_wayfarer_and_rw4012_variants(self):
         with open(os.path.join(ROOT,"config.json"),encoding="utf-8") as handle: config=json.load(handle)
         q=next(q for q in config["queries"] if q["key"]=="rayban")
