@@ -29,7 +29,7 @@ function listingTimestamp(value: string | null | undefined): number {
   const direct = new Date(value).getTime();
   if (Number.isFinite(direct)) return direct;
 
-  const text = value.trim().toLowerCase().replace(/\\.$/, "");
+  const text = value.trim().toLowerCase().replace(/\.$/, "");
   const now = Date.now();
   const relativeDays: Record<string, number> = {
     vandaag: 0, today: 0, gisteren: 1, yesterday: 1,
@@ -38,8 +38,8 @@ function listingTimestamp(value: string | null | undefined): number {
   if (Object.prototype.hasOwnProperty.call(relativeDays, text)) {
     return now - relativeDays[text] * 24 * 60 * 60 * 1000;
   }
-  const relative = text.match(/^(\\d+)\\s+(?:dag|dagen)\\s+geleden$/)
-    || text.match(/^(\\d+)\\s+days?\\s+ago$/);
+  const relative = text.match(/^(\d+)\s+(?:dag|dagen)\s+geleden$/)
+    || text.match(/^(\d+)\s+days?\s+ago$/);
   if (relative) return now - Number(relative[1]) * 24 * 60 * 60 * 1000;
 
   const months: Record<string, number> = {
@@ -49,14 +49,14 @@ function listingTimestamp(value: string | null | undefined): number {
     okt: 10, oktober: 10, oct: 10, october: 10, nov: 11, november: 11,
     dec: 12, december: 12
   };
-  const match = text.match(/^(\\d{1,2})\\s+([a-z]+)\\s+(\\d{2,4})$/);
+  const match = text.match(/^(\d{1,2})\s+([a-z]+)\s+(\d{2,4})$/);
   if (match && months[match[2]]) {
     const year = Number(match[3]) < 100 ? 2000 + Number(match[3]) : Number(match[3]);
     const endOfDay = Date.UTC(year, months[match[2]] - 1, Number(match[1]), 23, 59, 59);
     return Math.min(endOfDay, now);
   }
 
-  const numeric = text.match(/^(\\d{1,2})[-/.](\\d{1,2})[-/.](\\d{2,4})$/);
+  const numeric = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
   if (numeric) {
     const year = Number(numeric[3]) < 100 ? 2000 + Number(numeric[3]) : Number(numeric[3]);
     return Math.min(Date.UTC(year, Number(numeric[2]) - 1, Number(numeric[1]), 23, 59, 59), now);
