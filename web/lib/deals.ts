@@ -67,6 +67,7 @@ export type ScannerStats = {
 };
 
 export type DealFeed = {
+  valuationVersion?: number;
   updatedAt: string | null;
   scannedAt?: string | null;
   scannerStats?: ScannerStats | null;

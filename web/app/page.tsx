@@ -325,6 +325,7 @@ export default function HomePage() {
   const [advisorError, setAdvisorError] = useState("");
   const [profile, setProfile] = useState<TelegramProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [catalogUpdating, setCatalogUpdating] = useState(false);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [scannerStats, setScannerStats] = useState<ScannerStats | null>(null);
@@ -383,7 +384,8 @@ export default function HomePage() {
       if (!response.ok) throw new Error(data.error || "Не удалось загрузить предложения");
       if (id !== requestId.current) return;
       setDeals(Array.isArray(data.deals) ? data.deals as Deal[] : []);
-      setUpdatedAt(data.scannedAt || data.updatedAt || new Date().toISOString());
+      setCatalogUpdating(data.valuationReady === false);
+      setUpdatedAt(data.scannedAt || data.updatedAt || null);
       setScannerStats(data.scannerStats && typeof data.scannerStats === "object" ? data.scannerStats as ScannerStats : null);
       setError("");
     } catch (err) {
@@ -864,8 +866,8 @@ export default function HomePage() {
           <div className="deal-grid">{Array.from({ length: 6 }).map((_, index) => <div className="skeleton-card" key={index}><div /><span /><span /><span /></div>)}</div>
         ) : filtered.length === 0 ? (
           <div className="state-panel"><div className="state-icon">⌁</div>
-            <h3>Пока нет подходящих предложений</h3>
-            <p>Сканер продолжает искать хорошие цены. Подходящие объявления появятся здесь после проверки.</p>
+            <h3>{catalogUpdating ? "Обновляем базу рыночных сравнений" : "Пока нет подходящих предложений"}</h3>
+            <p>{catalogUpdating ? "Старые оценки скрыты после исправления классификации товаров. Радар собирает новую статистику, чтобы не показывать ложные скидки." : "Сканер продолжает искать хорошие цены. Подходящие объявления появятся здесь после проверки."}</p>
             {activeFilters ? <button className="secondary-button" onClick={resetFilters}>Сбросить фильтры</button> : null}
           </div>
         ) : (

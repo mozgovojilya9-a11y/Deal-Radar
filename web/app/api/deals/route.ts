@@ -84,11 +84,12 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) throw new Error(`GitHub feed returned HTTP ${response.status}`);
     const feed = await response.json() as Partial<DealFeed>;
+    const valuationReady = feed.valuationVersion === 2;
     const category = request.nextUrl.searchParams.get("category") || "";
     const sortParam = request.nextUrl.searchParams.get("sort");
     const sort = sortParam === "newest" || sortParam === "price" || sortParam === "discount" ? sortParam : "profit";
 
-    let deals = Array.isArray(feed.deals)
+    let deals = valuationReady && Array.isArray(feed.deals)
       ? feed.deals.filter(isDeal).filter((deal) => {
         if (deal.active === false || !isRecent(deal)) return false;
         if (deal.status === "candidate") return true;
@@ -112,9 +113,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       deals,
       count: deals.length,
-      updatedAt: typeof feed.updatedAt === "string" ? feed.updatedAt : null,
-      scannedAt: typeof feed.scannedAt === "string" ? feed.scannedAt : null,
-      scannerStats: feed.scannerStats && typeof feed.scannerStats === "object" ? feed.scannerStats : null
+      valuationReady,
+      updatedAt: valuationReady && typeof feed.updatedAt === "string" ? feed.updatedAt : null,
+      scannedAt: valuationReady && typeof feed.scannedAt === "string" ? feed.scannedAt : null,
+      scannerStats: valuationReady && feed.scannerStats && typeof feed.scannerStats === "object" ? feed.scannerStats : null
     }, {
       headers: {
         "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
