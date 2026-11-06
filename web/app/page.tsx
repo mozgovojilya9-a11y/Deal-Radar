@@ -6,11 +6,14 @@ import type { Deal, ScannerStats } from "@/lib/deals";
 type Tab = "home" | "strong" | "categories" | "saved" | "analytics" | "profile";
 type Sort = "profit" | "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
-type ResearchListing = { title: string; price: number; url: string; source: string; condition: "used" | "new" | "unknown"; kind: "marktplaats" | "web"; estimatedProfit?: number | null; profitRoi?: number | null; status?: string };
+type MatchType = "exact" | "variant" | "related" | "accessory" | "unrelated";
+type ResearchListing = { title: string; price: number; url: string; source: string; condition: "used" | "new" | "unknown"; kind: "marktplaats" | "web"; estimatedProfit?: number | null; profitRoi?: number | null; status?: string; matchType?: MatchType; matchConfidence?: number; matchReason?: string };
 type ProductResearch = {
   query: string; maxPrice: number; checkedAt: string; usedMedian: number | null; newMedian: number | null;
   expectedResalePrice: number | null; netResalePrice: number | null; sampleCount: number;
   sources: { marktplaats: { count: number; medianPrice: number | null }; otherUsed: { count: number; medianPrice: number | null }; newRetail: { count: number; medianPrice: number | null } };
+  ai?: { enabled: boolean; available: boolean; model: string; productSummary: string; keyAttributes: string[]; marketSummary: string; exactMatches: number; variants: number; reviewedOffers: number };
+  searchQueries?: string[];
   listings: ResearchListing[]; webOffers: ResearchListing[]; warnings: string[];
 };
 type UserSettings = { categories: string[]; minDiscount: number; maxDistanceKm: number | null; minPrice: number | null; maxPrice: number | null };
@@ -621,6 +624,27 @@ export default function HomePage() {
             {researchLoading ? <div className="research-loading"><span className="research-pulse" />Сравниваем объявления, б/у цены и новые товары в магазинах…</div> : null}
             {researchResult ? (
               <div className="research-report">
+                {researchResult.ai ? (
+                  <section className="research-ai-panel">
+                    <div className="research-ai-top">
+                      <span className="research-ai-kicker">AI MARKET ANALYST</span>
+                      <b className={researchResult.ai.available ? "research-ai-live" : "research-ai-off"}>
+                        {researchResult.ai.available ? "AI-анализ выполнен" : researchResult.ai.enabled ? "AI временно недоступен" : "AI не подключён"}
+                      </b>
+                    </div>
+                    <p>{researchResult.ai.productSummary || "Сопоставление найденных объявлений с поисковой моделью."}</p>
+                    {researchResult.ai.keyAttributes.length ? (
+                      <div className="research-ai-tags">{researchResult.ai.keyAttributes.map((attribute) => <span key={attribute}>{attribute}</span>)}</div>
+                    ) : null}
+                    {researchResult.ai.marketSummary ? <p className="research-ai-summary">{researchResult.ai.marketSummary}</p> : null}
+                    <div className="research-ai-stats">
+                      <span>Точные совпадения <b>{researchResult.ai.exactMatches}</b></span>
+                      <span>Другие версии <b>{researchResult.ai.variants}</b></span>
+                      <span>Проверено AI <b>{researchResult.ai.reviewedOffers}</b></span>
+                    </div>
+                    {!researchResult.ai.enabled ? <small className="research-ai-note">Добавьте OPENAI_API_KEY в переменные Vercel, чтобы включить интеллектуальное сопоставление.</small> : null}
+                  </section>
+                ) : null}
                 <div className="research-summary-grid">
                   <div><small>Б/у рынок · медиана</small><strong>{researchResult.usedMedian == null ? "—" : euro(researchResult.usedMedian)}</strong><span>{researchResult.sampleCount} сравнений</span></div>
                   <div><small>Новый товар · медиана</small><strong>{researchResult.newMedian == null ? "—" : euro(researchResult.newMedian)}</strong><span>{researchResult.sources.newRetail.count} источников</span></div>
@@ -636,7 +660,7 @@ export default function HomePage() {
                 ))}</div> : <p className="research-muted">Подходящих объявлений до указанного лимита не найдено.</p>}
                 <h4>Веб-источники: новые и подержанные товары</h4>
                 {researchResult.webOffers.length ? <div className="research-web-links">{researchResult.webOffers.slice(0, 10).map((item, index) => (
-                  <a href={item.url} target="_blank" rel="noopener noreferrer" key={item.url + index}><span>{item.title}</span><b>{euro(item.price)}</b><small>{item.source} · {item.condition === "used" ? "б/у" : item.condition === "new" ? "новый" : "состояние не определено"}</small></a>
+                  <a href={item.url} target="_blank" rel="noopener noreferrer" key={item.url + index}><span>{item.title}</span><b>{euro(item.price)}</b><small title={item.matchReason || ""}>{item.source} · {item.condition === "used" ? "б/у" : item.condition === "new" ? "новый" : "состояние не определено"} · {item.matchType === "exact" ? "точная модель" : item.matchType === "variant" ? "другая версия" : item.matchType === "related" ? "похожий товар" : "совпадение не подтверждено"}</small></a>
                 ))}</div> : <p className="research-muted">Веб-поиск не вернул достоверных цен. Marktplaats проверен отдельно.</p>}
                 {researchResult.warnings.map((warning) => <p className="research-warning" key={warning}>ⓘ {warning}</p>)}
               </div>
