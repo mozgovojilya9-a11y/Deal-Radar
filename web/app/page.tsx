@@ -13,7 +13,7 @@ type ProductResearch = {
   query: string; maxPrice: number; checkedAt: string; usedMedian: number | null; usedReferencePrice: number | null; newMedian: number | null;
   expectedResalePrice: number | null; netResalePrice: number | null; sampleCount: number;
   sources: { marktplaats: { count: number; medianPrice: number | null }; otherUsed: { count: number; medianPrice: number | null }; newRetail: { count: number; medianPrice: number | null } };
-  ai?: { enabled: boolean; available: boolean; model: string; productSummary: string; keyAttributes: string[]; marketSummary: string; exactMatches: number; variants: number; reviewedOffers: number };
+  ai?: { enabled: boolean; available: boolean; model: string; productSummary: string; keyAttributes: string[]; marketSummary: string; exactMatches: number; variants: number; reviewedOffers: number; googleSearchQueries: string[]; groundedSources: Array<{ title: string; url: string }> };
   searchQueries?: string[];
   marktplaatsSearchQueries?: string[];
   listings: ResearchListing[]; webOffers: ResearchListing[]; warnings: string[];
@@ -699,7 +699,9 @@ export default function HomePage() {
                       <span>Другие версии <b>{researchResult.ai.variants}</b></span>
                       <span>Проверено AI <b>{researchResult.ai.reviewedOffers}</b></span>
                     </div>
-                    {!researchResult.ai.enabled ? <small className="research-ai-note">Облачный AI отключён ради нулевой стоимости. Локальная AI-проверка объявлений выполняется сканером через Ollama на Mac.</small> : null}
+                    {researchResult.ai.googleSearchQueries?.length ? <small className="research-ai-note">Gemini проверил модель через Google Search: {researchResult.ai.googleSearchQueries.join(" · ")}</small> : null}
+                    {researchResult.ai.groundedSources?.length ? <div className="research-web-links">{researchResult.ai.groundedSources.map((source) => <a href={source.url} target="_blank" rel="noopener noreferrer" key={source.url}>{source.title}</a>)}</div> : null}
+                    {!researchResult.ai.enabled ? <small className="research-ai-note">Облачный AI не подключён; отображаются резервные результаты без grounded-проверки.</small> : null}
                   </section>
                 ) : null}
                 <div className="research-summary-grid">
