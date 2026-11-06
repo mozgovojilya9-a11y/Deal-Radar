@@ -40,7 +40,7 @@
       "group_regex": "\\b(?:console|pro|slim|digital|disc|cfi[\\s-]?\\d{4})\\b",
       "min_profit_eur": 50,
       "strict_group": true,
-      "require_regex": "(?=.*(?:\\bps5\\b|\\bplaystation[\\s-]*5\\b))(?=.*(?:\\bconsole\\b|\\bslim\\b|\\bpro\\b|\\b(?:digital|disc)\\s+(?:edition|versie)\\b|\\bcfi[\\s-]?\\d{4}\\b))",
+      "require_regex": "(?=.*(?:\\bps5\\b|\\bplaystation[\\s-]*5\\b))(?=.*(?:\\bconsole\\b|\\bslim\\b|\\bpro\\b|\\b(?:digital|disc)\\s+(?:edition|versie)\\b|\\bcfi[\\s-]?\\d{4}[a-z]?\\b))",
       "group_type": "model_required",
       "search_variants": [
         "playstation 5 console",
