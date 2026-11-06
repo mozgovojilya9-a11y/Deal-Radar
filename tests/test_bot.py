@@ -253,11 +253,11 @@ class ScannerTests(unittest.TestCase):
             "Meta Wayfarer Gen 1",
             "Sony camera second hand",
             "site:marktplaats.nl ray-ban",
-            "Ray Ban Meta Wayfarer",
+            "Ray Ban Meta Wayfarer Gen 2",
         ]
         self.assertEqual(
             bot.clean_ai_search_variants(q, values),
-            ["Ray-Ban Meta Wayfarer RW4012", "Ray Ban Meta Wayfarer"],
+            ["Ray-Ban Meta Wayfarer RW4012", "Ray Ban Meta Wayfarer Gen 2"],
         )
 
     def test_ai_search_plan_is_cached_for_seven_days(self):
