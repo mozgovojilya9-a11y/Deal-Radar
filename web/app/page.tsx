@@ -19,7 +19,7 @@ type ProductResearch = {
   listings: ResearchListing[]; webOffers: ResearchListing[]; warnings: string[];
 };
 type UserSettings = { categories: string[]; minDiscount: number; minPrice: number | null; maxPrice: number | null };
-const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, minPrice: null, maxPrice: 800 };
+const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, minPrice: null, maxPrice: null };
 const SETTINGS_KEY = "deal-radar-settings";
 const REFRESH_INTERVAL_MS = 120_000;
 const DISCOUNT_STEPS = [0, 10, 20, 30, 40, 50];
@@ -319,7 +319,7 @@ function DealCard({ deal, saved, onSave, onOpen }: {
 export default function HomePage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [researchQuery, setResearchQuery] = useState("");
-  const [researchMaxPrice, setResearchMaxPrice] = useState("800");
+  const [researchMaxPrice, setResearchMaxPrice] = useState("");
   const [researchIncludeUsed, setResearchIncludeUsed] = useState(true);
   const [researchIncludeNew, setResearchIncludeNew] = useState(true);
   const [researchLoading, setResearchLoading] = useState(false);
@@ -501,7 +501,7 @@ export default function HomePage() {
   async function runProductResearch() {
     const query = researchQuery.trim();
     const requestedMaxPrice = Number(researchMaxPrice);
-    const maxPrice = Number.isFinite(requestedMaxPrice) && requestedMaxPrice >= 10 ? requestedMaxPrice : (settings.maxPrice ?? 800);
+    const maxPrice = Number.isFinite(requestedMaxPrice) && requestedMaxPrice >= 10 ? requestedMaxPrice : settings.maxPrice;
     if (query.length < 3) { setResearchError("Укажи точную модель или название товара."); return; }
     const initData = window.Telegram?.WebApp?.initData || "";
     if (!initData) { setResearchError("Открой приложение внутри Telegram, чтобы запустить веб-исследование."); return; }
@@ -672,7 +672,7 @@ export default function HomePage() {
             </div>
             <div className="research-form">
               <label className="research-query"><span>Что ищем?</span><input value={researchQuery} onChange={(event) => setResearchQuery(event.target.value)} placeholder="Например: Ray-Ban Meta Wayfarer Gen 2 RW4012" maxLength={100} /></label>
-              <label className="research-budget"><span>Максимальная цена, €</span><input type="number" min="10" value={researchMaxPrice} onChange={(event) => setResearchMaxPrice(event.target.value)} /></label>
+              <label className="research-budget"><span>Максимальная цена, €</span><input type="number" min="10" value={researchMaxPrice} placeholder="Без ограничения" onChange={(event) => setResearchMaxPrice(event.target.value)} /></label>
               <fieldset className="research-condition"><legend>Источники для сравнения</legend>
                 <label><input type="checkbox" checked={researchIncludeUsed} onChange={(event) => setResearchIncludeUsed(event.target.checked)} /> Подержанные</label>
                 <label><input type="checkbox" checked={researchIncludeNew} onChange={(event) => setResearchIncludeNew(event.target.checked)} /> Новые</label>
@@ -721,7 +721,7 @@ export default function HomePage() {
                 </div>
                 <div className="research-sources"><span>Marktplaats: <b>{researchResult.sources.marktplaats.count}</b></span><span>Другие б/у площадки: <b>{researchResult.sources.otherUsed.count}</b></span><span>Магазины: <b>{researchResult.sources.newRetail.count}</b></span></div>
                 {researchResult.marktplaatsSearchQueries?.length ? <p className="research-muted">Gemini расширил поиск Marktplaats: {researchResult.marktplaatsSearchQueries.join(" · ")}</p> : null}
-                 <h4>Объявления Marktplaats до {euro(researchResult.maxPrice)}</h4>
+                 <h4>Объявления Marktplaats {researchResult.maxPrice == null ? "без ограничения цены" : "до " + euro(researchResult.maxPrice)}</h4>
                 {researchResult.listings.length ? <div className="research-offers">{researchResult.listings.slice(0, 8).map((item, index) => (
                   <a className="research-offer" href={item.url} target="_blank" rel="noopener noreferrer" key={item.url + index}>
                     <span><b>{item.title}</b><small>{item.source}</small></span><strong>{euro(item.price)}</strong>
@@ -873,7 +873,7 @@ export default function HomePage() {
             <div className="price-range">
               <input type="number" inputMode="numeric" min="0" placeholder="от" aria-label="Минимальная цена" value={settings.minPrice ?? ""} onChange={(event) => updateFilters({ minPrice: priceValue(event.target.value) })} />
               <i>—</i>
-              <input type="number" inputMode="numeric" min="0" placeholder="максимум" aria-label="Максимальная цена" value={settings.maxPrice ?? ""} onChange={(event) => updateFilters({ maxPrice: priceValue(event.target.value) })} />
+              <input type="number" inputMode="numeric" min="0" placeholder="без лимита" aria-label="Максимальная цена" value={settings.maxPrice ?? ""} onChange={(event) => updateFilters({ maxPrice: priceValue(event.target.value) })} />
             </div>
             <small className="settings-note">Укажи любую максимальную сумму. Пустое поле — без ограничения по цене.</small>
           </div>
