@@ -372,7 +372,7 @@ export async function POST(request: NextRequest) {
   const usedMedian = median(usedPrices);
   const localUsedReferencePrice = conservativeQuartile(usedPrices);
   const newMedian = median(newPrices);
-  let marketValuation = null;
+  let marketValuation: Awaited<ReturnType<typeof researchMarketValuation>> = null;
   if (isAiResearchEnabled()) {
     try {
       marketValuation = await researchMarketValuation(
