@@ -400,7 +400,7 @@ export async function POST(request: NextRequest) {
       : aiUsedPrice !== null
         ? Number((aiUsedPrice * 0.90).toFixed(2))
         : null;
-  const groundedNewPrice = marketValuation?.confidence >= 0.55
+  const groundedNewPrice = (marketValuation?.confidence ?? 0) >= 0.55
     ? marketValuation.estimatedNewPrice
     : null;
   const newRetailReference = newMedian ?? groundedNewPrice;
