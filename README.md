@@ -19,37 +19,40 @@ Supabase is not used or required. Your laptop does not need to be running.
 
 Open **Actions → deals → Run workflow** to start a manual scan. The scanner needs no GitHub secrets: it reads Marktplaats and publishes the JSON feed. The workflow needs repository Contents read/write permission. It runs about every 10 minutes; GitHub may delay scheduled starts. Each category query scans up to 5 pages × 100 results, not every listing on the entire Marktplaats site. Listings older than 30 days are excluded.
 
-## Free local AI product matching
+## Free AI product matching
 
-Deal Radar makes no paid AI API calls. The scheduled GitHub Actions scanner uses deterministic matching and price calculations, so it works without API keys. For stronger product-identity checks at no API cost, run the scanner locally on a Mac with [Ollama](https://ollama.com/download) and the `qwen2.5:3b` model. The model runs on your own computer; prompts and listing text are not sent to a hosted AI provider.
+Deal Radar uses Google's Gemini API on its free tier for product identity checks and query planning. It does not call OpenAI or any paid AI API. If the Gemini free quota is unavailable, the scheduled scanner falls back to deterministic matching; it can also use local Ollama when configured. Price medians, resale estimates, fees and ROI are calculated by code, never invented by the model.
 
-### One-time setup on macOS
+### Enable Gemini (recommended)
 
-1. Install the free Ollama app: https://ollama.com/download
-2. Open Ollama and let its local service start.
-3. In Terminal, from the Deal Radar repository, run:
+1. Create or open a Gemini API key in [Google AI Studio](https://aistudio.google.com/app/apikey).
+2. Make sure the Google Cloud project is on the **Free** usage tier and has no active Cloud Billing account linked. The free tier has per-model request and token limits; it is not unlimited.
+3. In **GitHub → Deal-Radar → Settings → Secrets and variables → Actions**, add a repository secret named `GEMINI_API_KEY`.
+4. In **Vercel → Project → Settings → Environment Variables**, add `GEMINI_API_KEY` and set its value to the same key. Keep it server-side; never add a `NEXT_PUBLIC_` prefix.
+5. Redeploy the Vercel project after adding the variable. The GitHub scanner will pick up the secret on its next scheduled run.
+
+The default model is `gemini-3.5-flash-lite`. The scheduled scanner reviews at most four new/changed listings per category per run and caches results by listing text to conserve the free quota. The manual research report uses Gemini only when the Vercel environment variable is configured.
+
+### Optional local fallback on macOS
+
+If the Gemini free quota is temporarily exhausted, you can run a local model with Ollama instead. Install [Ollama](https://ollama.com/download), then run:
 
 ```bash
 ollama pull qwen2.5:3b
 bash scripts/run_local_radar.sh
 ```
 
-The first model download can be several GB. The scanner stores its local review cache and SQLite database under `~/Library/Application Support/DealRadar`. It publishes only the resulting JSON feed to the existing `deals-data` branch. Your Git remote must already be authenticated for push access.
-
-### Optional automatic scans
-
-Run `bash scripts/install_macos_schedule.sh` to install a macOS LaunchAgent that runs the local scan every 15 minutes while the Mac is logged in and Ollama is running. Keep the Ollama app open. To remove the schedule:
+For automatic local scans every 15 minutes while your Mac is logged in and Ollama is running:
 
 ```bash
-launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.dealradar.local-scan.plist
-rm ~/Library/LaunchAgents/com.dealradar.local-scan.plist
+bash scripts/install_macos_schedule.sh
 ```
 
-The web-hosted manual research report deliberately uses free search and deterministic matching; local Ollama AI reviews are performed by the scanner and saved into the published deal feed. Price medians, resale estimates, fees and ROI are always calculated by code, never invented by the model.
+The local scanner stores its review cache and SQLite database under `~/Library/Application Support/DealRadar`. It publishes only the resulting JSON feed to the existing `deals-data` branch.
 
-### Cost and availability
+### Cost and privacy
 
-No OpenAI/Gemini key, paid AI subscription, or paid model endpoint is required. Ollama and the model are free to run locally, but use your computer's memory, electricity and disk space. Local AI scans only happen while the Mac is awake, logged in, and Ollama is running. GitHub and Vercel free plans still have their own usage limits and terms.
+Gemini free tier provides limited free model requests. Google states that content submitted on the unpaid tier may be used to improve its products, so only public listing titles/descriptions and product search terms should be sent; do not send personal or confidential information. If a billing account is linked, paid usage may be charged. Check the project's tier and usage in Google AI Studio.
 
 ## Vercel
 
