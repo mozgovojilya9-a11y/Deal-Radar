@@ -70,6 +70,12 @@ def open_db():
             qkey TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
             queries_json TEXT NOT NULL, checked_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS ai_market_references(
+            qkey TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
+            used_price_eur REAL, new_price_eur REAL, confidence REAL NOT NULL,
+            sample_count INTEGER NOT NULL, rationale TEXT, sources_json TEXT NOT NULL,
+            checked_at INTEGER NOT NULL
+        );
     """)
     return db
 
@@ -883,6 +889,130 @@ def get_ai_search_variants(db, q):
         log(f"[{qkey}] Gemini added {len(variants)} search variants: {variants}")
     return variants
 
+
+
+def get_ai_market_reference(db, q):
+    """Use Gemini Google Search grounding for a cached, evidence-based market reference."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key or not q.get("ai_discovery"):
+        return None
+    qkey = str(q.get("key") or "")
+    fingerprint_data = {
+        "query": q.get("query"), "label": q.get("label"),
+        "include_any": q.get("include_any", []),
+        "search_variants": q.get("search_variants", []),
+        "group_regex": q.get("group_regex"),
+    }
+    fingerprint = hashlib.sha256(json.dumps(fingerprint_data, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    now = int(time.time())
+    cached = db.execute(
+        "SELECT fingerprint, used_price_eur, new_price_eur, confidence, sample_count, rationale, sources_json, checked_at "
+        "FROM ai_market_references WHERE qkey=?",
+        (qkey,),
+    ).fetchone()
+    if cached and cached[0] == fingerprint:
+        ttl = 86400 if (cached[1] or cached[2]) else 21600
+        if now - int(cached[7]) < ttl:
+            try:
+                return {
+                    "used_price_eur": cached[1], "new_price_eur": cached[2],
+                    "confidence": float(cached[3]), "sample_count": int(cached[4]),
+                    "rationale": cached[5] or "", "sources": json.loads(cached[6] or "[]"),
+                }
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "used_price_eur": {"type": "number"},
+            "new_price_eur": {"type": "number"},
+            "confidence": {"type": "number"},
+            "sample_count": {"type": "integer"},
+            "rationale": {"type": "string"},
+        },
+        "required": ["used_price_eur", "new_price_eur", "confidence", "sample_count", "rationale"],
+    }
+    system = (
+        "You are a conservative Dutch product-market pricing analyst. Use Google Search grounding to research "
+        "the exact product model and current Netherlands/EU prices in EUR. Separate ordinary used/private-seller "
+        "prices from new retail prices; do not mix refurbished products into ordinary used prices. Preserve exact "
+        "generation, model code, storage, size and bundle. Ignore accessories, parts, damaged goods and unrelated "
+        "variants. Return realistic conservative asking-price estimates supported by current search evidence. "
+        "Never invent prices, observations, availability or sources. Return 0 for an estimate when evidence is weak. "
+        "sample_count means comparable price observations actually verified, not search-result count. Return JSON only."
+    )
+    user = json.dumps({
+        "target": {
+            "key": q.get("key"), "label": q.get("label"), "query": q.get("query"),
+            "search_variants": q.get("search_variants", []),
+            "include_any": q.get("include_any", []), "group_regex": q.get("group_regex"),
+            "exclude": q.get("exclude", []),
+        },
+        "market": "Netherlands", "currency": "EUR",
+        "task": "Estimate current ordinary used-market price and new-retail price separately.",
+    }, ensure_ascii=False)
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + urllib.parse.quote(model, safe="") + ":generateContent"
+    payload = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": user}]}],
+        "tools": [{"google_search": {}}],
+        "generationConfig": {
+            "temperature": 0.1, "maxOutputTokens": 900,
+            "responseMimeType": "application/json",
+            "responseSchema": _structured_schema(schema),
+        },
+    }
+    try:
+        request = urllib.request.Request(
+            endpoint, data=json.dumps(payload).encode("utf-8"),
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=18) as response:
+            data = json.load(response)
+        candidate = data.get("candidates", [{}])[0]
+        raw = "".join(part.get("text", "") for part in candidate.get("content", {}).get("parts", []))
+        parsed = json.loads(raw)
+        def valid_price(value):
+            try:
+                number = float(value)
+                return round(number, 2) if 10 <= number <= 50000 else None
+            except (TypeError, ValueError):
+                return None
+        used_price = valid_price(parsed.get("used_price_eur"))
+        new_price = valid_price(parsed.get("new_price_eur"))
+        confidence = max(0.0, min(1.0, float(parsed.get("confidence") or 0)))
+        sample_count = max(0, min(100, int(parsed.get("sample_count") or 0)))
+        sources = []
+        metadata = candidate.get("groundingMetadata") or {}
+        for chunk in metadata.get("groundingChunks", []):
+            web = chunk.get("web") or {}
+            url = str(web.get("uri") or "")
+            if url.startswith("https://") and url not in {x["url"] for x in sources}:
+                sources.append({"title": str(web.get("title") or "Google Search source")[:180], "url": url})
+        sources = sources[:8]
+        rationale = str(parsed.get("rationale") or "")[:700]
+    except Exception as exc:
+        log(f"[{qkey}] Gemini Google Search pricing unavailable: {type(exc).__name__}: {str(exc)[:120]}")
+        used_price, new_price, confidence, sample_count, rationale, sources = None, None, 0.0, 0, "", []
+
+    db.execute(
+        "INSERT OR REPLACE INTO ai_market_references "
+        "(qkey,fingerprint,used_price_eur,new_price_eur,confidence,sample_count,rationale,sources_json,checked_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?)",
+        (qkey, fingerprint, used_price, new_price, confidence, sample_count, rationale,
+         json.dumps(sources, ensure_ascii=False), now),
+    )
+    db.commit()
+    if used_price or new_price:
+        log(f"[{qkey}] Gemini Google Search market reference: used={used_price}, new={new_price}, "
+            f"confidence={confidence:.0%}, samples={sample_count}, sources={len(sources)}")
+    return {
+        "used_price_eur": used_price, "new_price_eur": new_price,
+        "confidence": confidence, "sample_count": sample_count,
+        "rationale": rationale, "sources": sources,
+    }
 
 def review_listings_with_ai(db, q, items, max_new=None):
     """Use cached AI decisions; only send new/changed listings to the model."""
