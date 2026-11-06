@@ -528,7 +528,7 @@ export default function HomePage() {
             title: selected.title, description: selected.description || "", price: selected.price,
             marketPrice: selected.market_price ?? null, newPrice: selected.new_price ?? null,
             estimatedProfit: selected.estimated_profit ?? null, category: selected.category_label,
-            city: selected.city || "Нидерланды", condition: selected.condition || "unknown",
+            city: selected.city || "Нидерланды",
             warningFlags: selected.warning_flags || [], listingUrl: selected.listing_url
           },
           messages: nextMessages
@@ -536,7 +536,7 @@ export default function HomePage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "AI временно недоступен.");
-      setAdvisorMessages((current) => [...current, { role: "model", text: String(data.answer || "Не удалось сформировать ответ.") }].slice(-12));
+      setAdvisorMessages((current) => [...current, { role: "model" as const, text: String(data.answer || "Не удалось сформировать ответ.") }].slice(-12));
     } catch (error) {
       setAdvisorError(error instanceof Error ? error.message : "Не удалось отправить вопрос.");
     } finally {
