@@ -13,7 +13,7 @@ export type AiOfferVerdict = {
   id: string;
   matchType: "exact" | "variant" | "related" | "accessory" | "unrelated";
   confidence: number;
-  condition: "used" | "new" | "unknown";
+  condition: "used" | "new" | "refurbished" | "unknown";
   reason: string;
 };
 
@@ -48,7 +48,7 @@ const REVIEW_SCHEMA = {
           id: { type: "string" },
           matchType: { type: "string", enum: ["exact", "variant", "related", "accessory", "unrelated"] },
           confidence: { type: "number" },
-          condition: { type: "string", enum: ["used", "new", "unknown"] },
+          condition: { type: "string", enum: ["used", "new", "refurbished", "unknown"] },
           reason: { type: "string" },
         },
         required: ["id", "matchType", "confidence", "condition", "reason"],
@@ -274,7 +274,7 @@ export async function reviewAiOffers(
       "Classify accessories, parts, repairs, empty boxes, incompatible bundles, and unrelated models as accessory or unrelated.",
       "Use exact only when the offer is genuinely comparable to the requested product. Use variant when it is the same family but a materially different configuration.",
       "Do not infer a price from text. Do not create or alter IDs, URLs, prices, or source names.",
-      "Set condition from explicit listing evidence; otherwise use unknown. Keep each reason concise and evidence-based.",
+      "Keep refurbished/reconditioned separate from ordinary used and new. Set condition from explicit listing evidence; otherwise use unknown. Keep each reason concise and evidence-based.",
       "The summary must describe only what the supplied listings support and must mention thin or conflicting evidence. Return JSON only.",
     ].join(" "),
     JSON.stringify({ query, offers: compactOffers }),
@@ -290,7 +290,7 @@ export async function reviewAiOffers(
       matchType: (["exact", "variant", "related", "accessory", "unrelated"].includes(String(item.matchType))
         ? item.matchType : "unrelated") as AiOfferVerdict["matchType"],
       confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0)),
-      condition: (["used", "new", "unknown"].includes(String(item.condition))
+      condition: (["used", "new", "refurbished", "unknown"].includes(String(item.condition))
         ? item.condition : "unknown") as AiOfferVerdict["condition"],
       reason: typeof item.reason === "string" ? item.reason.slice(0, 260) : "",
     }));
