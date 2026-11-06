@@ -750,6 +750,16 @@ def clean_ai_search_variants(q, values, limit=2):
         re.sub(r"[^a-z0-9]", "", str(term).lower())
         for term in (q.get("search_variants") or [])
     }
+    target_text = " ".join(
+        str(value) for value in [q.get("query"), q.get("label"), *(q.get("search_variants") or [])]
+        if value
+    )
+    target_generations = set(re.findall(
+        r"\b(?:gen(?:eration)?|generatie)\s*[.-]?\s*(\d+)\b|\b(\d+)(?:st|nd|rd|th)?\s+generation\b",
+        target_text, re.I,
+    ))
+    target_generations = {next((part for part in match if part), "") for match in target_generations}
+    target_generations.discard("")
     clean = []
     for value in values:
         if not isinstance(value, str):
@@ -759,6 +769,14 @@ def clean_ai_search_variants(q, values, limit=2):
             continue
         normalized = re.sub(r"[^a-z0-9]", "", term.lower())
         if normalized in existing or not any(token in normalized for token in anchor_tokens):
+            continue
+        suggested_generations = re.findall(
+            r"\b(?:gen(?:eration)?|generatie)\s*[.-]?\s*(\d+)\b|\b(\d+)(?:st|nd|rd|th)?\s+generation\b",
+            term, re.I,
+        )
+        suggested_generations = {next((part for part in match if part), "") for match in suggested_generations}
+        suggested_generations.discard("")
+        if target_generations and suggested_generations and not suggested_generations.issubset(target_generations):
             continue
         if normalized not in {re.sub(r"[^a-z0-9]", "", x.lower()) for x in clean}:
             clean.append(term)
