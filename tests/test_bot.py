@@ -66,7 +66,7 @@ class ScannerTests(unittest.TestCase):
         feed = bot.load_feed()
         self.assertEqual(feed["deals"][0]["listing_id"], "99")
         self.assertEqual(feed["deals"][0]["status"], "strong")
-        self.assertEqual(sum(d["status"] == "candidate" for d in feed["deals"]), 6)
+        self.assertEqual([d["listing_id"] for d in feed["deals"]], ["99"])
         self.assertEqual(feed["deals"][0]["price"], 250.0)
         self.assertEqual(feed["deals"][0]["market_price"], 400.0)
         self.assertAlmostEqual(feed["deals"][0]["discount"], 0.375, places=3)
