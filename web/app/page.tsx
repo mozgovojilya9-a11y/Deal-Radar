@@ -189,44 +189,19 @@ export default function HomePage() {
   }, [deals, saved, search, tab, settings]);
 
   function toggleSaved(id: string) {
-    const wasSaved = saved.includes(id);
-    const next = wasSaved ? saved.filter((item) => item !== id) : [...saved, id];
-    setSaved(next);
-    localStorage.setItem("deal-radar-favorites", JSON.stringify(next));
+    setSaved((current) => {
+      const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
+      localStorage.setItem("deal-radar-favorites", JSON.stringify(next));
+      return next;
+    });
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred("light");
-    if (telegramInitData) {
-      void fetch(wasSaved ? `/api/favorites?dealId=${encodeURIComponent(id)}` : "/api/favorites", {
-        method: wasSaved ? "DELETE" : "POST",
-        headers: telegramHeaders(true),
-        ...(wasSaved ? {} : { body: JSON.stringify({ dealId: id }) })
-      }).catch((error) => console.warn("Favorites sync failed", error));
-    }
   }
 
-  async function saveSettings() {
-    setSettingsSaving(true);
-    setSettingsMessage("");
-    try {
-      const response = await fetch("/api/settings", { method: "PUT", headers: telegramHeaders(true), body: JSON.stringify(settingsDraft) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Не удалось сохранить настройки");
-      setSettings(data.settings as UserSettings);
-      setSettingsDraft(data.settings as UserSettings);
-      setSettingsMessage("Настройки сохранены");
-    } catch (error) {
-      setSettingsMessage(error instanceof Error ? error.message : "Ошибка сохранения");
-    } finally { setSettingsSaving(false); }
+  function saveSettings() {
+    setSettings(settingsDraft);
+    localStorage.setItem("deal-radar-settings", JSON.stringify(settingsDraft));
+    setSettingsMessage("Настройки сохранены на этом устройстве");
   }
-
-  useEffect(() => {
-    setPriceHistory([]);
-    if (!selected || !telegramInitData) return;
-    const controller = new AbortController();
-    fetch(`/api/deals/${encodeURIComponent(selected.listing_id)}/history`, { headers: telegramHeaders(), cache: "no-store", signal: controller.signal })
-      .then(async (response) => { if (response.ok) { const data = await response.json(); setPriceHistory(Array.isArray(data.points) ? data.points as PricePoint[] : []); } })
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, [selected, telegramInitData]);
 
   const strongest = deals.length ? Math.max(...deals.map((deal) => Number(deal.discount) || 0)) : 0;
   const activeCategory = CATEGORIES.find((item) => item.key === category)?.label || "Все категории";
