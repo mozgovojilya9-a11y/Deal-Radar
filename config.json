@@ -393,7 +393,11 @@
       "min_price": 350,
       "max_price": 1300,
       "threshold": 0.25,
-      "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b"
+      "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b",
+      "exclude_regex": [
+        "^(?:scherm|display|lcd|oled|touchscreen|sensor\\s*flex|camera|batterij|accu|speaker|luidspreker|onderdeel(?:en)?|service\\s*pack|repair|reparatie)\\b",
+        "\\b(?:service\\s*pack|sensor\\s*flex|pulled|vervangingsscherm|replacement\\s*part|losse?\\s+scherm|voor\\s+onderdelen)\\b"
+      ]
     },
     {
       "key": "iphone-15",
@@ -417,7 +421,11 @@
       "min_price": 300,
       "max_price": 1200,
       "threshold": 0.25,
-      "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b"
+      "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b",
+      "exclude_regex": [
+        "^(?:scherm|display|lcd|oled|touchscreen|sensor\\s*flex|camera|batterij|accu|speaker|luidspreker|onderdeel(?:en)?|service\\s*pack|repair|reparatie)\\b",
+        "\\b(?:service\\s*pack|sensor\\s*flex|pulled|vervangingsscherm|replacement\\s*part|losse?\\s+scherm|voor\\s+onderdelen)\\b"
+      ]
     },
     {
       "key": "iphone-14",
@@ -441,7 +449,11 @@
       "min_price": 250,
       "max_price": 1000,
       "threshold": 0.25,
-      "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b"
+      "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b",
+      "exclude_regex": [
+        "^(?:scherm|display|lcd|oled|touchscreen|sensor\\s*flex|camera|batterij|accu|speaker|luidspreker|onderdeel(?:en)?|service\\s*pack|repair|reparatie)\\b",
+        "\\b(?:service\\s*pack|sensor\\s*flex|pulled|vervangingsscherm|replacement\\s*part|losse?\\s+scherm|voor\\s+onderdelen)\\b"
+      ]
     },
     {
       "key": "iphone-13",
@@ -465,7 +477,11 @@
       "min_price": 200,
       "max_price": 900,
       "threshold": 0.25,
-      "group_regex": "\\b(pro ?max|pro ?max|pro|mini|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b"
+      "group_regex": "\\b(pro ?max|pro ?max|pro|mini|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b",
+      "exclude_regex": [
+        "^(?:scherm|display|lcd|oled|touchscreen|sensor\\s*flex|camera|batterij|accu|speaker|luidspreker|onderdeel(?:en)?|service\\s*pack|repair|reparatie)\\b",
+        "\\b(?:service\\s*pack|sensor\\s*flex|pulled|vervangingsscherm|replacement\\s*part|losse?\\s+scherm|voor\\s+onderdelen)\\b"
+      ]
     },
     {
       "key": "iphone-12",
@@ -489,7 +505,11 @@
       "min_price": 150,
       "max_price": 700,
       "threshold": 0.25,
-      "group_regex": "\\b(pro ?max|pro|mini|64 ?gb|128 ?gb|256 ?gb)\\b"
+      "group_regex": "\\b(pro ?max|pro|mini|64 ?gb|128 ?gb|256 ?gb)\\b",
+      "exclude_regex": [
+        "^(?:scherm|display|lcd|oled|touchscreen|sensor\\s*flex|camera|batterij|accu|speaker|luidspreker|onderdeel(?:en)?|service\\s*pack|repair|reparatie)\\b",
+        "\\b(?:service\\s*pack|sensor\\s*flex|pulled|vervangingsscherm|replacement\\s*part|losse?\\s+scherm|voor\\s+onderdelen)\\b"
+      ]
     }
   ]
 }

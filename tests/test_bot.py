@@ -87,6 +87,15 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual([item["listing_id"] for item in feed["deals"]], ["old-deal"])
         self.assertEqual(feed["deals"][0]["posted_at"], posted)
 
+    def test_iphone_search_rejects_replacement_parts_not_phones(self):
+        with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as handle:
+            config = json.load(handle)
+        iphone = next(q for q in config["queries"] if q["key"] == "iphone-16")
+        self.assertFalse(bot.title_matches_query(iphone, "Scherm voor iPhone 16 Plus Zwart Service Pack"))
+        self.assertFalse(bot.title_matches_query(iphone, "Scherm met Sensor Flex voor iPhone 16 Pro Max Zwart Pulled"))
+        self.assertTrue(bot.title_matches_query(iphone, "Apple iPhone 16 Zwart, 88% Batterijconditie"))
+        self.assertTrue(bot.title_matches_query(iphone, "iPhone 16 Pro Max 256GB - scherm krasvrij"))
+
     def test_dutch_marktplaats_date_labels_are_parsed(self):
         now_label = f"{datetime.now(timezone.utc).day} {['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'][datetime.now(timezone.utc).month - 1]} {datetime.now(timezone.utc).year % 100:02d}"
         self.assertLess(bot.age_hours(now_label), 1)
