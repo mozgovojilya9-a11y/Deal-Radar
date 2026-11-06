@@ -19,7 +19,7 @@ type ProductResearch = {
   listings: ResearchListing[]; webOffers: ResearchListing[]; warnings: string[];
 };
 type UserSettings = { categories: string[]; minDiscount: number; maxDistanceKm: number | null; minPrice: number | null; maxPrice: number | null };
-const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, maxDistanceKm: null, minPrice: null, maxPrice: 800 };
+const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, maxDistanceKm: null, minPrice: null, maxPrice: null };
 const SETTINGS_KEY = "deal-radar-settings";
 const REFRESH_INTERVAL_MS = 120_000;
 const DISCOUNT_STEPS = [0, 10, 20, 30, 40, 50];
@@ -229,7 +229,7 @@ function matchesSearchIntent(product: string, query: string, title = product): b
 
 function readSettings(raw: unknown): UserSettings {
   const stored = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const positive = (value: unknown, max = 800) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.min(max, value) : null);
+  const positive = (value: unknown, max = 5000) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.min(max, value) : null);
   const categories = Array.isArray(stored.categories) ? stored.categories.filter((key): key is string => typeof key === "string")
     .map((key) => key === "airpods-pro" ? "airpods-pro-3" : key === "airpods" ? "airpods-5" : key) : [];
   return {
@@ -237,7 +237,7 @@ function readSettings(raw: unknown): UserSettings {
     minDiscount: typeof stored.minDiscount === "number" && Number.isInteger(stored.minDiscount) ? Math.min(90, Math.max(0, stored.minDiscount)) : 0,
     maxDistanceKm: positive(stored.maxDistanceKm, 100),
     minPrice: positive(stored.minPrice),
-    maxPrice: positive(stored.maxPrice)
+    maxPrice: stored.maxPrice === 800 ? null : positive(stored.maxPrice, 5000)
   };
 }
 
@@ -318,7 +318,7 @@ function DealCard({ deal, saved, onSave, onOpen }: {
 export default function HomePage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [researchQuery, setResearchQuery] = useState("");
-  const [researchMaxPrice, setResearchMaxPrice] = useState("800");
+  const [researchMaxPrice, setResearchMaxPrice] = useState("5000");
   const [researchIncludeUsed, setResearchIncludeUsed] = useState(true);
   const [researchIncludeNew, setResearchIncludeNew] = useState(true);
   const [researchLoading, setResearchLoading] = useState(false);
@@ -490,7 +490,7 @@ export default function HomePage() {
 
   function updateFilters(patch: Partial<UserSettings>) {
     const safePatch = { ...patch };
-    if (typeof safePatch.maxPrice === "number") safePatch.maxPrice = Math.min(800, Math.max(0, safePatch.maxPrice));
+    if (typeof safePatch.maxPrice === "number") safePatch.maxPrice = Math.min(5000, Math.max(0, safePatch.maxPrice));
     if (typeof safePatch.maxDistanceKm === "number") safePatch.maxDistanceKm = Math.min(100, Math.max(5, safePatch.maxDistanceKm));
     const next = { ...settings, ...safePatch };
     setSettings(next);
@@ -499,7 +499,7 @@ export default function HomePage() {
 
   async function runProductResearch() {
     const query = researchQuery.trim();
-    const maxPrice = Math.min(800, Math.max(10, Number(researchMaxPrice) || 800));
+    const maxPrice = Math.min(5000, Math.max(10, Number(researchMaxPrice) || 5000));
     if (query.length < 3) { setResearchError("Укажи точную модель или название товара."); return; }
     const initData = window.Telegram?.WebApp?.initData || "";
     if (!initData) { setResearchError("Открой приложение внутри Telegram, чтобы запустить веб-исследование."); return; }
@@ -670,7 +670,7 @@ export default function HomePage() {
             </div>
             <div className="research-form">
               <label className="research-query"><span>Что ищем?</span><input value={researchQuery} onChange={(event) => setResearchQuery(event.target.value)} placeholder="Например: Ray-Ban Meta Wayfarer Gen 2 RW4012" maxLength={100} /></label>
-              <label className="research-budget"><span>Максимальная цена, €</span><input type="number" min="10" max="800" value={researchMaxPrice} onChange={(event) => setResearchMaxPrice(String(Math.min(800, Math.max(10, Number(event.target.value) || 10))))} /></label>
+              <label className="research-budget"><span>Максимальная цена, €</span><input type="number" min="10" max="5000" value={researchMaxPrice} onChange={(event) => setResearchMaxPrice(String(Math.min(5000, Math.max(10, Number(event.target.value) || 10))))} /></label>
               <fieldset className="research-condition"><legend>Источники для сравнения</legend>
                 <label><input type="checkbox" checked={researchIncludeUsed} onChange={(event) => setResearchIncludeUsed(event.target.checked)} /> Подержанные</label>
                 <label><input type="checkbox" checked={researchIncludeNew} onChange={(event) => setResearchIncludeNew(event.target.checked)} /> Новые</label>
@@ -867,8 +867,9 @@ export default function HomePage() {
             <div className="price-range">
               <input type="number" inputMode="numeric" min="0" placeholder="от" aria-label="Минимальная цена" value={settings.minPrice ?? ""} onChange={(event) => updateFilters({ minPrice: priceValue(event.target.value) })} />
               <i>—</i>
-              <input type="number" inputMode="numeric" min="0" max="800" placeholder="до €800" aria-label="Максимальная цена" value={settings.maxPrice ?? ""} onChange={(event) => updateFilters({ maxPrice: priceValue(event.target.value) })} />
+              <input type="number" inputMode="numeric" min="0" max="5000" placeholder="до €5 000" aria-label="Максимальная цена" value={settings.maxPrice ?? ""} onChange={(event) => updateFilters({ maxPrice: priceValue(event.target.value) })} />
             </div>
+            <small className="settings-note">Пустое поле — без личного ограничения. В каталоге сканируются цены до €5 000.</small>
           </div>
           <div className="filter-group grow">
             <span className="filter-label">Скидка</span>
