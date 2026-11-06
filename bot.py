@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.environ.get("DEAL_CONFIG", os.path.join(HERE, "config.json"))
 DB_PATH = os.environ.get("DEAL_DB", os.path.join(HERE, "state.db"))
+FEED_PATH = os.environ.get("DEAL_FEED", os.path.join(HERE, "data", "deals.json"))
 API = "https://www.marktplaats.nl/lrp/api/search"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
@@ -180,24 +181,46 @@ def risks(it):
     return [label for rx, label in SOFT if rx.search(it["text"])]
 
 
-def supabase_upsert_deal(q, it, med, discount, flags, grp):
-    """Publish a qualified deal to Supabase for the Mini App. Optional until secrets are configured."""
-    supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
-    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-    if not supabase_url or not service_key:
-        return False
-    payload = {
+def load_feed():
+    """Load the public Mini App feed from the GitHub-backed JSON file."""
+    os.makedirs(os.path.dirname(FEED_PATH), exist_ok=True)
+    try:
+        with open(FEED_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return {"updatedAt": None, "deals": data}
+        if isinstance(data, dict) and isinstance(data.get("deals"), list):
+            return data
+    except FileNotFoundError:
+        pass
+    except (OSError, json.JSONDecodeError) as exc:
+        log("не удалось прочитать каталог:", type(exc).__name__, str(exc)[:160])
+    return {"updatedAt": None, "deals": []}
+
+
+def save_feed(data):
+    """Atomically save the current feed; GitHub Actions publishes this file."""
+    os.makedirs(os.path.dirname(FEED_PATH), exist_ok=True)
+    tmp_path = FEED_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp_path, FEED_PATH)
+
+
+def make_feed_deal(q, it, med, discount, flags, grp):
+    return {
         "listing_id": it["id"],
         "title": it["title"],
         "description": it.get("description") or "",
-        "price": it["price"],
+        "price": round(float(it["price"]), 2),
         "market_price": round(float(med), 2),
         "discount": round(float(discount), 4),
         "category_key": q["key"],
         "category_label": q["label"],
         "model_group": grp,
         "city": it.get("city") or "",
-        "distance_km": it.get("dist_km"),
+        "distance_km": round(float(it["dist_km"]), 2) if it.get("dist_km") is not None else None,
         "listing_url": it["url"],
         "image_url": it.get("image_url"),
         "warning_flags": flags,
@@ -205,86 +228,7 @@ def supabase_upsert_deal(q, it, med, discount, flags, grp):
         "detected_at": datetime.now(timezone.utc).isoformat(),
         "active": True,
     }
-    endpoint = supabase_url + "/rest/v1/deals?on_conflict=listing_id"
-    req = urllib.request.Request(
-        endpoint,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "apikey": service_key,
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates,return=minimal",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as response:
-            if response.status not in (200, 201, 204):
-                log("Supabase: неожиданный HTTP статус", response.status)
-                return False
-        return True
-    except Exception as exc:
-        # Do not print request headers or secrets. Telegram notification remains independent.
-        log("Supabase: не удалось сохранить объявление:", type(exc).__name__, str(exc)[:180])
-        return False
 
-
-
-def supabase_record_price(listing_id, price, market_price=None, discount=None):
-    """Append one observation for a deal already published to the Mini App."""
-    base = os.environ.get("SUPABASE_URL", "").rstrip("/")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-    if not base or not key:
-        return False
-    payload = {
-        "listing_id": listing_id,
-        "price": round(float(price), 2),
-        "market_price": round(float(market_price), 2) if market_price is not None else None,
-        "discount": round(float(discount), 4) if discount is not None else None,
-        "observed_at": datetime.now(timezone.utc).isoformat(),
-    }
-    req = urllib.request.Request(
-        base + "/rest/v1/deal_price_history",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"apikey": key, "Content-Type": "application/json", "Prefer": "return=minimal"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as response:
-            return response.status in (200, 201, 204)
-    except Exception as exc:
-        log("Supabase history: не удалось сохранить цену:", type(exc).__name__, str(exc)[:140])
-        return False
-
-
-def supabase_record_run(found, new, errors):
-    """Publish scanner health counters for the Mini App dashboard."""
-    base = os.environ.get("SUPABASE_URL", "").rstrip("/")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-    if not base or not key:
-        return False
-    payload = {
-        "id": 1,
-        "last_run_at": datetime.now(timezone.utc).isoformat(),
-        "last_run_found": int(found),
-        "last_run_new": int(new),
-        "last_run_errors": int(errors),
-    }
-    req = urllib.request.Request(
-        base + "/rest/v1/bot_status?on_conflict=id",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "apikey": key,
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates,return=minimal",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as response:
-            return response.status in (200, 201, 204)
-    except Exception as exc:
-        log("Supabase status: не удалось сохранить статистику:", type(exc).__name__, str(exc)[:140])
-        return False
 
 def tg(method, payload):
     token = os.environ.get("TELEGRAM_TOKEN")
@@ -324,6 +268,12 @@ def run_once(cfg, db, dry=False):
     window = now - cfg.get("market_days", 21) * 86400
     min_n, fails, sent_count = cfg.get("min_samples", 8), 0, 0
     total_checked = 0
+    feed_doc = load_feed()
+    feed_deals = {
+        str(deal.get("listing_id")): deal
+        for deal in feed_doc.get("deals", [])
+        if isinstance(deal, dict) and deal.get("listing_id")
+    }
     for q in cfg["queries"]:
         qkey = q["key"]
         existing = db.execute("SELECT COUNT(*) FROM listings WHERE qkey=?", (qkey,)).fetchone()[0]
@@ -353,9 +303,6 @@ def run_once(cfg, db, dry=False):
                 db.execute("INSERT INTO listings VALUES(?,?,?,?,?,?,?)", (it["id"], qkey, grp, it["title"], it["price"], now, now))
                 new_items.append((it, grp))
         db.commit()
-        if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
-            for tracked in tracked_updates:
-                supabase_record_price(tracked["id"], tracked["price"])
         for it, grp in new_items:
             age = age_hours(it["date"])
             if age is None and first_run:
@@ -378,9 +325,7 @@ def run_once(cfg, db, dry=False):
             discount = 1 - it["price"] / med
             if discount < need:
                 continue
-            if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
-                if supabase_upsert_deal(q, it, med, discount, flags, grp):
-                    supabase_record_price(it["id"], it["price"], med, discount)
+            feed_deals[it["id"]] = make_feed_deal(q, it, med, discount, flags, grp)
             send(format_deal(q, it, med, n, kind, discount, flags), dry)
             db.execute("INSERT OR IGNORE INTO sent VALUES(?,?)", (it["id"], now))
             db.commit()
@@ -394,8 +339,28 @@ def run_once(cfg, db, dry=False):
             send("⚠️ Бот не смог получить данные с Marktplaats (возможно, блокировка или смена формата). Проверьте логи.", dry)
             db.execute("INSERT OR REPLACE INTO meta VALUES('warned',?)", (str(now),))
             db.commit()
-    if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
-        supabase_record_run(total_checked, sent_count, fails)
+    # Keep only recent listings; old offers should not remain in the public feed.
+    cutoff = now - 72 * 3600
+    fresh_deals = []
+    for deal in feed_deals.values():
+        try:
+            detected = datetime.fromisoformat(str(deal.get("detected_at", "")).replace("Z", "+00:00"))
+            if detected.tzinfo is None:
+                detected = detected.replace(tzinfo=timezone.utc)
+            if detected.timestamp() >= cutoff:
+                fresh_deals.append(deal)
+        except (TypeError, ValueError):
+            continue
+    fresh_deals.sort(key=lambda item: item.get("detected_at") or "", reverse=True)
+    fresh_deals = fresh_deals[:200]
+    if fresh_deals != feed_doc.get("deals", []):
+        feed_doc = {
+            "updatedAt": datetime.now(timezone.utc).isoformat(),
+            "deals": fresh_deals,
+        }
+        if not dry:
+            save_feed(feed_doc)
+            log(f"каталог обновлён: {len(fresh_deals)} предложений")
     log(f"готово: проверено объявлений {total_checked}, отправлено {sent_count}, ошибок запросов {fails}")
 
 def get_chat_id():
