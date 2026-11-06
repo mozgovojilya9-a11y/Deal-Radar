@@ -5,7 +5,7 @@
   "seed_pages": 5,
   "min_samples": 8,
   "market_days": 21,
-  "max_age_hours": 168,
+  "max_age_hours": 720,
   "queries": [
     {
       "key": "ps5",
@@ -510,6 +510,51 @@
         "^(?:scherm|display|lcd|oled|touchscreen|sensor\\s*flex|camera|batterij|accu|speaker|luidspreker|onderdeel(?:en)?|service\\s*pack|repair|reparatie)\\b",
         "\\b(?:service\\s*pack|sensor\\s*flex|pulled|vervangingsscherm|replacement\\s*part|losse?\\s+scherm|voor\\s+onderdelen)\\b"
       ]
+    },
+    {
+      "key": "televisions",
+      "label": "Телевизоры",
+      "query": "televisie",
+      "include_any": [
+        "televisie",
+        "television",
+        "smart tv",
+        "tv"
+      ],
+      "exclude": [
+        "tv meubel",
+        "tv-meubel",
+        "televisiekast",
+        "tv kast",
+        "tv-kast",
+        "tv standaard",
+        "tv-standaard",
+        "tv beugel",
+        "tv-beugel",
+        "muurbeugel",
+        "ophangbeugel",
+        "afstandsbediening",
+        "afstandbediening",
+        "remote",
+        "onderdelen",
+        "onderdeel",
+        "scherm",
+        "display",
+        "paneel",
+        "backlight",
+        "voeding",
+        "defect",
+        "kapot",
+        "reparatie",
+        "tuner",
+        "chromecast",
+        "fire tv stick",
+        "android tv box",
+        "tv box"
+      ],
+      "min_price": 60,
+      "max_price": 1500,
+      "threshold": 0.25
     }
   ]
 }

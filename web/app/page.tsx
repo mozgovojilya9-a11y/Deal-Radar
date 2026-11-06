@@ -20,6 +20,7 @@ const CATEGORIES = [
   { key: "iphone-12", label: "iPhone 12", icon: "▣" },
   { key: "ps5", label: "PlayStation 5", icon: "⌘" },
   { key: "ps4", label: "PlayStation 4", icon: "⌘" },
+  { key: "televisions", label: "Телевизоры", icon: "▣" },
   { key: "airpods-pro-3", label: "AirPods Pro 3", icon: "◉" },
   { key: "airpods-max", label: "AirPods Max", icon: "◉" },
   { key: "airpods-5", label: "AirPods 5", icon: "◉" },
