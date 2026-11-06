@@ -1,6 +1,12 @@
 name: deals
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "bot.py"
+      - "config.json"
+      - ".github/workflows/deals.yml"
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:

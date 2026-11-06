@@ -268,6 +268,12 @@ def run_once(cfg, db, dry=False):
     window = now - cfg.get("market_days", 21) * 86400
     min_n, fails, sent_count = cfg.get("min_samples", 8), 0, 0
     total_checked = 0
+    total_accepted = 0
+    total_candidates = 0
+    skipped_age = 0
+    skipped_risk = 0
+    skipped_samples = 0
+    skipped_discount = 0
     feed_doc = load_feed()
     feed_deals = {
         str(deal.get("listing_id")): deal
@@ -287,29 +293,36 @@ def run_once(cfg, db, dry=False):
             time.sleep(random.uniform(2, 4))
             continue
         total_checked += len(raw)
-        new_items = []
+        candidates = {}
         for l in raw:
             it = parse_listing(l)
             if not accept(q, it, cfg):
                 continue
+            total_accepted += 1
             grp = group_of(q, it["text"])
             known = db.execute("SELECT 1 FROM listings WHERE id=?", (it["id"],)).fetchone()
             if known:
                 db.execute("UPDATE listings SET last_seen=?, price=? WHERE id=?", (now, it["price"], it["id"]))
             else:
                 db.execute("INSERT INTO listings VALUES(?,?,?,?,?,?,?)", (it["id"], qkey, grp, it["title"], it["price"], now, now))
-                new_items.append((it, grp))
+            # Re-evaluate every currently visible, unsent listing. A listing may
+            # become a genuine deal only after more comparable market samples arrive.
+            candidates[it["id"]] = (it, grp)
         db.commit()
-        for it, grp in new_items:
+        for it, grp in candidates.values():
+            total_candidates += 1
             age = age_hours(it["date"])
             if age is None and first_run:
+                skipped_age += 1
                 continue
             if age is not None and age > cfg.get("max_age_hours", 36):
+                skipped_age += 1
                 continue
             if db.execute("SELECT 1 FROM sent WHERE id=?", (it["id"],)).fetchone():
                 continue
             flags = risks(it)
             if flags is None:
+                skipped_risk += 1
                 continue
             n, med = market_stats(db, qkey, grp, it["id"], window)
             kind, need = "model", q.get("threshold", 0.2)
@@ -318,9 +331,11 @@ def run_once(cfg, db, dry=False):
                 kind = "category"
                 need = max(q.get("threshold", 0.2) + 0.15, 0.4) if grp != "all" else q.get("threshold", 0.2)
                 if n < min_n * (2 if grp != "all" else 1) or med is None:
+                    skipped_samples += 1
                     continue
             discount = 1 - it["price"] / med
             if discount < need:
+                skipped_discount += 1
                 continue
             feed_deals[it["id"]] = make_feed_deal(q, it, med, discount, flags, grp)
             send(format_deal(q, it, med, n, kind, discount, flags), dry)
@@ -358,7 +373,13 @@ def run_once(cfg, db, dry=False):
         if not dry:
             save_feed(feed_doc)
             log(f"каталог обновлён: {len(fresh_deals)} предложений")
-    log(f"готово: проверено объявлений {total_checked}, отправлено {sent_count}, ошибок запросов {fails}")
+    log(
+        f"готово: проверено объявлений {total_checked}, принято после базовых фильтров {total_accepted}, "
+        f"кандидатов на оценку {total_candidates}, отправлено {sent_count}, "
+        f"отсечено по возрасту {skipped_age}, рискам {skipped_risk}, "
+        f"недостатку рыночных данных {skipped_samples}, скидке {skipped_discount}, "
+        f"ошибок запросов {fails}"
+    )
 
 def get_chat_id():
     data = tg("getUpdates", {})
