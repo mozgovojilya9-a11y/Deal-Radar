@@ -6,10 +6,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-type Condition = "used" | "new" | "unknown";
+type Condition = "used" | "new" | "refurbished" | "unknown";
 type MatchType = "exact" | "variant" | "related" | "accessory" | "unrelated";
 type Offer = { title: string; description: string; price: number; url: string; source: string; condition: Condition; kind: "marktplaats" | "web"; matchType?: MatchType; matchConfidence?: number; matchReason?: string };
-const USED_HOSTS = ["marktplaats.nl", "ebay.nl", "2dehands.be", "tweakers.net", "backmarket.nl", "refurbed.nl"];
+const USED_HOSTS = ["marktplaats.nl", "ebay.nl", "2dehands.be", "tweakers.net"];
 const NEW_HOSTS = ["ray-ban.com", "bol.com", "coolblue.nl", "mediamarkt.nl", "amazon.nl", "kamera-express.nl", "cameranu.nl", "apple.com", "samsung.com", "sony.nl", "nikon.nl", "fujifilm.com", "alternate.nl"];
 const USED_WORDS = /\b(tweedehands|gebruikt|used|pre-owned|occasion|refurbished|vraag\s*&\s*aanbod)\b/i;
 const NEW_WORDS = /\b(nieuw|new|sealed|geseald|ongeopend)\b/i;
@@ -361,7 +361,7 @@ export async function POST(request: NextRequest) {
       && isConsoleHardwareOffer(offer.title, query));
   const exactWeb = relevantWeb.filter((offer) => offer.matchType === "exact");
   const usedWeb = exactWeb.filter((offer) => offer.condition === "used");
-  const newWeb = exactWeb.filter((offer) => offer.condition === "new");
+  const newWeb = exactWeb.filter((offer) => offer.condition === "new");\n  const refurbishedWeb = exactWeb.filter((offer) => offer.condition === "refurbished");
   const mpUsedPrices = relevantMarket.filter((offer) => offer.condition === "used").map((offer) => offer.price);
   // Use Marktplaats alone when there are enough local comparables; external used prices only fill small samples.
   const usedPrices = mpUsedPrices.length >= 3 ? mpUsedPrices : [...mpUsedPrices, ...usedWeb.map((offer) => offer.price)];
@@ -431,7 +431,7 @@ export async function POST(request: NextRequest) {
     sources: {
       marktplaats: { count: relevantMarket.length, medianPrice: median(relevantMarket.map((offer) => offer.price)) },
       otherUsed: { count: usedWeb.length, medianPrice: median(usedWeb.map((offer) => offer.price)) },
-      newRetail: { count: newWeb.length, medianPrice: newMedian },
+      newRetail: { count: newWeb.length, medianPrice: newMedian },\n      refurbished: { count: refurbishedWeb.length, medianPrice: median(refurbishedWeb.map((offer) => offer.price)) },
       geminiGrounded: { usedPrice: marketValuation?.estimatedUsedPrice ?? null, newPrice: marketValuation?.estimatedNewPrice ?? null, confidence: marketValuation?.confidence ?? 0 },
     },
     ai: {
