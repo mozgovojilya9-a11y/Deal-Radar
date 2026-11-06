@@ -1,13 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Deal } from "@/lib/deals";
 
 type Tab = "home" | "categories" | "saved" | "profile";
 type Sort = "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
-type UserSettings = { categories: string[]; minDiscount: number; maxDistanceKm: number | null };
-const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, maxDistanceKm: null };
+type UserSettings = { categories: string[]; minDiscount: number; maxDistanceKm: number | null; minPrice: number | null; maxPrice: number | null };
+const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, maxDistanceKm: null, minPrice: null, maxPrice: null };
+const SETTINGS_KEY = "deal-radar-settings";
+const REFRESH_INTERVAL_MS = 120_000;
+const DISCOUNT_STEPS = [0, 10, 20, 30, 40, 50];
 const CATEGORIES = [
   { key: "", label: "Все", icon: "✦" },
   { key: "iphone-16", label: "iPhone 16", icon: "▣" },
@@ -17,9 +20,9 @@ const CATEGORIES = [
   { key: "iphone-12", label: "iPhone 12", icon: "▣" },
   { key: "ps5", label: "PlayStation 5", icon: "⌘" },
   { key: "ps4", label: "PlayStation 4", icon: "⌘" },
-  { key: "airpods-pro", label: "AirPods Pro", icon: "◉" },
+  { key: "airpods-pro-3", label: "AirPods Pro 3", icon: "◉" },
   { key: "airpods-max", label: "AirPods Max", icon: "◉" },
-  { key: "airpods", label: "AirPods", icon: "◉" },
+  { key: "airpods-5", label: "AirPods 5", icon: "◉" },
   { key: "rayban", label: "Ray-Ban", icon: "◇" },
   { key: "watch-diesel", label: "Часы Diesel", icon: "◷" },
   { key: "watch-boss", label: "Hugo Boss", icon: "◷" },
@@ -36,6 +39,36 @@ const CATEGORIES = [
 function euro(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
   return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number(value));
+}
+ 
+function priceValue(raw: string): number | null {
+  const parsed = Number(raw.replace(",", "."));
+  return raw.trim() !== "" && Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function readSettings(raw: unknown): UserSettings {
+  const stored = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const positive = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null);
+  const categories = Array.isArray(stored.categories) ? stored.categories.filter((key): key is string => typeof key === "string")
+    .map((key) => key === "airpods-pro" ? "airpods-pro-3" : key === "airpods" ? "airpods-5" : key) : [];
+  return {
+    categories,
+    minDiscount: typeof stored.minDiscount === "number" && Number.isInteger(stored.minDiscount) ? Math.min(90, Math.max(0, stored.minDiscount)) : 0,
+    maxDistanceKm: positive(stored.maxDistanceKm),
+    minPrice: positive(stored.minPrice),
+    maxPrice: positive(stored.maxPrice)
+  };
+}
+
+function ageLabel(value: string | null | undefined) {
+  if (!value) return "—";
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return "—";
+  const minutes = Math.max(0, Math.round((Date.now() - time) / 60000));
+  if (minutes < 1) return "только что";
+  if (minutes < 60) return minutes + " мин назад";
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? hours + " ч назад" : Math.round(hours / 24) + " дн назад";
 }
 
 function dateLabel(value: string | null | undefined) {
@@ -81,11 +114,12 @@ function DealCard({ deal, saved, onSave, onOpen }: {
           <strong>{euro(Math.max(0, Number(deal.market_price) - Number(deal.price)))}</strong>
         </div>
         <div className="card-footer">
-          <span className="location">⌖ {deal.city || "Нидерланды"}{deal.distance_km != null ? " · " + Math.round(deal.distance_km) + " км" : ""}</span>
+          <span className="location">⌖ {deal.city || "Нидерланды"}{deal.distance_km != null ? <b className="distance"> · {Math.round(deal.distance_km)} км</b> : null}</span>
           <button className={"save-button" + (saved ? " active" : "")} onClick={onSave} aria-label="В избранное">
             {saved ? "♥" : "♡"}
           </button>
         </div>
+        <a className="card-link" href={deal.listing_url} target="_blank" rel="noopener noreferrer">Открыть на Marktplaats <span>↗</span></a>
       </div>
     </article>
   );
@@ -103,6 +137,8 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const requestId = useRef(0);
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [settingsDraft, setSettingsDraft] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [settingsMessage, setSettingsMessage] = useState("");
@@ -116,18 +152,14 @@ export default function HomePage() {
     }
 
     try {
-      const storedSettings = JSON.parse(localStorage.getItem("deal-radar-settings") || "null");
+      const storedSettings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null");
       if (storedSettings && typeof storedSettings === "object") {
-        const next = {
-          categories: Array.isArray(storedSettings.categories) ? storedSettings.categories.filter((key: unknown): key is string => typeof key === "string") : [],
-          minDiscount: Number.isInteger(storedSettings.minDiscount) ? Math.min(90, Math.max(0, Number(storedSettings.minDiscount))) : 0,
-          maxDistanceKm: typeof storedSettings.maxDistanceKm === "number" && storedSettings.maxDistanceKm > 0 ? storedSettings.maxDistanceKm : null
-        };
+        const next = readSettings(storedSettings);
         setSettings(next);
         setSettingsDraft(next);
       }
     } catch {
-      localStorage.removeItem("deal-radar-settings");
+      try { localStorage.removeItem(SETTINGS_KEY); } catch { /* storage unavailable */ }
     }
 
     const webApp = window.Telegram?.WebApp;
@@ -151,28 +183,33 @@ export default function HomePage() {
       .catch(() => undefined);
   }, []);
 
-  const loadDeals = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  const loadDeals = useCallback(async (silent = false) => {
+    const id = ++requestId.current;
+    if (silent) setRefreshing(true); else setLoading(true);
     try {
       const params = new URLSearchParams({ sort });
       if (category) params.set("category", category);
-      const response = await fetch("/api/deals?" + params.toString(), { cache: "default" });
+      const response = await fetch("/api/deals?" + params.toString(), { cache: "no-store" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Не удалось загрузить предложения");
+      if (id !== requestId.current) return;
       setDeals(Array.isArray(data.deals) ? data.deals as Deal[] : []);
-      setUpdatedAt(data.updatedAt || new Date().toISOString());
+      setUpdatedAt(data.scannedAt || data.updatedAt || new Date().toISOString());
+      setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ошибка загрузки");
+      if (id !== requestId.current) return;
+      if (!silent) setError(err instanceof Error ? err.message : "Ошибка загрузки");
     } finally {
-      setLoading(false);
+      if (id === requestId.current) { setLoading(false); setRefreshing(false); }
     }
   }, [category, sort]);
 
   useEffect(() => {
     void loadDeals();
-    const timer = window.setInterval(() => void loadDeals(), 300_000);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(() => void loadDeals(true), REFRESH_INTERVAL_MS);
+    const onVisible = () => { if (document.visibilityState === "visible") void loadDeals(true); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
   }, [loadDeals]);
 
   const filtered = useMemo(() => {
@@ -181,6 +218,8 @@ export default function HomePage() {
     if (settings.categories.length) result = result.filter((deal) => settings.categories.includes(deal.category_key));
     if (settings.minDiscount > 0) result = result.filter((deal) => Number(deal.discount) * 100 >= settings.minDiscount);
     if (settings.maxDistanceKm !== null) result = result.filter((deal) => deal.distance_km === null || Number(deal.distance_km) <= settings.maxDistanceKm!);
+    if (settings.minPrice !== null) result = result.filter((deal) => Number(deal.price) >= settings.minPrice!);
+    if (settings.maxPrice !== null) result = result.filter((deal) => Number(deal.price) <= settings.maxPrice!);
     if (search.trim()) {
       const term = search.trim().toLocaleLowerCase();
       result = result.filter((deal) => (deal.title + " " + (deal.description || "")).toLocaleLowerCase().includes(term));
@@ -191,16 +230,36 @@ export default function HomePage() {
   function toggleSaved(id: string) {
     setSaved((current) => {
       const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
-      localStorage.setItem("deal-radar-favorites", JSON.stringify(next));
+      try { localStorage.setItem("deal-radar-favorites", JSON.stringify(next)); } catch { /* storage unavailable */ }
       return next;
     });
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred("light");
   }
 
+  function persistSettings(next: UserSettings) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+  }
+
   function saveSettings() {
     setSettings(settingsDraft);
-    localStorage.setItem("deal-radar-settings", JSON.stringify(settingsDraft));
+    persistSettings(settingsDraft);
     setSettingsMessage("Настройки сохранены на этом устройстве");
+  }
+
+  function updateFilters(patch: Partial<UserSettings>) {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    setSettingsDraft((old) => ({ ...old, ...patch }));
+    persistSettings(next);
+  }
+
+  const activeFilters = (settings.minDiscount > 0 ? 1 : 0) + (settings.minPrice !== null ? 1 : 0) + (settings.maxPrice !== null ? 1 : 0)
+    + (settings.maxDistanceKm !== null ? 1 : 0) + (settings.categories.length ? 1 : 0) + (category ? 1 : 0) + (search.trim() ? 1 : 0);
+
+  function resetFilters() {
+    setSearch("");
+    setCategory("");
+    updateFilters({ ...DEFAULT_SETTINGS });
   }
 
   const strongest = deals.length ? Math.max(...deals.map((deal) => Number(deal.discount) || 0)) : 0;
@@ -251,7 +310,7 @@ export default function HomePage() {
       <section className="stats-grid">
         <div className="stat-card"><span className="stat-label">В ленте сейчас</span><strong>{deals.length}</strong><span className="stat-caption">актуальных предложений</span></div>
         <div className="stat-card accent-stat"><span className="stat-label">Максимальная скидка</span><strong>{deals.length ? Math.round(strongest * 100) + "%" : "—"}</strong><span className="stat-caption">от наблюдаемой цены рынка</span></div>
-        <div className="stat-card"><span className="stat-label">Каталог обновлён</span><strong className="stat-time">{updatedAt ? new Date(updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "—"}</strong><span className="stat-caption">последнее поступление новых предложений</span></div>
+        <div className="stat-card"><span className="stat-label">Каталог обновлён</span><strong className="stat-time">{updatedAt ? new Date(updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "—"}</strong><span className="stat-caption">последнее сканирование · {ageLabel(updatedAt)}</span></div>
       </section>
 
       <section className="content-section" id="deals">
@@ -261,7 +320,7 @@ export default function HomePage() {
             <h2>{tab === "saved" ? "Избранное" : "Свежие находки"}<span className="heading-count">{filtered.length}</span></h2>
             <p>{tab === "saved" ? "Сохранённые тобой объявления" : "Только то, что прошло проверку выгодности"}</p>
           </div>
-          <button className="refresh-button" onClick={() => void loadDeals()} disabled={loading}><span className={loading ? "spin" : ""}>↻</span> Обновить</button>
+          <button className="refresh-button" onClick={() => void loadDeals(true)} disabled={loading || refreshing}><span className={loading || refreshing ? "spin" : ""}>↻</span> Обновить</button>
         </div>
 
         <div className="toolbar">
@@ -277,7 +336,27 @@ export default function HomePage() {
           ))}
         </div>
 
-        {error ? (
+        <div className="filter-panel" role="group" aria-label="Фильтры по цене и скидке">
+          <div className="filter-group">
+            <span className="filter-label">Цена, €</span>
+            <div className="price-range">
+              <input type="number" inputMode="numeric" min="0" placeholder="от" aria-label="Минимальная цена" value={settings.minPrice ?? ""} onChange={(event) => updateFilters({ minPrice: priceValue(event.target.value) })} />
+              <i>—</i>
+              <input type="number" inputMode="numeric" min="0" placeholder="до" aria-label="Максимальная цена" value={settings.maxPrice ?? ""} onChange={(event) => updateFilters({ maxPrice: priceValue(event.target.value) })} />
+            </div>
+          </div>
+          <div className="filter-group grow">
+            <span className="filter-label">Скидка</span>
+            <div className="discount-steps">
+              {DISCOUNT_STEPS.map((step) => (
+                <button type="button" key={step} className={"discount-chip" + (settings.minDiscount === step ? " selected" : "")} onClick={() => updateFilters({ minDiscount: step })}>{step === 0 ? "Любая" : "от " + step + "%"}</button>
+              ))}
+            </div>
+          </div>
+          {activeFilters ? <button type="button" className="reset-filters" onClick={resetFilters}>Сбросить · {activeFilters}</button> : null}
+        </div>
+
+        {error && deals.length === 0 ? (
           <div className="state-panel error-panel">
             <div className="state-icon">!</div>
             <h3>Лента пока не подключена</h3>
@@ -295,6 +374,7 @@ export default function HomePage() {
             <h3>{tab === "saved" ? "Пока ничего не сохранено" : "Пока нет подходящих предложений"}</h3>
             <p>{tab === "saved" ? "Нажимай на сердечко в карточке, чтобы сохранить товар." : "Бот продолжает собирать рыночные цены. Когда появятся предложения с нужной скидкой, они отобразятся здесь."}</p>
             {tab === "saved" ? <button className="secondary-button" onClick={() => setTab("home")}>К предложениям</button> : null}
+            {tab !== "saved" && activeFilters ? <button className="secondary-button" onClick={resetFilters}>Сбросить фильтры</button> : null}
           </div>
         ) : (
           <div className="deal-grid">
@@ -354,7 +434,7 @@ export default function HomePage() {
               <h2>{selected.title}</h2>
               <div className="detail-price"><strong>{euro(selected.price)}</strong><span>Рынок ≈ {euro(selected.market_price)}</span></div>
               <p>{selected.description || "Описание отсутствует в исходном объявлении."}</p>
-              <div className="detail-facts"><span>⌖ {selected.city || "Нидерланды"}</span><span>Обнаружено {dateLabel(selected.detected_at)}</span></div>
+              <div className="detail-facts"><span>⌖ {selected.city || "Нидерланды"}{selected.distance_km != null ? " · " + Math.round(selected.distance_km) + " км" : ""}</span><span>Обнаружено {dateLabel(selected.detected_at)}</span></div>
               {selected.warning_flags?.length ? <div className="warning-list"><strong>Обрати внимание</strong>{selected.warning_flags.map((flag) => <span key={flag}>⚠ {flag}</span>)}</div> : null}
               <a className="primary-button full-button" href={selected.listing_url} target="_blank" rel="noreferrer">Открыть на Marktplaats ↗</a>
               <button className="secondary-button full-button" onClick={() => toggleSaved(selected.listing_id)}>{saved.includes(selected.listing_id) ? "Убрать из избранного" : "Добавить в избранное"}</button>
