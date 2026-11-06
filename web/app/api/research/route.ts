@@ -172,7 +172,7 @@ async function fetchWebOffer(row: { url: string; title: string; snippet: string 
   if (price === null || BAD_WORDS.test(base)) return null;
   return { title: row.title || host, description: pageText, price, url: row.url, source: host, condition: conditionFor(host, base + " " + pageText), kind: "web" };
 }
-function parseMarktplaats(data: Record<string, unknown>, maxPrice: number): Offer[] {
+function parseMarktplaats(data: Record<string, unknown>, maxPrice: number | null): Offer[] {
   const embedded = (data._embedded && typeof data._embedded === "object" ? data._embedded : {}) as Record<string, unknown>;
   const rows = (embedded["mp:search-result"] || data.listings || []) as unknown[];
   const result: Offer[] = [];
@@ -185,7 +185,7 @@ function parseMarktplaats(data: Record<string, unknown>, maxPrice: number): Offe
     const price = cents > 0 ? cents / 100 : Number(row.price);
     const title = String(row.title || "");
     const description = String(row.description || "");
-    if (!Number.isFinite(price) || price < 10 || price > maxPrice || BAD_WORDS.test(title)) continue;
+    if (!Number.isFinite(price) || price < 10 || (maxPrice !== null && price > maxPrice) || BAD_WORDS.test(title)) continue;
     const links = row._links as Record<string, unknown> | undefined;
     const rel = (links?.["mp:advertisement-website-link"] || links?.["mp:advertisement"]) as Record<string, unknown> | undefined;
     let listingUrl = String(row.vipUrl || rel?.href || "");
@@ -198,7 +198,7 @@ function parseMarktplaats(data: Record<string, unknown>, maxPrice: number): Offe
   }
   return result;
 }
-async function searchMarktplaats(query: string, maxPrice: number) {
+async function searchMarktplaats(query: string, maxPrice: number | null) {
   const headers = { "User-Agent": "Mozilla/5.0 (compatible; DealRadarResearch/1.0)", Accept: "application/json", "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8" };
   const params = new URLSearchParams({ query, offset: "0", limit: "100", locale: "nl-NL", searchDescription: "true", sortBy: "price", sortOrder: "ascending" });
   let data: Record<string, unknown> | null = null;
@@ -252,7 +252,7 @@ export async function POST(request: NextRequest) {
   const requestedMaxPrice = Number(body.maxPrice);
   const maxPrice = Number.isFinite(requestedMaxPrice) && requestedMaxPrice >= 10
     ? requestedMaxPrice
-    : 800;
+    : null;
   const includeUsed = body.includeUsed !== false;
   const includeNew = body.includeNew !== false;
   if (!includeUsed && !includeNew) return NextResponse.json({ error: "Выбери хотя бы один режим: б/у или новый товар." }, { status: 400 });
@@ -390,7 +390,7 @@ export async function POST(request: NextRequest) {
   }
   // Local comparable listings remain the primary evidence. Gemini can refine the
   // estimate modestly, or provide a conservative fallback when local samples are thin.
-  const aiUsedPrice = marketValuation?.confidence >= 0.55
+  const aiUsedPrice = (marketValuation?.confidence ?? 0) >= 0.55
     ? marketValuation.estimatedUsedPrice
     : null;
   const usedReferencePrice = localUsedReferencePrice !== null && aiUsedPrice !== null
