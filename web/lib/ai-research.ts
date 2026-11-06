@@ -5,6 +5,8 @@ export type AiResearchPlan = {
   usedQueries: string[];
   newQueries: string[];
   keyAttributes: string[];
+  googleSearchQueries: string[];
+  groundedSources: Array<{ title: string; url: string }>;
 };
 
 export type AiOfferVerdict = {
@@ -126,32 +128,125 @@ async function requestStructuredJson<T>(
   return JSON.parse(raw) as T;
 }
 
+
+async function requestGroundedJson<T>(
+  schema: JsonRecord,
+  system: string,
+  user: string,
+  maxTokens: number,
+): Promise<{
+  result: T;
+  googleSearchQueries: string[];
+  groundedSources: Array<{ title: string; url: string }>;
+} | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  const model = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+  const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/"
+    + encodeURIComponent(model) + ":generateContent";
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: [{ text: user }] }],
+      tools: [{ google_search: {} }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: maxTokens,
+        responseMimeType: "application/json",
+        responseSchema: toGeminiSchema(schema),
+      },
+    }),
+    signal: AbortSignal.timeout(16000),
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Gemini Google Search grounding returned HTTP " + response.status);
+  const payload = await response.json() as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+      groundingMetadata?: {
+        webSearchQueries?: string[];
+        groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>;
+      };
+    }>;
+  };
+  const candidate = payload.candidates?.[0];
+  const raw = candidate?.content?.parts?.map((part) => part.text || "").join("").trim() || "";
+  if (!raw) throw new Error("Gemini grounded response was empty");
+  const result = JSON.parse(raw) as T;
+  const metadata = candidate?.groundingMetadata;
+  const groundedSources = (metadata?.groundingChunks || [])
+    .map((chunk) => ({
+      title: String(chunk.web?.title || "Google Search source"),
+      url: String(chunk.web?.uri || ""),
+    }))
+    .filter((item) => {
+      try {
+        const url = new URL(item.url);
+        return url.protocol === "https:" && url.hostname.includes(".")
+          && !url.hostname.endsWith(".local") && !url.hostname.endsWith(".internal");
+      } catch { return false; }
+    })
+    .slice(0, 8);
+  return {
+    result,
+    googleSearchQueries: (metadata?.webSearchQueries || [])
+      .filter((item): item is string => typeof item === "string").slice(0, 8),
+    groundedSources,
+  };
+}
+
 export async function createAiResearchPlan(
   query: string,
   includeUsed: boolean,
   includeNew: boolean,
 ): Promise<AiResearchPlan | null> {
-  const result = await requestStructuredJson<JsonRecord>(
-    "deal_radar_search_plan",
-    PLAN_SCHEMA,
-    [
-      "You are the product research planner for a second-hand marketplace price analyst in the Netherlands.",
-      "Identify the exact product from the user's wording. Do not invent model numbers, specifications, release years, or aliases.",
-      "Keep generation, storage, size, panel, model code, bundle and regional suffix exact.",
-      "Return short phrases directly usable on Marktplaats and Dutch retail search pages.",
-      "Use natural Dutch seller terms and English model wording. Every phrase must retain a core product identifier.",
-      "Do not expand to games, cases, accessories, parts or other generations. Separate used and new-retail searches.",
-      "If the query is ambiguous, say so in productSummary and use conservative queries. Return JSON only.",
-    ].join(" "),
-    JSON.stringify({ query, includeUsed, includeNew }),
-    700,
-  );
+  const system = [
+    "You are a product research planner for a Dutch second-hand marketplace analyst.",
+    "Use Google Search grounding to verify exact product identity, generation, aliases and current retailer model wording.",
+    "Never invent model codes, specifications, generation numbers, prices, availability or URLs.",
+    "Keep generation, storage, size, panel, model code, bundle and regional suffix exact.",
+    "Return short phrases directly usable on Marktplaats and Dutch retail search pages.",
+    "Use natural Dutch seller terms and English model wording. Every phrase must retain a core product identifier.",
+    "Do not expand to games, cases, accessories, parts or other generations unless the user asked for them.",
+    "Separate used listing searches from new retail searches. Return JSON only.",
+  ].join(" ");
+  const user = JSON.stringify({
+    query, includeUsed, includeNew,
+    market: "Netherlands", currency: "EUR",
+    requestedOutput: {
+      productSummary: "exact product identity and ambiguity notes",
+      usedQueries: "up to three precise used-market search phrases",
+      newQueries: "up to three Dutch retailer search phrases",
+      keyAttributes: "model-generation details that distinguish exact matches",
+    },
+  });
+  let grounded: Awaited<ReturnType<typeof requestGroundedJson<JsonRecord>>> = null;
+  let result: JsonRecord | null = null;
+  try {
+    grounded = await requestGroundedJson<JsonRecord>(PLAN_SCHEMA, system, user, 1000);
+    result = grounded?.result || null;
+  } catch (error) {
+    console.warn("Gemini Search grounding unavailable; falling back to structured planning:", error);
+  }
+  if (!result) {
+    result = await requestStructuredJson<JsonRecord>(
+      "deal_radar_search_plan",
+      PLAN_SCHEMA,
+      system + " Return conservative queries if the exact configuration is ambiguous.",
+      user,
+      900,
+    );
+  }
   if (!result) return null;
   return {
     productSummary: typeof result.productSummary === "string" ? result.productSummary.slice(0, 500) : "",
     usedQueries: cleanStrings(result.usedQueries, includeUsed ? 3 : 0, 180),
     newQueries: cleanStrings(result.newQueries, includeNew ? 3 : 0, 180),
     keyAttributes: cleanStrings(result.keyAttributes, 8, 100),
+    googleSearchQueries: grounded?.googleSearchQueries || [],
+    groundedSources: grounded?.groundedSources || [],
   };
 }
 
