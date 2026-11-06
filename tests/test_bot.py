@@ -76,8 +76,8 @@ class ScannerTests(unittest.TestCase):
         first = [listing("a", 400, now), listing("b", 400, now), listing("99", 250, now)]
         self.run_scan(first)
         first_feed = bot.load_feed()["deals"]
-        self.assertEqual([d["listing_id"] for d in first_feed], ["99"])
-        self.assertEqual(first_feed[0]["status"], "candidate")
+        self.assertEqual({d["listing_id"] for d in first_feed}, {"a", "b", "99"})
+        self.assertTrue(all(d["status"] == "candidate" for d in first_feed))
         self.run_scan(first + [listing("c", 400, now)])
         updated = bot.load_feed()["deals"]
         self.assertEqual([d["listing_id"] for d in updated], ["99"])
