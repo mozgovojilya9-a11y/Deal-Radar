@@ -6,8 +6,15 @@ import type { Deal, ScannerStats } from "@/lib/deals";
 type Tab = "home" | "categories" | "saved" | "analytics" | "profile";
 type Sort = "profit" | "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
+type ResearchListing = { title: string; price: number; url: string; source: string; condition: "used" | "new" | "unknown"; kind: "marktplaats" | "web"; estimatedProfit?: number | null; profitRoi?: number | null; status?: string };
+type ProductResearch = {
+  query: string; maxPrice: number; checkedAt: string; usedMedian: number | null; newMedian: number | null;
+  expectedResalePrice: number | null; netResalePrice: number | null; sampleCount: number;
+  sources: { marktplaats: { count: number; medianPrice: number | null }; otherUsed: { count: number; medianPrice: number | null }; newRetail: { count: number; medianPrice: number | null } };
+  listings: ResearchListing[]; webOffers: ResearchListing[]; warnings: string[];
+};
 type UserSettings = { categories: string[]; minDiscount: number; maxDistanceKm: number | null; minPrice: number | null; maxPrice: number | null };
-const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, maxDistanceKm: null, minPrice: null, maxPrice: null };
+const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, maxDistanceKm: null, minPrice: null, maxPrice: 800 };
 const SETTINGS_KEY = "deal-radar-settings";
 const REFRESH_INTERVAL_MS = 120_000;
 const DISCOUNT_STEPS = [0, 10, 20, 30, 40, 50];
@@ -101,7 +108,7 @@ function priceValue(raw: string): number | null {
 
 function readSettings(raw: unknown): UserSettings {
   const stored = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  const positive = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null);
+  const positive = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.min(800, value) : null);
   const categories = Array.isArray(stored.categories) ? stored.categories.filter((key): key is string => typeof key === "string")
     .map((key) => key === "airpods-pro" ? "airpods-pro-3" : key === "airpods" ? "airpods-5" : key) : [];
   return {
@@ -186,6 +193,11 @@ function DealCard({ deal, saved, onSave, onOpen }: {
 
 export default function HomePage() {
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [researchQuery, setResearchQuery] = useState("");
+  const [researchMaxPrice, setResearchMaxPrice] = useState("800");
+  const [researchLoading, setResearchLoading] = useState(false);
+  const [researchError, setResearchError] = useState("");
+  const [researchResult, setResearchResult] = useState<ProductResearch | null>(null);
   const [category, setCategory] = useState("");
   const [sort, setSort] = useState<Sort>("profit");
   const [tab, setTab] = useState<Tab>("home");
@@ -340,9 +352,36 @@ export default function HomePage() {
   }
 
   function updateFilters(patch: Partial<UserSettings>) {
-    const next = { ...settings, ...patch };
+    const safePatch = { ...patch };
+    if (typeof safePatch.maxPrice === "number") safePatch.maxPrice = Math.min(800, Math.max(0, safePatch.maxPrice));
+    const next = { ...settings, ...safePatch };
     setSettings(next);
     persistSettings(next);
+  }
+
+  async function runProductResearch() {
+    const query = researchQuery.trim();
+    const maxPrice = Math.min(800, Math.max(10, Number(researchMaxPrice) || 800));
+    if (query.length < 3) { setResearchError("Укажи точную модель или название товара."); return; }
+    const initData = window.Telegram?.WebApp?.initData || "";
+    if (!initData) { setResearchError("Открой приложение внутри Telegram, чтобы запустить веб-исследование."); return; }
+    setResearchLoading(true);
+    setResearchError("");
+    setResearchResult(null);
+    try {
+      const response = await fetch("/api/research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, query, maxPrice })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Не удалось провести исследование.");
+      setResearchResult(data as ProductResearch);
+    } catch (error) {
+      setResearchError(error instanceof Error ? error.message : "Ошибка веб-исследования.");
+    } finally {
+      setResearchLoading(false);
+    }
   }
 
   const activeFilters = (settings.minDiscount > 0 ? 1 : 0) + (settings.minPrice !== null ? 1 : 0) + (settings.maxPrice !== null ? 1 : 0)
@@ -450,6 +489,41 @@ export default function HomePage() {
 
       {tab === "categories" ? (
         <section className="content-section v2-section">
+          <div className="research-card">
+            <div className="research-head">
+              <div><div className="eyebrow">LIVE MARKET RESEARCH</div><h3>Исследовать товар</h3><p>Укажи любую модель. Радар соберёт объявления Marktplaats, сравнит цены б/у и проверит стоимость нового товара в магазинах.</p></div>
+              <span className="research-live">LIVE</span>
+            </div>
+            <div className="research-form">
+              <label className="research-query"><span>Что ищем?</span><input value={researchQuery} onChange={(event) => setResearchQuery(event.target.value)} placeholder="Например: Ray-Ban Meta Wayfarer Gen 2 RW4012" maxLength={100} /></label>
+              <label className="research-budget"><span>Максимальная цена, €</span><input type="number" min="10" max="800" value={researchMaxPrice} onChange={(event) => setResearchMaxPrice(String(Math.min(800, Math.max(10, Number(event.target.value) || 10))))} /></label>
+              <button type="button" className="primary-button research-submit" onClick={runProductResearch} disabled={researchLoading}>{researchLoading ? "Ищем по площадкам…" : "Искать и анализировать"}</button>
+            </div>
+            {researchError ? <p className="research-error" role="alert">{researchError}</p> : null}
+            {researchLoading ? <div className="research-loading"><span className="research-pulse" />Сравниваем объявления, б/у цены и новые товары в магазинах…</div> : null}
+            {researchResult ? (
+              <div className="research-report">
+                <div className="research-summary-grid">
+                  <div><small>Б/у рынок · медиана</small><strong>{researchResult.usedMedian == null ? "—" : euro(researchResult.usedMedian)}</strong><span>{researchResult.sampleCount} сравнений</span></div>
+                  <div><small>Новый товар · медиана</small><strong>{researchResult.newMedian == null ? "—" : euro(researchResult.newMedian)}</strong><span>{researchResult.sources.newRetail.count} источников</span></div>
+                  <div><small>Ожидаемая цена перепродажи</small><strong>{researchResult.expectedResalePrice == null ? "—" : euro(researchResult.expectedResalePrice)}</strong><span>с консервативным запасом</span></div>
+                </div>
+                <div className="research-sources"><span>Marktplaats: <b>{researchResult.sources.marktplaats.count}</b></span><span>Другие б/у площадки: <b>{researchResult.sources.otherUsed.count}</b></span><span>Магазины: <b>{researchResult.sources.newRetail.count}</b></span></div>
+                <h4>Объявления Marktplaats до {euro(researchResult.maxPrice)}</h4>
+                {researchResult.listings.length ? <div className="research-offers">{researchResult.listings.slice(0, 8).map((item, index) => (
+                  <a className="research-offer" href={item.url} target="_blank" rel="noopener noreferrer" key={item.url + index}>
+                    <span><b>{item.title}</b><small>{item.source}</small></span><strong>{euro(item.price)}</strong>
+                    <em className={item.status === "strong" ? "profit-strong" : item.status === "good" ? "profit-good" : ""}>{item.estimatedProfit == null ? "Недостаточно данных" : (item.estimatedProfit >= 0 ? "+" : "") + euro(item.estimatedProfit)}</em>
+                  </a>
+                ))}</div> : <p className="research-muted">Подходящих объявлений до указанного лимита не найдено.</p>}
+                <h4>Веб-источники: новые и подержанные товары</h4>
+                {researchResult.webOffers.length ? <div className="research-web-links">{researchResult.webOffers.slice(0, 10).map((item, index) => (
+                  <a href={item.url} target="_blank" rel="noopener noreferrer" key={item.url + index}><span>{item.title}</span><b>{euro(item.price)}</b><small>{item.source} · {item.condition === "used" ? "б/у" : item.condition === "new" ? "новый" : "состояние не определено"}</small></a>
+                ))}</div> : <p className="research-muted">Веб-поиск не вернул достоверных цен. Marktplaats проверен отдельно.</p>}
+                {researchResult.warnings.map((warning) => <p className="research-warning" key={warning}>ⓘ {warning}</p>)}
+              </div>
+            ) : null}
+          </div>
           {openGroup && !catQuery.trim() ? (
             <>
               <button type="button" className="cg-back" onClick={() => setCatGroup(null)}>← Все категории</button>
@@ -545,7 +619,7 @@ export default function HomePage() {
             <div className="price-range">
               <input type="number" inputMode="numeric" min="0" placeholder="от" aria-label="Минимальная цена" value={settings.minPrice ?? ""} onChange={(event) => updateFilters({ minPrice: priceValue(event.target.value) })} />
               <i>—</i>
-              <input type="number" inputMode="numeric" min="0" placeholder="до" aria-label="Максимальная цена" value={settings.maxPrice ?? ""} onChange={(event) => updateFilters({ maxPrice: priceValue(event.target.value) })} />
+              <input type="number" inputMode="numeric" min="0" max="800" placeholder="до €800" aria-label="Максимальная цена" value={settings.maxPrice ?? ""} onChange={(event) => updateFilters({ maxPrice: priceValue(event.target.value) })} />
             </div>
           </div>
           <div className="filter-group grow">
