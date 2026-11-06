@@ -198,24 +198,17 @@ function parseMarktplaats(data: Record<string, unknown>, maxPrice: number): Offe
   }
   return result;
 }
-async function searchMarktplaats(query: string, maxPrice: number, maxDistanceKm: number) {
+async function searchMarktplaats(query: string, maxPrice: number) {
   const headers = { "User-Agent": "Mozilla/5.0 (compatible; DealRadarResearch/1.0)", Accept: "application/json", "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8" };
-  const postcode = process.env.MARKTPLAATS_POSTCODE || "";
-  const validFullPostcode = /^\d{4}[A-Z]{2}$/i.test(postcode);
   const params = new URLSearchParams({ query, offset: "0", limit: "100", locale: "nl-NL", searchDescription: "true", sortBy: "price", sortOrder: "ascending" });
   let data: Record<string, unknown> | null = null;
-  // API v2 needs a full six-character postcode; with four digits use the local legacy endpoint.
-  if (validFullPostcode) {
-    params.set("postCode", postcode.toUpperCase());
-    params.set("distance", String(Math.round(maxDistanceKm * 1000)));
-    try {
-      const response = await fetch("https://api.marktplaats.nl/v2/search?" + params.toString(), { headers, signal: AbortSignal.timeout(10000), cache: "no-store" });
-      if (response.ok) data = await response.json() as Record<string, unknown>;
-    } catch { /* Fall back below. */ }
-  }
+  // Nationwide search: omit postcode and distance from both Marktplaats endpoints.
+  try {
+    const response = await fetch("https://api.marktplaats.nl/v2/search?" + params.toString(), { headers, signal: AbortSignal.timeout(10000), cache: "no-store" });
+    if (response.ok) data = await response.json() as Record<string, unknown>;
+  } catch { /* Fall back to the legacy nationwide endpoint. */ }
   if (!data) {
     const legacy = new URLSearchParams({ query, limit: "100", offset: "0", sortBy: "PRICE", sortOrder: "INCREASING", searchInTitleAndDescription: "true" });
-    if (postcode) { legacy.set("postcode", postcode); legacy.set("distanceMeters", String(Math.round(maxDistanceKm * 1000))); }
     const response = await fetch("https://www.marktplaats.nl/lrp/api/search?" + legacy.toString(), { headers, signal: AbortSignal.timeout(10000), cache: "no-store" });
     if (!response.ok) throw new Error("Marktplaats API HTTP " + response.status);
     data = await response.json() as Record<string, unknown>;
@@ -250,7 +243,7 @@ function relevance(candidate: string, query: string) {
 export async function POST(request: NextRequest) {
   const token = process.env.TELEGRAM_TOKEN;
   if (!token) return NextResponse.json({ error: "TELEGRAM_TOKEN не настроен." }, { status: 503 });
-  let body: { initData?: string; query?: string; maxPrice?: number; maxDistanceKm?: number; includeUsed?: boolean; includeNew?: boolean };
+  let body: { initData?: string; query?: string; maxPrice?: number; includeUsed?: boolean; includeNew?: boolean };
   try { body = await request.json() as typeof body; } catch { return NextResponse.json({ error: "Некорректный JSON." }, { status: 400 }); }
   const userId = verifyInitData(body.initData || "", token);
   if (!userId) return NextResponse.json({ error: "Откройте исследование внутри Telegram." }, { status: 401 });
@@ -260,7 +253,6 @@ export async function POST(request: NextRequest) {
   const maxPrice = Number.isFinite(requestedMaxPrice) && requestedMaxPrice >= 10
     ? requestedMaxPrice
     : 5000;
-  const maxDistanceKm = Math.min(100, Math.max(5, Number(body.maxDistanceKm) || 100));
   const includeUsed = body.includeUsed !== false;
   const includeNew = body.includeNew !== false;
   if (!includeUsed && !includeNew) return NextResponse.json({ error: "Выбери хотя бы один режим: б/у или новый товар." }, { status: 400 });
@@ -270,7 +262,7 @@ export async function POST(request: NextRequest) {
   const usedQuery = 'site:ebay.nl OR site:2dehands.be OR site:tweakers.net "' + query + '" tweedehands used occasion';
   const newQuery = '"' + query + '" prijs nieuw kopen Nederland price';
   const [primaryMarketResult, planResult] = await Promise.all([
-    includeUsed ? searchMarktplaats(query, maxPrice, maxDistanceKm).then((value) => ({ status: "fulfilled" as const, value }))
+    includeUsed ? searchMarktplaats(query, maxPrice).then((value) => ({ status: "fulfilled" as const, value }))
       .catch((reason) => ({ status: "rejected" as const, reason }))
       : Promise.resolve({ status: "fulfilled" as const, value: [] as Offer[] }),
     createAiResearchPlan(query, includeUsed, includeNew)
@@ -286,7 +278,7 @@ export async function POST(request: NextRequest) {
     ? Array.from(new Set([query, ...(plan?.usedQueries || [])].map((term) => term.trim()).filter(Boolean))).slice(0, 4)
     : [];
   const extraMarketResults = await Promise.all(usedMarktplaatsQueries.slice(1).map((term) =>
-    searchMarktplaats(term, maxPrice, maxDistanceKm)
+    searchMarktplaats(term, maxPrice)
       .then((value) => ({ status: "fulfilled" as const, value }))
       .catch((reason) => ({ status: "rejected" as const, reason }))
   ));
@@ -402,7 +394,7 @@ export async function POST(request: NextRequest) {
   ];
 
   return NextResponse.json({
-    query, maxPrice, maxDistanceKm, includeUsed, includeNew, checkedAt: new Date().toISOString(),
+    query, maxPrice, includeUsed, includeNew, checkedAt: new Date().toISOString(),
     sources: {
       marktplaats: { count: relevantMarket.length, medianPrice: median(relevantMarket.map((offer) => offer.price)) },
       otherUsed: { count: usedWeb.length, medianPrice: median(usedWeb.map((offer) => offer.price)) },
