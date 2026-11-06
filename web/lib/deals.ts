@@ -54,6 +54,9 @@ export type ScannerStats = {
   rejectedDiscount: number;
   rejectedProfit: number;
   retailProxyEvaluated: number;
+  aiReviewed?: number;
+  aiRejected?: number;
+  aiRescued?: number;
   candidateNoMarket: number;
   candidatePreliminary: number;
   primaryRejected: number;
