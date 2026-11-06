@@ -671,6 +671,17 @@ def run_once(cfg, db, dry=False):
         metrics["checked"] += len(raw)
         if q.get("key") == "rayban":
             log(f"[{qkey}] rows={len(raw)} variants={len(q.get('search_variants') or [q.get('query')])}")
+            diagnostic_rows = []
+            for raw_row in raw:
+                parsed_row = parse_listing(raw_row)
+                if re.search(r"ray.?ban|wayfarer|rw.?4012|meta", parsed_row.get("text", ""), re.I):
+                    diagnostic_rows.append({
+                        "title": parsed_row.get("title"), "price": parsed_row.get("price"),
+                        "date": parsed_row.get("date"), "id": parsed_row.get("id"),
+                        "ptype": parsed_row.get("ptype"),
+                        "external_link": parsed_row.get("external_link"),
+                    })
+            log(f"[{qkey}] candidate_rows={json.dumps(diagnostic_rows[:30], ensure_ascii=False)}")
         candidates = {}
         for listing in raw:
             item = parse_listing(listing)

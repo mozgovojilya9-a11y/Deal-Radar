@@ -153,10 +153,13 @@
         "RW4012",
         "rayban meta",
         "RW 4012",
-        "Meta Wayfarer Gen 2"
+        "Meta Wayfarer Gen 2",
+        "ray-ban wayfarer gen 2",
+        "wayfarer gen 2",
+        "ray-ban wayfarer"
       ],
       "variant_pages": 1,
-      "search_v2": true,
+      "search_v2": false,
       "match_description": true
     },
     {
