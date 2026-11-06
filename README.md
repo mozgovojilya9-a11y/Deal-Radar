@@ -19,6 +19,25 @@ Supabase is not used or required. Your laptop does not need to be running.
 
 Open **Actions → deals → Run workflow** to start a manual scan. The scanner needs no GitHub secrets: it reads Marktplaats and publishes the JSON feed. The workflow needs repository Contents read/write permission. It runs about every 10 minutes; GitHub may delay scheduled starts. Each category query scans up to 5 pages × 100 results, not every listing on the entire Marktplaats site. Listings older than 30 days are excluded.
 
+## AI product matching
+
+Deal Radar can use OpenAI for query expansion and exact-product identity checks. The AI does not invent prices and does not calculate profit: market medians, resale estimates, ROI, and fees remain deterministic calculations from source-backed offers. Accessories and unrelated products are filtered; materially different variants are kept separate from exact-model price samples. AI decisions in the scheduled scanner are cached by listing text so the same unchanged listing is not repeatedly sent to the model.
+
+### Enable AI in Vercel
+
+In **Vercel → Project → Settings → Environment Variables**, add:
+
+- `OPENAI_API_KEY` — your server-side OpenAI API key.
+- `OPENAI_MODEL` — optional; defaults to `gpt-6-luna`.
+
+Apply it to Production (and Preview if needed), then redeploy. Do not use a `NEXT_PUBLIC_` prefix.
+
+### Enable AI in the scheduled scanner
+
+In **GitHub → Deal-Radar → Settings → Secrets and variables → Actions**, add a repository secret named `OPENAI_API_KEY` with the same key. The GitHub Actions scanner will then use AI reviews automatically. `OPENAI_MODEL` defaults to `gpt-6-luna`; `AI_REVIEW_MAX_PER_QUERY` defaults to 12 new/changed listings per category per scan.
+
+The project continues to work without an API key: existing search and rule-based matching remain active, and the manual research report clearly marks AI as disabled. AI output is treated as a product-match signal only; it cannot set offer prices, median values, or calculated profit.
+
 ## Vercel
 
 Set Root Directory to `web`, Framework to Next.js, Production Branch to `main`. Add this server-only Production Environment Variable:
