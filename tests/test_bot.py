@@ -294,6 +294,55 @@ class ScannerTests(unittest.TestCase):
         self.assertFalse(bot.title_matches_query(q,"Ray-Ban Meta Wayfarer Gen 1 RW4006"))
         self.assertEqual(bot.group_of(q,"Ray-Ban Meta Gen 2 RW4012"),"wayfarer-gen-2")
 
+    def test_ai_reviews_are_cached_until_listing_text_changes(self):
+        db = bot.open_db()
+        item = {
+            "id": "ai-1", "title": "PS5 console",
+            "description": "PlayStation 5 disc edition in goede staat",
+            "price": 250,
+        }
+        verdict = {
+            "ai-1": {
+                "same_product": True, "comparable": True, "is_accessory": False,
+                "confidence": 0.98, "variant": "disc", "reason": "Exacte PS5 disc-console",
+            }
+        }
+        try:
+            with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+                with mock.patch.object(bot, "request_ai_listing_review", return_value=verdict) as request_ai:
+                    first = bot.review_listings_with_ai(db, CFG["queries"][0], [item])
+                    second = bot.review_listings_with_ai(db, CFG["queries"][0], [item])
+                    self.assertTrue(first["ai-1"]["same_product"])
+                    self.assertTrue(second["ai-1"]["comparable"])
+                    self.assertEqual(request_ai.call_count, 1)
+                    changed = {**item, "description": "PlayStation 5 controller only"}
+                    refreshed = bot.review_listings_with_ai(db, CFG["queries"][0], [changed])
+                    self.assertIn("ai-1", refreshed)
+                    self.assertEqual(request_ai.call_count, 2)
+        finally:
+            db.close()
+
+    def test_ai_can_confidently_reject_accessory_mismatch(self):
+        now = datetime.now(timezone.utc).isoformat()
+        seed = [listing(f"ai-seed-{i}", 400, now) for i in range(1, 7)]
+        target = listing("ai-accessory", 80, now, title="PS5 controller")
+        def decisions(db, query, items):
+            return {
+                "ai-accessory": {
+                    "same_product": False, "comparable": False, "is_accessory": True,
+                    "confidence": 0.99, "variant": "controller",
+                    "reason": "Контроллер является аксессуаром, а не консолью",
+                }
+            }
+        db = bot.open_db()
+        try:
+            with mock.patch.object(bot, "fetch_query", return_value=seed + [target]), \
+                 mock.patch.object(bot, "review_listings_with_ai", side_effect=decisions):
+                self.assertTrue(bot.run_once(CFG, db, dry=False))
+            self.assertEqual(bot.load_feed()["deals"], [])
+        finally:
+            db.close()
+
     def test_marktplaats_v2_search_result_is_normalized(self):
         row={"itemId":"m123","title":"Ray-Ban Meta Gen 2 RW4012",
              "priceModel":{"modelType":"fixed","askingPrice":32500},
