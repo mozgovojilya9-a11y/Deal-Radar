@@ -1094,7 +1094,7 @@ def run_once(cfg, db, dry=False):
     changed = fresh_deals != feed_doc.get("deals", [])
     primary_rejected = sum(metrics[key] for key in (
         "rejectedTitle", "rejectedExternalLink", "rejectedOldModel", "rejectedInvalid",
-        "rejectedPriceType", "rejectedPriceRange", "rejectedDistance"
+        "rejectedPriceType", "rejectedPriceRange", "rejectedDistance", "aiRejected"
     ))
     rejected_total = primary_rejected + sum(metrics[key] for key in (
         "rejectedAge", "rejectedDateUnknown", "rejectedRisk", "rejectedDiscount", "rejectedProfit"
