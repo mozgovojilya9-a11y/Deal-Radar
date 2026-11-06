@@ -236,35 +236,64 @@ def age_hours(s):
     return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
 
 def television_model_year(text):
-    """Infer 2023-2026 TV generation from model codes; unknown generations are rejected."""
+    """Infer 2023-2026 model generation from known regional model-number schemes."""
     raw = str(text or "").upper()
+
+    # LG OLED: OLED55C3/C4/C5/C6 = 2023/24/25/26.
     match = re.search(r"\bOLED\s*\d{2,3}[A-Z]([1-6])\b", raw)
     if match:
         return 2020 + int(match.group(1))
+
+    # LG UHD / QNED / NanoCell generation letters.
     lg_uhd = re.search(r"\b\d{2,3}U([BATR])\d{3,5}\b", raw)
     if lg_uhd:
         return {"R": 2023, "T": 2024, "A": 2025, "B": 2026}[lg_uhd.group(1)]
     lg_qned = re.search(r"\b\d{2,3}(?:QNED|NANO)\d{2,3}([BATR])\d{1,2}[A-Z]{0,2}\b", raw)
     if lg_qned:
         return {"R": 2023, "T": 2024, "A": 2025, "B": 2026}[lg_qned.group(1)]
-    samsung = re.search(r"\b(?:QE|QN|QA|LS|MRE|UE)?\d{2,3}(?:Q|QN|S|LS|M|R)?\d{1,3}([ABCDFH])(?:[A-Z0-9]{0,5})\b", raw)
+
+    # Samsung QLED/OLED/Micro RGB: C/D/F/H = 2023/24/25/26.
+    samsung = re.search(r"\b(?:QE|QN|QA|UA|UE|LS|MRE)?\d{2,3}(?:Q|QN|S|LS|M|R)?\d{1,3}([ABCDFH])(?:[A-Z0-9]{0,5})\b", raw)
     if samsung:
         return {"A": 2021, "B": 2022, "C": 2023, "D": 2024, "F": 2025, "H": 2026}[samsung.group(1)]
+    samsung_uhd = re.search(r"\b(?:UA|UE)?\d{2,3}U(?:7000|8000|8500|9000)([FH])\b", raw)
+    if samsung_uhd:
+        return {"F": 2025, "H": 2026}[samsung_uhd.group(1)]
     samsung_led = re.search(r"\b(?:UE|QE)?\d{2,3}(CU|DU|BU|AU|TU)\d{4,5}\b|\b(CU|DU|BU|AU|TU)\d{4,5}\b", raw)
     if samsung_led:
         code = samsung_led.group(1) or samsung_led.group(2)
         return {"TU": 2020, "AU": 2021, "BU": 2022, "CU": 2023, "DU": 2024}[code]
-    sony = re.search(r"\b(?:KD|XR|KJ|KE|K)\s*[- ]?\d{2,3}[A-Z0-9]{1,5}([KLM])(?:2)?\b", raw)
-    if sony:
-        return {"L": 2023, "K": 2024, "M": 2026}[sony.group(1)]
+
+    # Sony: 2023 L-series; new K- model format starts 2024.
+    sony_2026 = re.search(r"\bK-\d{2,3}(?:XR\d{2}|S\d{2})M2\b", raw)
+    if sony_2026:
+        return 2026
+    sony_2026_bravia5 = re.search(r"\bK-\d{2,3}XR53\b", raw)
+    if sony_2026_bravia5:
+        return 2026
+    sony_2025 = re.search(r"\bK-\d{2,3}XR50\b", raw)
+    if sony_2025:
+        return 2025
+    sony_2024 = re.search(r"\bK-\d{2,3}(?:XR(?:90|80|70)|S(?:25|20))\b", raw)
+    if sony_2024:
+        return 2024
+    sony_2023 = re.search(r"\b(?:KD|XRJ|XR|KJ|KE)\s*[- ]?\d{2,3}[A-Z0-9]{1,5}L\b", raw)
+    if sony_2023:
+        return 2023
+
+    # Philips: model-year digit is 8/9/0/1 for 2023/24/25/26.
     philips_oled = re.search(r"\b(?:\d{2,3})?OLED\d{2}([8901])\b", raw)
     philips_led = re.search(r"\b(?:\d{2,3})?PUS\d{3}([8901])(?:/\d{2})?\b|\b(?:\d{2,3})?PQS\d{3}([8901])(?:/\d{2})?\b", raw)
     digit = (philips_oled.group(1) if philips_oled else None) or ((philips_led.group(1) or philips_led.group(2)) if philips_led else None)
     if digit:
         return {"8": 2023, "9": 2024, "0": 2025, "1": 2026}[digit]
-    hisense = re.search(r"\b\d{2,3}[A-Z]\d{1,2}(NQ|KQ|Q|S)\b", raw)
+
+    # Hisense Europe: K/KQ=2023, N/NQ=2024, Q=2025, S=2026.
+    hisense = re.search(r"\b\d{2,3}[A-Z]\d{1,2}(NQ|KQ|K|N|Q|S)\b", raw)
     if hisense:
-        return {"KQ": 2023, "NQ": 2024, "Q": 2025, "S": 2026}[hisense.group(1)]
+        return {"KQ": 2023, "K": 2023, "NQ": 2024, "N": 2024, "Q": 2025, "S": 2026}[hisense.group(1)]
+
+    # TCL: K=2025 and L=2026 in current P/C lines.
     tcl = re.search(r"\b\d{2,3}[PC]\d{1,2}([KL])\b", raw)
     if tcl:
         return {"K": 2025, "L": 2026}[tcl.group(1)]
@@ -272,6 +301,8 @@ def television_model_year(text):
         return 2023
     if re.search(r"\bC855\b", raw):
         return 2024
+
+    # A year written explicitly as the model year is a fallback, not purchase date.
     explicit = re.search(
         r"\b(?:model(?:jaar)?|model year|bouwjaar)\s*[:-]?\s*(202[3-6])\b|\b(202[3-6])\s+(?:model|modeljaar)\b",
         raw, re.I,
@@ -279,7 +310,6 @@ def television_model_year(text):
     if explicit:
         return int(explicit.group(1) or explicit.group(2))
     return None
-
 
 def group_of(q, text):
     """Build comparable product buckets instead of comparing unrelated items."""
