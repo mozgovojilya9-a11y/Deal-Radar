@@ -127,3 +127,16 @@ The repository branch and deployment still need the external Supabase project/ke
 - Never commit Telegram tokens, Supabase service-role keys, `.env.local`, or `state.db`.
 
 Deal Radar finds candidates. Check condition, authenticity, seller reputation and safe payment before buying.
+
+## 8. Personal settings, favorites, scanner status and price history
+
+After the original `supabase/schema.sql` has been run, run the additive migration
+`supabase/migrations/20261106010000_personal_radar_features.sql` in Supabase → SQL Editor.
+It adds `favorites`, `user_settings`, `bot_status` and `deal_price_history` without replacing the existing `deals` table.
+
+- Personal settings (selected categories, minimum discount and display distance) are saved per Telegram user. These settings filter the Mini App feed; the scanner's actual postcode and search radius remain in `config.json`.
+- Favorites are stored per Telegram user in Supabase and synchronize when the same user opens the Mini App on another device.
+- The bot writes counts from each scan to `bot_status`.
+- Price observations are recorded for newly published deals and on later scans for listings already marked as sent by the scanner.
+
+The new API routes require a valid Telegram `initData` signature. No Telegram user ID is accepted from an untrusted request body.

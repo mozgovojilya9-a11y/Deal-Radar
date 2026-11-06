@@ -227,6 +227,65 @@ def supabase_upsert_deal(q, it, med, discount, flags, grp):
         log("Supabase: не удалось сохранить объявление:", type(exc).__name__, str(exc)[:180])
         return False
 
+
+
+def supabase_record_price(listing_id, price, market_price=None, discount=None):
+    """Append one observation for a deal already published to the Mini App."""
+    base = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not base or not key:
+        return False
+    payload = {
+        "listing_id": listing_id,
+        "price": round(float(price), 2),
+        "market_price": round(float(market_price), 2) if market_price is not None else None,
+        "discount": round(float(discount), 4) if discount is not None else None,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    req = urllib.request.Request(
+        base + "/rest/v1/deal_price_history",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"apikey": key, "Content-Type": "application/json", "Prefer": "return=minimal"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            return response.status in (200, 201, 204)
+    except Exception as exc:
+        log("Supabase history: не удалось сохранить цену:", type(exc).__name__, str(exc)[:140])
+        return False
+
+
+def supabase_record_run(found, new, errors):
+    """Publish scanner health counters for the Mini App dashboard."""
+    base = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not base or not key:
+        return False
+    payload = {
+        "id": 1,
+        "last_run_at": datetime.now(timezone.utc).isoformat(),
+        "last_run_found": int(found),
+        "last_run_new": int(new),
+        "last_run_errors": int(errors),
+    }
+    req = urllib.request.Request(
+        base + "/rest/v1/bot_status?on_conflict=id",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "apikey": key,
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            return response.status in (200, 201, 204)
+    except Exception as exc:
+        log("Supabase status: не удалось сохранить статистику:", type(exc).__name__, str(exc)[:140])
+        return False
+
 def tg(method, payload):
     token = os.environ.get("TELEGRAM_TOKEN")
     if not token:
@@ -264,6 +323,7 @@ def run_once(cfg, db, dry=False):
     now = int(time.time())
     window = now - cfg.get("market_days", 21) * 86400
     min_n, fails, sent_count = cfg.get("min_samples", 8), 0, 0
+    total_checked = 0
     for q in cfg["queries"]:
         qkey = q["key"]
         existing = db.execute("SELECT COUNT(*) FROM listings WHERE qkey=?", (qkey,)).fetchone()[0]
@@ -276,7 +336,9 @@ def run_once(cfg, db, dry=False):
             fails += 1
             time.sleep(random.uniform(2, 4))
             continue
+        total_checked += len(raw)
         new_items = []
+        tracked_updates = []
         for l in raw:
             it = parse_listing(l)
             if not accept(q, it, cfg):
@@ -285,10 +347,15 @@ def run_once(cfg, db, dry=False):
             known = db.execute("SELECT 1 FROM listings WHERE id=?", (it["id"],)).fetchone()
             if known:
                 db.execute("UPDATE listings SET last_seen=?, price=? WHERE id=?", (now, it["price"], it["id"]))
+                if db.execute("SELECT 1 FROM sent WHERE id=?", (it["id"],)).fetchone():
+                    tracked_updates.append(it)
             else:
                 db.execute("INSERT INTO listings VALUES(?,?,?,?,?,?,?)", (it["id"], qkey, grp, it["title"], it["price"], now, now))
                 new_items.append((it, grp))
         db.commit()
+        if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
+            for tracked in tracked_updates:
+                supabase_record_price(tracked["id"], tracked["price"])
         for it, grp in new_items:
             age = age_hours(it["date"])
             if age is None and first_run:
@@ -312,7 +379,8 @@ def run_once(cfg, db, dry=False):
             if discount < need:
                 continue
             if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
-                supabase_upsert_deal(q, it, med, discount, flags, grp)
+                if supabase_upsert_deal(q, it, med, discount, flags, grp):
+                    supabase_record_price(it["id"], it["price"], med, discount)
             send(format_deal(q, it, med, n, kind, discount, flags), dry)
             db.execute("INSERT OR IGNORE INTO sent VALUES(?,?)", (it["id"], now))
             db.commit()
@@ -326,7 +394,9 @@ def run_once(cfg, db, dry=False):
             send("⚠️ Бот не смог получить данные с Marktplaats (возможно, блокировка или смена формата). Проверьте логи.", dry)
             db.execute("INSERT OR REPLACE INTO meta VALUES('warned',?)", (str(now),))
             db.commit()
-    log(f"готово: отправлено {sent_count}, ошибок запросов {fails}")
+    if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
+        supabase_record_run(total_checked, sent_count, fails)
+    log(f"готово: проверено объявлений {total_checked}, отправлено {sent_count}, ошибок запросов {fails}")
 
 def get_chat_id():
     data = tg("getUpdates", {})

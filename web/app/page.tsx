@@ -6,6 +6,14 @@ import type { Deal } from "@/lib/supabase";
 type Tab = "home" | "categories" | "saved" | "profile";
 type Sort = "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
+type UserSettings = { categories: string[]; minDiscount: number; maxDistanceKm: number | null };
+type BotStats = { last_run_at: string; last_run_found: number; last_run_new: number; last_run_errors: number };
+type PricePoint = { price: number; market_price: number | null; discount: number | null; observed_at: string };
+const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, maxDistanceKm: null };
+function telegramHeaders(json = false): Record<string, string> {
+  const initData = typeof window !== "undefined" ? window.Telegram?.WebApp?.initData || "" : "";
+  return { ...(json ? { "Content-Type": "application/json" } : {}), ...(initData ? { Authorization: `tma ${initData}` } : {}) };
+}
 
 const CATEGORIES = [
   { key: "", label: "Все", icon: "✦" },
@@ -102,33 +110,60 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
+  const [settingsDraft, setSettingsDraft] = useState<UserSettings>(DEFAULT_SETTINGS);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState("");
+  const [botStats, setBotStats] = useState<BotStats | null>(null);
+  const [priceHistory, setPriceHistory] = useState<PricePoint[]>([]);
+  const [telegramInitData, setTelegramInitData] = useState("");
 
   useEffect(() => {
-    try {
-      setSaved(JSON.parse(localStorage.getItem("deal-radar-favorites") || "[]") as string[]);
-    } catch {
-      setSaved([]);
-    }
+    try { setSaved(JSON.parse(localStorage.getItem("deal-radar-favorites") || "[]") as string[]); }
+    catch { setSaved([]); }
     const webApp = window.Telegram?.WebApp;
-    if (webApp) {
-      webApp.ready();
-      webApp.expand();
-      webApp.setHeaderColor?.("#0a0d12");
-      webApp.setBackgroundColor?.("#0a0d12");
-      if (webApp.initData) {
-        fetch("/api/auth", {
+    if (!webApp) return;
+    webApp.ready();
+    webApp.expand();
+    webApp.setHeaderColor?.("#0a0d12");
+    webApp.setBackgroundColor?.("#0a0d12");
+    if (!webApp.initData) return;
+    setTelegramInitData(webApp.initData);
+    const headers = { Authorization: `tma ${webApp.initData}` };
+    void (async () => {
+      try {
+        const authResponse = await fetch("/api/auth", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ initData: webApp.initData })
-        })
-          .then(async (response) => {
-            if (!response.ok) return;
-            const data = await response.json();
-            if (data.authenticated && data.user) setProfile(data.user as TelegramProfile);
-          })
-          .catch(() => undefined);
-      }
-    }
+        });
+        if (!authResponse.ok) return;
+        const authData = await authResponse.json();
+        if (!authData.authenticated || !authData.user) return;
+        setProfile(authData.user as TelegramProfile);
+        const [favoritesResponse, settingsResponse, statsResponse] = await Promise.all([
+          fetch("/api/favorites", { headers, cache: "no-store" }),
+          fetch("/api/settings", { headers, cache: "no-store" }),
+          fetch("/api/stats", { headers, cache: "no-store" })
+        ]);
+        if (favoritesResponse.ok) {
+          const data = await favoritesResponse.json();
+          const ids = Array.isArray(data.ids) ? data.ids as string[] : [];
+          setSaved(ids);
+          localStorage.setItem("deal-radar-favorites", JSON.stringify(ids));
+        }
+        if (settingsResponse.ok) {
+          const data = await settingsResponse.json();
+          const next = data.settings as UserSettings;
+          setSettings(next);
+          setSettingsDraft(next);
+        }
+        if (statsResponse.ok) {
+          const data = await statsResponse.json();
+          setBotStats(data.status as BotStats | null);
+        }
+      } catch { /* Personal features may be temporarily unavailable; keep the public feed usable. */ }
+    })();
   }, []);
 
   const loadDeals = useCallback(async () => {
@@ -158,21 +193,55 @@ export default function HomePage() {
   const filtered = useMemo(() => {
     let result = deals;
     if (tab === "saved") result = result.filter((deal) => saved.includes(deal.listing_id));
+    if (settings.categories.length) result = result.filter((deal) => settings.categories.includes(deal.category_key));
+    if (settings.minDiscount > 0) result = result.filter((deal) => Number(deal.discount) * 100 >= settings.minDiscount);
+    if (settings.maxDistanceKm !== null) result = result.filter((deal) => deal.distance_km === null || Number(deal.distance_km) <= settings.maxDistanceKm!);
     if (search.trim()) {
       const term = search.trim().toLocaleLowerCase();
       result = result.filter((deal) => (deal.title + " " + (deal.description || "")).toLocaleLowerCase().includes(term));
     }
     return result;
-  }, [deals, saved, search, tab]);
+  }, [deals, saved, search, tab, settings]);
 
   function toggleSaved(id: string) {
-    setSaved((current) => {
-      const next = current.includes(id) ? current.filter((item) => item !== id) : [...current, id];
-      localStorage.setItem("deal-radar-favorites", JSON.stringify(next));
-      window.Telegram?.WebApp?.HapticFeedback?.impactOccurred("light");
-      return next;
-    });
+    const wasSaved = saved.includes(id);
+    const next = wasSaved ? saved.filter((item) => item !== id) : [...saved, id];
+    setSaved(next);
+    localStorage.setItem("deal-radar-favorites", JSON.stringify(next));
+    window.Telegram?.WebApp?.HapticFeedback?.impactOccurred("light");
+    if (telegramInitData) {
+      void fetch(wasSaved ? `/api/favorites?dealId=${encodeURIComponent(id)}` : "/api/favorites", {
+        method: wasSaved ? "DELETE" : "POST",
+        headers: telegramHeaders(true),
+        ...(wasSaved ? {} : { body: JSON.stringify({ dealId: id }) })
+      }).catch((error) => console.warn("Favorites sync failed", error));
+    }
   }
+
+  async function saveSettings() {
+    setSettingsSaving(true);
+    setSettingsMessage("");
+    try {
+      const response = await fetch("/api/settings", { method: "PUT", headers: telegramHeaders(true), body: JSON.stringify(settingsDraft) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Не удалось сохранить настройки");
+      setSettings(data.settings as UserSettings);
+      setSettingsDraft(data.settings as UserSettings);
+      setSettingsMessage("Настройки сохранены");
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "Ошибка сохранения");
+    } finally { setSettingsSaving(false); }
+  }
+
+  useEffect(() => {
+    setPriceHistory([]);
+    if (!selected || !telegramInitData) return;
+    const controller = new AbortController();
+    fetch(`/api/deals/${encodeURIComponent(selected.listing_id)}/history`, { headers: telegramHeaders(), cache: "no-store", signal: controller.signal })
+      .then(async (response) => { if (response.ok) { const data = await response.json(); setPriceHistory(Array.isArray(data.points) ? data.points as PricePoint[] : []); } })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [selected, telegramInitData]);
 
   const strongest = deals.length ? Math.max(...deals.map((deal) => Number(deal.discount) || 0)) : 0;
   const activeCategory = CATEGORIES.find((item) => item.key === category)?.label || "Все категории";
@@ -222,7 +291,7 @@ export default function HomePage() {
       <section className="stats-grid">
         <div className="stat-card"><span className="stat-label">В ленте сейчас</span><strong>{deals.length}</strong><span className="stat-caption">актуальных предложений</span></div>
         <div className="stat-card accent-stat"><span className="stat-label">Максимальная скидка</span><strong>{deals.length ? Math.round(strongest * 100) + "%" : "—"}</strong><span className="stat-caption">от наблюдаемой цены рынка</span></div>
-        <div className="stat-card"><span className="stat-label">Обновление</span><strong className="stat-time">{updatedAt ? new Date(updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "—"}</strong><span className="stat-caption">автоматическая проверка</span></div>
+        <div className="stat-card"><span className="stat-label">Последний скан</span><strong className="stat-time">{botStats?.last_run_at ? new Date(botStats.last_run_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : updatedAt ? new Date(updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "—"}</strong><span className="stat-caption">{botStats ? `Проверено ${botStats.last_run_found} · новых ${botStats.last_run_new}${botStats.last_run_errors ? ` · ошибок ${botStats.last_run_errors}` : ""}` : "Статистика появится после запуска бота"}</span></div>
       </section>
 
       <section className="content-section" id="deals">
@@ -290,10 +359,23 @@ export default function HomePage() {
       </nav>
 
       {tab === "profile" ? (
-        <div className="profile-toast" role="status">
-          <strong>{profile ? profile.firstName + (profile.lastName ? " " + profile.lastName : "") : "Гость Deal Radar"}</strong>
-          <span>{profile?.username ? "@" + profile.username : profile ? "Telegram подтверждён" : "Открой Mini App из Telegram для подтверждения профиля."}</span>
-          <button onClick={() => setTab("home")}>Закрыть</button>
+        <div className="profile-toast settings-panel" role="region" aria-label="Настройки Deal Radar">
+          <div className="settings-head"><div><strong>{profile ? profile.firstName + (profile.lastName ? " " + profile.lastName : "") : "Гость Deal Radar"}</strong><span>{profile?.username ? "@" + profile.username : profile ? "Telegram подтверждён" : "Откройте приложение из Telegram"}</span></div><button onClick={() => setTab("home")}>×</button></div>
+          <label className="settings-field">Минимальная скидка: <b>{settingsDraft.minDiscount}%</b>
+            <input type="range" min="0" max="70" step="5" value={settingsDraft.minDiscount} onChange={(event) => setSettingsDraft((old) => ({ ...old, minDiscount: Number(event.target.value) }))} />
+          </label>
+          <label className="settings-field">Максимальное расстояние
+            <select value={settingsDraft.maxDistanceKm ?? 0} onChange={(event) => setSettingsDraft((old) => ({ ...old, maxDistanceKm: Number(event.target.value) || null }))}>
+              <option value="0">Без ограничения</option><option value="10">10 км</option><option value="25">25 км</option><option value="50">50 км</option><option value="100">100 км</option><option value="150">150 км</option>
+            </select>
+          </label>
+          <div className="settings-field">Категории <span className="settings-hint">Пустой выбор = все категории</span>
+            <div className="settings-category-grid">
+              {CATEGORIES.filter((item) => item.key).map((item) => <button type="button" key={item.key} className={settingsDraft.categories.includes(item.key) ? "preference-chip active" : "preference-chip"} onClick={() => setSettingsDraft((old) => ({ ...old, categories: old.categories.includes(item.key) ? old.categories.filter((key) => key !== item.key) : [...old.categories, item.key] }))}>{item.label}</button>)}
+            </div>
+          </div>
+          <div className="settings-actions"><span>{settingsMessage}</span><button className="secondary-button" onClick={() => void saveSettings()} disabled={settingsSaving || !telegramInitData}>{settingsSaving ? "Сохраняем…" : "Сохранить настройки"}</button></div>
+          <p className="settings-note">Эти фильтры влияют на ленту приложения. Базовый регион и радиус сканера задаются в config.json.</p>
         </div>
       ) : null}
 
@@ -313,6 +395,20 @@ export default function HomePage() {
               <div className="detail-price"><strong>{euro(selected.price)}</strong><span>Рынок ≈ {euro(selected.market_price)}</span></div>
               <p>{selected.description || "Описание отсутствует в исходном объявлении."}</p>
               <div className="detail-facts"><span>⌖ {selected.city || "Нидерланды"}</span><span>Обнаружено {dateLabel(selected.detected_at)}</span></div>
+              <div className="price-history">
+                <strong>История цены</strong>
+                {priceHistory.length ? <>
+                  <div className="history-bars">
+                    {priceHistory.map((point, index) => {
+                      const values = priceHistory.map((item) => Number(item.price));
+                      const min = Math.min(...values), max = Math.max(...values);
+                      const height = max === min ? 55 : 18 + ((Number(point.price) - min) / (max - min)) * 62;
+                      return <div className="history-point" key={point.observed_at + index} title={`${euro(point.price)} · ${dateLabel(point.observed_at)}`}><span className="history-bar" style={{ height: height + "%" }} /><small>{dateLabel(point.observed_at)}</small></div>;
+                    })}
+                  </div>
+                  <p>{priceHistory.length} наблюдений. История пополняется при следующих сканированиях.</p>
+                </> : <p>Пока мало данных. История начнёт собираться после следующих запусков бота.</p>}
+              </div>
               {selected.warning_flags?.length ? <div className="warning-list"><strong>Обрати внимание</strong>{selected.warning_flags.map((flag) => <span key={flag}>⚠ {flag}</span>)}</div> : null}
               <a className="primary-button full-button" href={selected.listing_url} target="_blank" rel="noreferrer">Открыть на Marktplaats ↗</a>
               <button className="secondary-button full-button" onClick={() => toggleSaved(selected.listing_id)}>{saved.includes(selected.listing_id) ? "Убрать из избранного" : "Добавить в избранное"}</button>
