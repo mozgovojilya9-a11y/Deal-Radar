@@ -21,6 +21,18 @@ const CATEGORIES = [
   { key: "ps5", label: "PlayStation 5", icon: "⌘" },
   { key: "ps4", label: "PlayStation 4", icon: "⌘" },
   { key: "televisions", label: "Телевизоры", icon: "▣" },
+  { key: "drones", label: "Дроны", icon: "◇" },
+  { key: "bag-michael-kors", label: "Сумки Michael Kors", icon: "▱" },
+  { key: "backpack-michael-kors", label: "Рюкзаки Michael Kors", icon: "▱" },
+  { key: "microphone-shure", label: "Микрофоны Shure", icon: "◉" },
+  { key: "microphone-rode", label: "Микрофоны RØDE", icon: "◉" },
+  { key: "microphone-dji", label: "Микрофоны DJI", icon: "◉" },
+  { key: "microphone-sennheiser", label: "Микрофоны Sennheiser", icon: "◉" },
+  { key: "headphones-sony", label: "Наушники Sony", icon: "◉" },
+  { key: "headphones-bose", label: "Наушники Bose", icon: "◉" },
+  { key: "headphones-sennheiser", label: "Наушники Sennheiser", icon: "◉" },
+  { key: "headphones-jbl", label: "Наушники JBL", icon: "◉" },
+  { key: "headphones-beats", label: "Наушники Beats", icon: "◉" },
   { key: "airpods-pro-3", label: "AirPods Pro 3", icon: "◉" },
   { key: "airpods-max", label: "AirPods Max", icon: "◉" },
   { key: "airpods-5", label: "AirPods 5", icon: "◉" },
@@ -85,40 +97,41 @@ function DealCard({ deal, saved, onSave, onOpen }: {
   onSave: () => void;
   onOpen: () => void;
 }) {
-  const discount = Math.max(0, Math.round(Number(deal.discount) * 100));
+  const candidate = deal.status === "candidate";
+  const good = deal.status === "good";
+  const hasEstimate = deal.market_price !== null && deal.market_price !== undefined;
+  const discount = deal.discount == null ? null : Math.max(0, Math.round(Number(deal.discount) * 100));
+  const statusLabel = candidate ? "ПРОВЕРКА" : good ? "ХОРОШАЯ ЦЕНА" : "СИЛЬНАЯ ВЫГОДА";
   return (
-    <article className="deal-card">
+    <article className={"deal-card" + (candidate ? " candidate-card" : "") + (good ? " good-card" : "")}>
       <button className="image-button" onClick={onOpen} aria-label={"Открыть " + deal.title}>
         <div className="deal-image">
           {deal.image_url ? (
-            // Marktplaats image hosts are dynamic; plain img avoids a hard-coded remote host allowlist.
             // eslint-disable-next-line @next/next/no-img-element
             <img src={deal.image_url} alt={deal.title} loading="lazy" referrerPolicy="no-referrer" />
-          ) : (
-            <span className="image-fallback">✦</span>
-          )}
-          <span className="discount-pill">−{discount}%</span>
+          ) : <span className="image-fallback">✦</span>}
+          <span className={"discount-pill" + (candidate ? " candidate-pill" : "") + (good ? " good-pill" : "")}>
+            {discount === null ? "На проверке" : candidate ? "≈ −" + discount + "%" : "−" + discount + "%"}
+          </span>
         </div>
       </button>
       <div className="deal-content">
-        <div className="deal-meta">
-          <span>{deal.category_label}</span>
-          <span>{dateLabel(deal.posted_at || deal.detected_at)}</span>
-        </div>
+        <div className="deal-meta"><span>{deal.category_label}</span><span>{dateLabel(deal.posted_at || deal.detected_at)}</span></div>
+        <div className={"deal-status " + (candidate ? "candidate" : good ? "good" : "strong")}>{statusLabel}</div>
         <button className="deal-title" onClick={onOpen}>{deal.title}</button>
         <div className="price-row">
           <strong>{euro(deal.price)}</strong>
-          <span className="old-price">{euro(deal.market_price)}</span>
+          <span className="old-price">{hasEstimate ? "≈ " + euro(deal.market_price) : "Рынок уточняется"}</span>
         </div>
-        <div className="saving-line">
-          <span>Экономия</span>
-          <strong>{euro(Math.max(0, Number(deal.market_price) - Number(deal.price)))}</strong>
-        </div>
+        {hasEstimate && discount !== null ? (
+          <div className={"saving-line" + (candidate ? " preliminary-saving" : "")}>
+            <span>{candidate ? "Предварительная разница" : "Ориентир экономии"}</span>
+            <strong>{euro(Number(deal.market_price) - Number(deal.price))}</strong>
+          </div>
+        ) : <p className="candidate-explanation">{deal.evaluation_reason || "Недостаточно похожих объявлений для подтверждения рыночной цены."}</p>}
         <div className="card-footer">
           <span className="location">⌖ {deal.city || "Нидерланды"}{deal.distance_km != null ? <b className="distance"> · {Math.round(deal.distance_km)} км</b> : null}</span>
-          <button className={"save-button" + (saved ? " active" : "")} onClick={onSave} aria-label="В избранное">
-            {saved ? "♥" : "♡"}
-          </button>
+          <button className={"save-button" + (saved ? " active" : "")} onClick={onSave} aria-label="В избранное">{saved ? "♥" : "♡"}</button>
         </div>
         <a className="card-link" href={deal.listing_url} target="_blank" rel="noopener noreferrer">Открыть на Marktplaats <span>↗</span></a>
       </div>
@@ -219,7 +232,7 @@ export default function HomePage() {
     let result = deals;
     if (tab === "saved") result = result.filter((deal) => saved.includes(deal.listing_id));
     if (settings.categories.length) result = result.filter((deal) => settings.categories.includes(deal.category_key));
-    if (settings.minDiscount > 0) result = result.filter((deal) => Number(deal.discount) * 100 >= settings.minDiscount);
+    if (settings.minDiscount > 0) result = result.filter((deal) => deal.discount == null || Number(deal.discount) * 100 >= settings.minDiscount);
     if (settings.maxDistanceKm !== null) result = result.filter((deal) => deal.distance_km === null || Number(deal.distance_km) <= settings.maxDistanceKm!);
     if (settings.minPrice !== null) result = result.filter((deal) => Number(deal.price) >= settings.minPrice!);
     if (settings.maxPrice !== null) result = result.filter((deal) => Number(deal.price) <= settings.maxPrice!);
@@ -229,6 +242,10 @@ export default function HomePage() {
     }
     return result;
   }, [deals, saved, search, tab, settings]);
+
+  const strongDeals = useMemo(() => filtered.filter((deal) => !deal.status || deal.status === "strong"), [filtered]);
+  const goodDeals = useMemo(() => filtered.filter((deal) => deal.status === "good"), [filtered]);
+  const reviewDeals = useMemo(() => filtered.filter((deal) => deal.status === "candidate"), [filtered]);
 
   function toggleSaved(id: string) {
     setSaved((current) => {
@@ -311,10 +328,10 @@ export default function HomePage() {
       </section>
 
       <section className="stats-grid scanner-overview">
-        <div className="stat-card"><span className="stat-label">Проверено сканером</span><strong>{scannerStats ? scannerStats.checked.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">объявлений за последний запуск</span></div>
-        <div className="stat-card accent-stat"><span className="stat-label">Выгодных в каталоге</span><strong>{deals.length}</strong><span className="stat-caption">прошли оценку цены и фильтры</span></div>
-        <div className="stat-card"><span className="stat-label">Кандидатов оценено</span><strong>{scannerStats ? scannerStats.candidates.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">после первичного отбора</span></div>
-        <div className="stat-card"><span className="stat-label">Отсеяно правилами</span><strong>{scannerStats ? scannerStats.rejectedTotal.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">возраст, риски, данные и скидка</span></div>
+        <div className="stat-card"><span className="stat-label">Результатов поиска</span><strong>{scannerStats ? scannerStats.checked.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">включая совпадения между запросами</span></div>
+        <div className="stat-card accent-stat"><span className="stat-label">Уникальных объявлений</span><strong>{scannerStats?.unique != null ? scannerStats.unique.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">по ID Marktplaats</span></div>
+        <div className="stat-card"><span className="stat-label">Повторных совпадений</span><strong>{scannerStats?.duplicates != null ? scannerStats.duplicates.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">одно объявление найдено в нескольких запросах</span></div>
+        <div className="stat-card"><span className="stat-label">В каталоге</span><strong>{deals.length}</strong><span className="stat-caption">выгодные предложения и кандидаты</span></div>
       </section>
 
       {tab === "analytics" ? (
@@ -328,24 +345,26 @@ export default function HomePage() {
             <div className="analytics-primary green"><span>Выгодных добавлено за запуск</span><strong>{scannerStats ? scannerStats.newDeals.toLocaleString("ru-RU") : "—"}</strong><small>Всего активных предложений в каталоге: {deals.length}</small></div>
           </div>
           <div className="analytics-grid">
-            <div className="analytics-card"><span>Прошли базовые фильтры</span><strong>{scannerStats ? scannerStats.accepted.toLocaleString("ru-RU") : "—"}</strong><small>подходящие по модели, цене и ключевым словам</small></div>
-            <div className="analytics-card"><span>Кандидаты оценены</span><strong>{scannerStats ? scannerStats.candidates.toLocaleString("ru-RU") : "—"}</strong><small>для сравнения с рыночной стоимостью</small></div>
+            <div className="analytics-card"><span>Первично прошли фильтры</span><strong>{scannerStats ? scannerStats.accepted.toLocaleString("ru-RU") : "—"}</strong><small>уникальные объявления после проверки товара, цены и региона</small></div>
+            <div className="analytics-card"><span>Подтверждённые сделки</span><strong>{scannerStats ? ((scannerStats.strongDeals ?? 0) + (scannerStats.goodDeals ?? 0)).toLocaleString("ru-RU") : "—"}</strong><small>достаточно похожих объявлений для сравнения</small></div>
+            <div className="analytics-card"><span>Кандидаты на проверке</span><strong>{scannerStats?.reviewCandidates != null ? scannerStats.reviewCandidates.toLocaleString("ru-RU") : "—"}</strong><small>нужно больше рыночных данных</small></div>
             <div className="analytics-card"><span>Ошибки поисковых запросов</span><strong>{scannerStats ? scannerStats.failedQueries + " / " + scannerStats.queryCount : "—"}</strong><small>ошибившиеся запросы из общего числа</small></div>
-            <div className="analytics-card"><span>Максимальная скидка в каталоге</span><strong>{deals.length ? Math.round(strongest * 100) + "%" : "—"}</strong><small>от ориентировочной рыночной цены</small></div>
           </div>
           <div className="rejection-panel">
             <div className="rejection-heading"><div><div className="eyebrow">FILTER BREAKDOWN</div><h3>Почему объявления отсеялись</h3></div><strong>{scannerStats ? scannerStats.rejectedTotal.toLocaleString("ru-RU") : "—"} <small>всего</small></strong></div>
             {[
-              { label: "Слишком старые", value: scannerStats?.rejectedAge ?? 0, color: "age" },
-              { label: "Подозрительные / рисковые", value: scannerStats?.rejectedRisk ?? 0, color: "risk" },
-              { label: "Недостаточно рыночных данных", value: scannerStats?.rejectedSamples ?? 0, color: "samples" },
-              { label: "Скидка ниже заданного порога", value: scannerStats?.rejectedDiscount ?? 0, color: "discount" }
+              { label: "Не подошли по названию / модели", value: scannerStats?.rejectedTitle ?? 0, color: "age" },
+              { label: "Цена или формат цены не подошли", value: (scannerStats?.rejectedPriceType ?? 0) + (scannerStats?.rejectedPriceRange ?? 0) + (scannerStats?.rejectedInvalid ?? 0), color: "risk" },
+              { label: "За пределами радиуса", value: scannerStats?.rejectedDistance ?? 0, color: "samples" },
+              { label: "Старше 30 дней / дата неизвестна", value: (scannerStats?.rejectedAge ?? 0) + (scannerStats?.rejectedDateUnknown ?? 0), color: "age" },
+              { label: "Рискованные объявления", value: scannerStats?.rejectedRisk ?? 0, color: "risk" },
+              { label: "Скидка ниже порога хорошей цены", value: scannerStats?.rejectedDiscount ?? 0, color: "discount" }
             ].map((item) => {
               const total = scannerStats?.rejectedTotal ?? 0;
               const width = total > 0 ? Math.min(100, (item.value / total) * 100) : 0;
               return <div className="rejection-row" key={item.color}><div className="rejection-label"><span>{item.label}</span><strong>{scannerStats ? item.value.toLocaleString("ru-RU") : "—"}</strong></div><div className="rejection-track"><i className={"rejection-fill " + item.color} style={{ width: width + "%" }} /></div></div>;
             })}
-            <p className="analytics-note">Счётчики относятся к последнему запуску. Повторные объявления в разных поисковых категориях могут учитываться в общем количестве проверок более одного раза.</p>
+            <p className="analytics-note">«Результаты поиска» включают повторы. «Уникальные» считаются по ID Marktplaats. Кандидаты не считаются отсеянными: они остаются в отдельном блоке, пока сканер собирает сопоставимые цены.</p>
           </div>
         </section>
       ) : null}
@@ -408,32 +427,34 @@ export default function HomePage() {
         </div>
 
         {error && deals.length === 0 ? (
-          <div className="state-panel error-panel">
-            <div className="state-icon">!</div>
-            <h3>Лента пока не подключена</h3>
-            <p>{error}</p>
+          <div className="state-panel error-panel"><div className="state-icon">!</div><h3>Лента пока не подключена</h3><p>{error}</p>
             <span>Проверьте доступность каталога и попробуйте обновить страницу ещё раз.</span>
             <button className="secondary-button" onClick={() => void loadDeals()}>Попробовать снова</button>
           </div>
         ) : loading && filtered.length === 0 ? (
-          <div className="deal-grid">
-            {Array.from({ length: 6 }).map((_, index) => <div className="skeleton-card" key={index}><div /><span /><span /><span /></div>)}
-          </div>
+          <div className="deal-grid">{Array.from({ length: 6 }).map((_, index) => <div className="skeleton-card" key={index}><div /><span /><span /><span /></div>)}</div>
         ) : filtered.length === 0 ? (
-          <div className="state-panel">
-            <div className="state-icon">⌁</div>
+          <div className="state-panel"><div className="state-icon">⌁</div>
             <h3>{tab === "saved" ? "Пока ничего не сохранено" : "Пока нет подходящих предложений"}</h3>
-            <p>{tab === "saved" ? "Нажимай на сердечко в карточке, чтобы сохранить товар." : "Бот продолжает собирать рыночные цены. Когда появятся предложения с нужной скидкой, они отобразятся здесь."}</p>
+            <p>{tab === "saved" ? "Нажимай на сердечко в карточке, чтобы сохранить товар." : "Сканер продолжает искать хорошие цены. Подходящие объявления появятся здесь после проверки."}</p>
             {tab === "saved" ? <button className="secondary-button" onClick={() => setTab("home")}>К предложениям</button> : null}
             {tab !== "saved" && activeFilters ? <button className="secondary-button" onClick={resetFilters}>Сбросить фильтры</button> : null}
           </div>
+        ) : tab === "saved" ? (
+          <div className="deal-grid">{filtered.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div>
         ) : (
-          <div className="deal-grid">
-            {filtered.map((deal) => (
-              <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />
-            ))}
+          <div className="deal-tiers">
+            <section className="deal-tier strong-tier"><div className="tier-heading"><div><div className="eyebrow">TOP OPPORTUNITIES</div><h3>Самые выгодные <span>{strongDeals.length}</span></h3><p>Лучшее подтверждённое соотношение цены и рынка</p></div></div>
+              {strongDeals.length ? <div className="deal-grid">{strongDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div> : <p className="tier-empty">Пока нет сделок, которые прошли полный порог проверки.</p>}
+            </section>
+            <section className="deal-tier good-tier"><div className="tier-heading"><div><div className="eyebrow">GOOD VALUE</div><h3>Тоже хорошие предложения <span>{goodDeals.length}</span></h3><p>Скидка ниже максимального порога, но цена всё ещё привлекательная</p></div></div>
+              {goodDeals.length ? <div className="deal-grid">{goodDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div> : <p className="tier-empty">В этом проходе не нашлось предложений в среднем диапазоне выгоды.</p>}
+            </section>
+            <section className="deal-tier review-tier"><div className="tier-heading"><div><div className="eyebrow">NEEDS A SECOND LOOK</div><h3>Кандидаты на проверку <span>{reviewDeals.length}</span></h3><p>Не скрываем из-за нехватки сравнений. Скидка здесь не подтверждена.</p></div></div>
+              {reviewDeals.length ? <div className="deal-grid">{reviewDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div> : <p className="tier-empty">Кандидатов пока нет.</p>}
+            </section>
           </div>
-        )}
+        )}}
       </section>
 
       ) : null}
@@ -484,9 +505,11 @@ export default function HomePage() {
               ) : <span>✦</span>}
             </div>
             <div className="detail-body">
-              <div className="eyebrow">{selected.category_label} · −{Math.round(Number(selected.discount) * 100)}%</div>
+              <div className="eyebrow">{selected.category_label} · {selected.status === "candidate" ? "ТРЕБУЕТ ПРОВЕРКИ" : selected.status === "good" ? "ХОРОШАЯ ЦЕНА" : selected.discount == null ? "ВЫГОДНО" : "−" + Math.round(Number(selected.discount) * 100) + "%"}</div>
               <h2>{selected.title}</h2>
-              <div className="detail-price"><strong>{euro(selected.price)}</strong><span>Рынок ≈ {euro(selected.market_price)}</span></div>
+              <div className="detail-price"><strong>{euro(selected.price)}</strong><span>{selected.market_price != null ? "Рынок ≈ " + euro(selected.market_price) : "Рыночная цена пока не подтверждена"}</span></div>
+              {selected.evaluation_reason ? <div className="candidate-detail-note">{selected.evaluation_reason}</div> : null}
+              {selected.market_samples ? <div className="detail-facts"><span>Сравнений: {selected.market_samples}</span><span>Уверенность: {selected.market_confidence === "high" ? "высокая" : "предварительная"}</span></div> : null}
               <p>{selected.description || "Описание отсутствует в исходном объявлении."}</p>
               <div className="detail-facts"><span>⌖ {selected.city || "Нидерланды"}{selected.distance_km != null ? " · " + Math.round(selected.distance_km) + " км" : ""}</span><span>Обнаружено {dateLabel(selected.detected_at)}</span></div>
               {selected.warning_flags?.length ? <div className="warning-list"><strong>Обрати внимание</strong>{selected.warning_flags.map((flag) => <span key={flag}>⚠ {flag}</span>)}</div> : null}
