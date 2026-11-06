@@ -60,7 +60,6 @@ export async function readDeals(options: {
   const response = await fetch(url, {
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: "Bearer " + SUPABASE_SERVICE_ROLE_KEY,
       Accept: "application/json"
     },
     cache: "no-store"

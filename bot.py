@@ -211,7 +211,6 @@ def supabase_upsert_deal(q, it, med, discount, flags, grp):
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={
             "apikey": service_key,
-            "Authorization": "Bearer " + service_key,
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates,return=minimal",
         },
