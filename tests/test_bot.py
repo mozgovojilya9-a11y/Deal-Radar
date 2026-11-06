@@ -59,9 +59,7 @@ class ScannerTests(unittest.TestCase):
     def test_catalog_receives_deal_without_telegram(self):
         seed = [listing(str(i), 400, date=datetime.now(timezone.utc).isoformat()) for i in range(1, 7)]
         self.assertTrue(self.run_scan(seed))
-        first_feed = bot.load_feed()["deals"]
-        self.assertEqual(len(first_feed), 6)
-        self.assertTrue(all(item["status"] == "candidate" for item in first_feed))
+        self.assertEqual(bot.load_feed()["deals"], [])
         now = datetime.now(timezone.utc).isoformat()
         deal = listing("99", 250, date=now, title="PS5 met 2 controllers")
         self.assertTrue(self.run_scan(seed + [deal]))
@@ -379,9 +377,7 @@ class ScannerTests(unittest.TestCase):
             with mock.patch.object(bot, "fetch_query", return_value=seed + [target]), \
                  mock.patch.object(bot, "review_listings_with_ai", side_effect=decisions):
                 self.assertTrue(bot.run_once(CFG, db, dry=False))
-            remaining = bot.load_feed()["deals"]
-            self.assertNotIn("ai-accessory", [item["listing_id"] for item in remaining])
-            self.assertTrue(all(item["status"] == "candidate" for item in remaining))
+            self.assertEqual(bot.load_feed()["deals"], [])
         finally:
             db.close()
 
