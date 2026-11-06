@@ -317,6 +317,11 @@ export default function HomePage() {
   const [search, setSearch] = useState("");
   const [saved, setSaved] = useState<string[]>([]);
   const [selected, setSelected] = useState<Deal | null>(null);
+  const [advisorOpen, setAdvisorOpen] = useState(false);
+  const [advisorInput, setAdvisorInput] = useState("");
+  const [advisorMessages, setAdvisorMessages] = useState<Array<{ role: "user" | "model"; text: string }>>([]);
+  const [advisorLoading, setAdvisorLoading] = useState(false);
+  const [advisorError, setAdvisorError] = useState("");
   const [profile, setProfile] = useState<TelegramProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -498,6 +503,43 @@ export default function HomePage() {
       setResearchError(error instanceof Error ? error.message : "Ошибка веб-исследования.");
     } finally {
       setResearchLoading(false);
+    }
+  }
+
+  async function sendProductQuestion(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    const question = advisorInput.trim();
+    if (!selected || !question || advisorLoading) return;
+    const initData = window.Telegram?.WebApp?.initData || "";
+    if (!initData) { setAdvisorError("Открой приложение внутри Telegram, чтобы консультироваться с AI."); return; }
+    const nextMessages = [...advisorMessages, { role: "user" as const, text: question }].slice(-12);
+    setAdvisorMessages(nextMessages);
+    setAdvisorInput("");
+    setAdvisorError("");
+    setAdvisorLoading(true);
+    try {
+      const response = await fetch("/api/advisor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          product: {
+            title: selected.title, description: selected.description || "", price: selected.price,
+            marketPrice: selected.market_price ?? null, newPrice: selected.new_price ?? null,
+            estimatedProfit: selected.estimated_profit ?? null, category: selected.category_label,
+            city: selected.city || "Нидерланды", condition: selected.condition || "unknown",
+            warningFlags: selected.warning_flags || [], listingUrl: selected.listing_url
+          },
+          messages: nextMessages
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "AI временно недоступен.");
+      setAdvisorMessages((current) => [...current, { role: "model", text: String(data.answer || "Не удалось сформировать ответ.") }].slice(-12));
+    } catch (error) {
+      setAdvisorError(error instanceof Error ? error.message : "Не удалось отправить вопрос.");
+    } finally {
+      setAdvisorLoading(false);
     }
   }
 
@@ -920,6 +962,33 @@ export default function HomePage() {
               {selected.warning_flags?.length ? <div className="warning-list"><strong>Обрати внимание</strong>{selected.warning_flags.map((flag) => <span key={flag}>⚠ {flag}</span>)}</div> : null}
               <a className="primary-button full-button" href={selected.listing_url} target="_blank" rel="noreferrer">Открыть на Marktplaats ↗</a>
               <button className="secondary-button full-button" onClick={() => toggleSaved(selected.listing_id)}>{saved.includes(selected.listing_id) ? "Убрать из избранного" : "Добавить в избранное"}</button>
+
+              <button className="advisor-toggle full-button" type="button" onClick={() => { setAdvisorOpen((open) => !open); setAdvisorError(""); }}>
+                <span className="advisor-toggle-mark">✳</span><span><strong>Спросить AI о товаре</strong><small>Проверка покупки, риски и советы</small></span><span className="advisor-toggle-arrow">{advisorOpen ? "−" : "+"}</span>
+              </button>
+              {advisorOpen ? (
+                <section className="product-advisor" aria-label="Консультация AI по товару">
+                  <div className="advisor-heading"><div><span className="advisor-status-dot" /><strong>AI-консультант</strong></div><small>Контекст этого объявления уже добавлен</small></div>
+                  <div className="advisor-context"><span>{selected.title}</span><b>{euro(selected.price)}</b></div>
+                  <div className="advisor-suggestions">
+                    {["Стоит ли покупать за эту цену?", "На что обратить внимание при осмотре?", "Какие риски и вопросы задать продавцу?"].map((question) => (
+                      <button type="button" key={question} onClick={() => setAdvisorInput(question)} disabled={advisorLoading}>{question}</button>
+                    ))}
+                  </div>
+                  <div className="advisor-thread" aria-live="polite">
+                    {!advisorMessages.length ? <p className="advisor-empty">Задай вопрос об этом товаре. AI учтёт цену, описание, оценку рынка и предупреждения радара.</p> : advisorMessages.map((message, index) => (
+                      <div className={"advisor-message " + message.role} key={index}><span>{message.role === "user" ? "Вы" : "AI"}</span><p>{message.text}</p></div>
+                    ))}
+                    {advisorLoading ? <div className="advisor-thinking"><span /><span /><span /> Анализирую товар…</div> : null}
+                  </div>
+                  {advisorError ? <p className="advisor-error" role="alert">{advisorError}</p> : null}
+                  <form className="advisor-form" onSubmit={sendProductQuestion}>
+                    <input value={advisorInput} onChange={(event) => setAdvisorInput(event.target.value)} placeholder="Спроси что-нибудь о товаре…" maxLength={700} disabled={advisorLoading} />
+                    <button type="submit" disabled={advisorLoading || !advisorInput.trim()} aria-label="Отправить вопрос">↑</button>
+                  </form>
+                  <p className="advisor-disclaimer">AI помогает оценить объявление, но не может подтвердить подлинность или фактическое состояние товара.</p>
+                </section>
+              ) : null}
             </div>
           </section>
         </div>
