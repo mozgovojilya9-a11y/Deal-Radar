@@ -126,7 +126,7 @@ def fetch_query(cfg, q, pages):
                 try:
                     result.extend(fetch_marktplaats_v2(cfg, term, term_pages))
                 except Exception as v2_error:
-                    log(f"[{qkey}] v2 fallback warning for '{term}': {v2_error}")
+                    log(f"[{q.get('key', 'search')}] v2 fallback warning for '{term}': {v2_error}")
         except Exception as legacy_error:
             try:
                 result = fetch_marktplaats_v2(cfg, term, term_pages)
