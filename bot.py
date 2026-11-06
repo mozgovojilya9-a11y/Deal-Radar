@@ -97,13 +97,14 @@ def fetch_marktplaats_v2(cfg, query, pages):
         params = {
             "query": query, "offset": page * 100, "limit": 100, "locale": "nl-NL",
             "searchDescription": "true",
-            "distance": int(cfg.get("distance_km", 100) * 1000),
             "sortBy": "price", "sortOrder": "ascending",
         }
-        postcode = str(cfg.get("postcode") or "").strip().upper()
-        if not re.fullmatch(r"\d{4}[A-Z]{2}", postcode):
-            raise ValueError("Marktplaats API v2 needs a full six-character postcode for radius filtering")
-        params["postCode"] = postcode
+        if not cfg.get("nationwide_search"):
+            params["distance"] = int(cfg.get("distance_km", 100) * 1000)
+            postcode = str(cfg.get("postcode") or "").strip().upper()
+            if not re.fullmatch(r"\d{4}[A-Z]{2}", postcode):
+                raise ValueError("Marktplaats API v2 needs a full six-character postcode for radius filtering")
+            params["postCode"] = postcode
         req = urllib.request.Request("https://api.marktplaats.nl/v2/search?" + urllib.parse.urlencode(params), headers=HEADERS)
         with urllib.request.urlopen(req, timeout=25) as response:
             data = json.load(response)
@@ -126,12 +127,14 @@ def fetch_query(cfg, q, pages):
     for term in terms:
         term_pages = min(pages, int(q.get("variant_pages", 1))) if len(terms) > 1 else pages
         params = {
-            "query": term, "postcode": cfg["postcode"],
-            "distanceMeters": int(cfg["distance_km"] * 1000),
+            "query": term,
             "limit": 100, "offset": 0,
             "sortBy": "SORT_INDEX", "sortOrder": "DECREASING",
             "searchInTitleAndDescription": "true",
         }
+        if not cfg.get("nationwide_search"):
+            params["postcode"] = cfg["postcode"]
+            params["distanceMeters"] = int(cfg["distance_km"] * 1000)
         try:
             result = []
             for page in range(term_pages):
@@ -565,7 +568,7 @@ def primary_rejection(q, it, cfg):
     minimum_price = float(q.get("min_price", 0) or 0)
     if float(it["price"]) < minimum_price:
         return "price_range"
-    if it.get("dist_km") is not None and it["dist_km"] > cfg["distance_km"] + 1:
+    if not cfg.get("nationwide_search") and it.get("dist_km") is not None and it["dist_km"] > cfg["distance_km"] + 1:
         return "distance"
     if it.get("external_link") or has_external_website_link(it.get("description") or ""):
         return "external_link"
