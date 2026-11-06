@@ -122,11 +122,13 @@
     {
       "key": "rayban",
       "label": "Ray-Ban Meta Wayfarer Gen 2+",
-      "query": "ray-ban meta wayfarer",
+      "query": "ray-ban meta gen 2 wayfarer",
       "include_any": [
         "ray-ban",
         "rayban",
-        "ray ban"
+        "ray ban",
+        "rw4012",
+        "meta wayfarer"
       ],
       "exclude": [
         "hoesje",
@@ -134,14 +136,20 @@
         "etui",
         "doekje",
         "poster",
-        "case",
-        "onderdelen"
+        "onderdelen",
+        "case only"
       ],
       "min_price": 40,
-      "max_price": 450,
+      "max_price": 800,
       "threshold": 0.25,
-      "group_regex": "\\b(wayfarer)\\b",
-      "require_regex": "(?=.*\\bray[\\s-]?ban\\b)(?=.*\\bmeta\\b)(?=.*\\bwayfarer\\b)(?=.*(?:\\bgen(?:eration)?[\\s.-]*(?:[2-9]\\d*|1\\d+)\\b|\\b(?:[2-9]\\d*|1\\d+)(?:st|nd|rd|th)?[\\s.-]*gen(?:eration)?\\b|\\b(?:[2-9]\\d*|1\\d+)(?:e|de)[\\s.-]*generatie\\b))"
+      "group_regex": "\\b(?:wayfarer|rw4012)\\b",
+      "require_regex": "(?:(?=.*\\bray[\\s-]?ban\\b)(?=.*\\bmeta\\b)(?=.*\\bwayfarer\\b)(?=.*(?:\\bgen(?:eration)?[\\s.-]*(?:[2-9]\\d*|1\\d+)\\b|\\b(?:[2-9]\\d*|1\\d+)(?:st|nd|rd|th)?[\\s.-]*gen(?:eration)?\\b|\\b(?:[2-9]\\d*|1\\d+)(?:e|de)[\\s.-]*generatie\\b))|(?=.*\\bRW4012\\b)(?=.*\\bmeta\\b))",
+      "search_variants": [
+        "ray-ban meta wayfarer gen 2",
+        "ray-ban meta gen 2",
+        "RW4012 meta"
+      ],
+      "variant_pages": 1
     },
     {
       "key": "watch-diesel",
@@ -282,7 +290,7 @@
         "batterij"
       ],
       "min_price": 80,
-      "max_price": 1500,
+      "max_price": 800,
       "threshold": 0.3,
       "group_regex": "\\b(PRX|Gentleman|Seastar|Le Locle|Supersport|T-?Race|PRC ?200|PR ?100|Couturier|Everytime|Classic Dream|Heritage|Chrono XL)\\b"
     },
@@ -398,7 +406,7 @@
         "behuizing"
       ],
       "min_price": 350,
-      "max_price": 1300,
+      "max_price": 800,
       "threshold": 0.25,
       "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b",
       "exclude_regex": [
@@ -430,7 +438,7 @@
         "behuizing"
       ],
       "min_price": 300,
-      "max_price": 1200,
+      "max_price": 800,
       "threshold": 0.25,
       "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b",
       "exclude_regex": [
@@ -462,7 +470,7 @@
         "behuizing"
       ],
       "min_price": 250,
-      "max_price": 1000,
+      "max_price": 800,
       "threshold": 0.25,
       "group_regex": "\\b(pro ?max|pro|plus|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b",
       "exclude_regex": [
@@ -494,7 +502,7 @@
         "behuizing"
       ],
       "min_price": 200,
-      "max_price": 900,
+      "max_price": 800,
       "threshold": 0.25,
       "group_regex": "\\b(pro ?max|pro ?max|pro|mini|64 ?gb|128 ?gb|256 ?gb|512 ?gb|1 ?tb)\\b",
       "exclude_regex": [
@@ -580,7 +588,7 @@
         "tv box"
       ],
       "min_price": 60,
-      "max_price": 1500,
+      "max_price": 800,
       "threshold": 0.26,
       "group_type": "television",
       "strict_group": true,
@@ -624,7 +632,7 @@
       "group_regex": "\\b(?:mini\\s*[234](?:\\s*pro)?|mavic\\s*(?:2|3)(?:\\s*(?:pro|max|classic))?|air\\s*[23](?:\\s*s)?|avata\\s*[12]|neo|fpv)\\b",
       "strict_group": true,
       "min_price": 100,
-      "max_price": 2500,
+      "max_price": 800,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 90,
@@ -819,7 +827,7 @@
       "group_regex": "\\b(?:mke\\s*600|mke\\s*400|profile|ew-?d|avx|xs\\s*wireless)\\b",
       "strict_group": true,
       "min_price": 40,
-      "max_price": 900,
+      "max_price": 800,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 35
@@ -1019,7 +1027,7 @@
       "group_regex": "\\b(?:a7\\s*(?:iv|v|c\\s*ii|iii)|a6700|a6400|zv-e10\\s*(?:ii)?|zv-1\\s*(?:ii)?)\\b",
       "strict_group": true,
       "min_price": 180,
-      "max_price": 3500,
+      "max_price": 800,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 100,
@@ -1064,7 +1072,7 @@
       "group_regex": "\\b(?:eos\\s*r(?:50|10|7|8|6\\s*ii|5\\s*ii|6|5)|r50|r10|r7|r8|r6\\s*(?:mark\\s*)?ii|r5\\s*(?:mark\\s*)?ii|g7x\\s*(?:ii|iii))\\b",
       "strict_group": true,
       "min_price": 150,
-      "max_price": 5000,
+      "max_price": 800,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 100,
@@ -1108,7 +1116,7 @@
       "group_regex": "\\b(?:z\\s*(?:5\\s*ii|6\\s*iii|f|8|9|50\\s*ii|30))\\b",
       "strict_group": true,
       "min_price": 180,
-      "max_price": 6000,
+      "max_price": 800,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 100,
@@ -1153,7 +1161,7 @@
       "group_regex": "\\b(?:x100\\s*vi|x-t\\s*(?:5|50|6)|x-s\\s*20|x-h\\s*2(?:s)?)\\b",
       "strict_group": true,
       "min_price": 200,
-      "max_price": 4000,
+      "max_price": 800,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 100,
@@ -1198,7 +1206,7 @@
       "group_regex": "\\b(?:s5\\s*ii\\s*x?|s9|gh\\s*7|g9\\s*ii)\\b",
       "strict_group": true,
       "min_price": 180,
-      "max_price": 4500,
+      "max_price": 800,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 100,
@@ -1243,7 +1251,7 @@
       "group_regex": "\\b(?:hero\\s*(?:11|12|13|14)|max\\s*2)\\b",
       "strict_group": true,
       "min_price": 70,
-      "max_price": 900,
+      "max_price": 800,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 45,
@@ -1265,5 +1273,6 @@
     "retail_proxy_min_profit_eur": 70,
     "retail_proxy_min_roi": 0.35,
     "retail_reference_max_age_days": 45
-  }
+  },
+  "max_product_price_eur": 800
 }

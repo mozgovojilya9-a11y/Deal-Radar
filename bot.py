@@ -67,24 +67,72 @@ def market_stats(db, qkey, grp, exclude_id, since):
     prices = [r[0] for r in db.execute(sql, args)]
     return (len(prices), statistics.median(prices)) if prices else (0, None)
 
-def fetch_query(cfg, q, pages):
+def fetch_marktplaats_v2(cfg, query, pages):
+    """Fallback to the documented Marktplaats v2 search endpoint."""
     out = []
-    for p in range(pages):
+    for page in range(min(pages, 3)):
         params = {
-            "query": q["query"], "postcode": cfg["postcode"],
+            "query": query, "offset": page * 100, "limit": 100, "locale": "nl-NL",
+            "searchDescription": "true", "postCode": cfg.get("postcode", ""),
+            "distance": int(cfg.get("distance_km", 50) * 1000),
+            "sortBy": "default", "sortOrder": "descending",
+        }
+        params = {key: value for key, value in params.items() if value not in ("", None)}
+        req = urllib.request.Request("https://api.marktplaats.nl/v2/search?" + urllib.parse.urlencode(params), headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=25) as response:
+            data = json.load(response)
+        embedded = data.get("_embedded") or {}
+        items = embedded.get("mp:search-result") or data.get("listings") or []
+        out.extend(items)
+        if len(items) < 100:
+            break
+        time.sleep(random.uniform(0.6, 1.2))
+    return out
+
+
+def fetch_query(cfg, q, pages):
+    """Search several wording/model-code variants, then deduplicate by Marktplaats ID."""
+    terms = q.get("search_variants") or [q["query"]]
+    terms = list(dict.fromkeys(str(term).strip() for term in terms if str(term).strip()))
+    out = []
+    seen = set()
+    for term in terms:
+        term_pages = min(pages, int(q.get("variant_pages", 1))) if len(terms) > 1 else pages
+        params = {
+            "query": term, "postcode": cfg["postcode"],
             "distanceMeters": int(cfg["distance_km"] * 1000),
-            "limit": 100, "offset": p * 100,
+            "limit": 100, "offset": 0,
             "sortBy": "SORT_INDEX", "sortOrder": "DECREASING",
             "searchInTitleAndDescription": "true",
         }
-        req = urllib.request.Request(API + "?" + urllib.parse.urlencode(params), headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=25) as r:
-            data = json.load(r)
-        items = data.get("listings") or []
-        out += items
-        if len(items) < 100:
-            break
-        time.sleep(random.uniform(1.5, 3.0))
+        try:
+            result = []
+            for page in range(term_pages):
+                params["offset"] = page * 100
+                req = urllib.request.Request(API + "?" + urllib.parse.urlencode(params), headers=HEADERS)
+                with urllib.request.urlopen(req, timeout=25) as response:
+                    data = json.load(response)
+                items = data.get("listings") or []
+                result.extend(items)
+                if len(items) < 100:
+                    break
+                time.sleep(random.uniform(0.6, 1.2))
+            if not result:
+                result = fetch_marktplaats_v2(cfg, term, term_pages)
+        except Exception as legacy_error:
+            try:
+                result = fetch_marktplaats_v2(cfg, term, term_pages)
+            except Exception:
+                raise legacy_error
+        for item in result:
+            listing_id = str(item.get("itemId") or item.get("id") or "")
+            if listing_id and listing_id in seen:
+                continue
+            if listing_id:
+                seen.add(listing_id)
+            out.append(item)
+        if len(terms) > 1:
+            time.sleep(random.uniform(0.6, 1.2))
     return out
 
 def extract_image_url(l):
@@ -133,14 +181,27 @@ def has_external_website_link(value):
 
 
 def parse_listing(l):
+    """Normalize both current Marktplaats search responses and the documented v2 API."""
     pi, loc = l.get("priceInfo") or {}, l.get("location") or {}
+    price_model = l.get("priceModel") or {}
+    cents = pi.get("priceCents")
+    if not isinstance(cents, (int, float)):
+        cents = price_model.get("askingPrice")
+    if not isinstance(cents, (int, float)):
+        cents = l.get("priceCents")
+    description = l.get("description") or l.get("categorySpecificDescription") or ""
+    if not description and isinstance(l.get("translations"), list):
+        description = " ".join(str(t.get("description") or "") for t in l["translations"] if isinstance(t, dict))
     url = l.get("vipUrl") or ""
+    if not url and isinstance(l.get("_links"), dict):
+        rel = l["_links"].get("mp:advertisement-website-link") or l["_links"].get("mp:advertisement")
+        if isinstance(rel, dict):
+            url = rel.get("href") or ""
     if url.startswith("/"):
         url = "https://www.marktplaats.nl" + url
-    cents = pi.get("priceCents")
-    description = l.get("description") or l.get("categorySpecificDescription") or ""
-    text = " ".join(filter(None, [l.get("title"), l.get("description"),
-                                  l.get("categorySpecificDescription")]))
+    if url and url.startswith("http://link.marktplaats.nl/"):
+        url = url.replace("http://", "https://", 1)
+    text = " ".join(filter(None, [l.get("title"), description, l.get("categorySpecificDescription")]))
     link_fields = []
     for key in ("externalUrl", "externalURL", "website", "websiteUrl", "websiteURL", "externalLinks"):
         value = l.get(key)
@@ -150,19 +211,25 @@ def parse_listing(l):
             link_fields.extend(str(x) for x in value if x)
         elif isinstance(value, dict):
             link_fields.extend(str(x) for x in value.values() if x)
+    price_type = pi.get("priceType") or price_model.get("modelType")
+    if isinstance(price_type, str):
+        price_type = "FIXED" if price_type.lower() == "fixed" else price_type.upper()
+    location = l.get("location")
+    if not isinstance(location, dict):
+        location = {}
     return {
-        "id": str(l.get("itemId") or ""),
+        "id": str(l.get("itemId") or l.get("id") or ""),
         "title": l.get("title") or "",
         "text": text,
         "description": description,
         "external_link": has_external_website_link(text) or any(has_external_website_link(x) for x in link_fields),
         "image_url": extract_image_url(l),
         "price": cents / 100.0 if isinstance(cents, (int, float)) else None,
-        "ptype": pi.get("priceType"),
-        "city": loc.get("cityName") or "",
-        "dist_km": (loc.get("distanceMeters") / 1000.0)
-        if isinstance(loc.get("distanceMeters"), (int, float)) else None,
-        "date": l.get("date"),
+        "ptype": price_type,
+        "city": location.get("cityName") or "",
+        "dist_km": (location.get("distanceMeters") / 1000.0)
+        if isinstance(location.get("distanceMeters"), (int, float)) else None,
+        "date": l.get("date") or l.get("dateCreated") or l.get("createdAt"),
         "url": url,
     }
 
@@ -315,6 +382,8 @@ def group_of(q, text):
     """Build comparable product buckets instead of comparing unrelated items."""
     group_type = q.get("group_type")
     lowered = text.lower()
+    if q.get("key") == "rayban":
+        return "wayfarer-gen-2" if title_matches_query(q, text) else "unknown"
     if group_type == "television":
         brands = ("samsung", "lg", "sony", "philips", "panasonic", "hisense", "tcl",
                   "metz", "grundig", "sharp", "toshiba", "loewe")
@@ -399,7 +468,9 @@ def primary_rejection(q, it, cfg):
         return "invalid"
     if it["ptype"] not in (None, "FIXED"):
         return "price_type"
-    if not (q.get("min_price", 0) <= it["price"] <= q.get("max_price", 10**9)):
+    absolute_cap = float(cfg.get("max_product_price_eur", 800))
+    category_cap = min(float(q.get("max_price", absolute_cap)), absolute_cap)
+    if not (float(q.get("min_price", 0)) <= it["price"] <= category_cap):
         return "price_range"
     if it["dist_km"] is not None and it["dist_km"] > cfg["distance_km"] + 1:
         return "distance"

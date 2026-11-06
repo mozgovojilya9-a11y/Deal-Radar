@@ -235,6 +235,33 @@ class ScannerTests(unittest.TestCase):
         self.assertFalse(bot.title_matches_query(sony,"Sony camera tas"))
         self.assertTrue(bot.title_matches_query(canon,"Canon EOS R6 Mark II body"))
 
+    def test_global_price_ceiling_is_800_euros(self):
+        q={"min_price":1,"max_price":2000}
+        item={"title":"Sony camera body","id":"x","price":801,"ptype":"FIXED","dist_km":1,"external_link":False}
+        self.assertEqual(bot.primary_rejection(q,item,{"distance_km":50,"max_product_price_eur":800}),"price_range")
+        item["price"]=800
+        self.assertIsNone(bot.primary_rejection(q,item,{"distance_km":50,"max_product_price_eur":800}))
+
+    def test_rayban_gen2_accepts_wayfarer_and_rw4012_variants(self):
+        with open(os.path.join(ROOT,"config.json"),encoding="utf-8") as handle: config=json.load(handle)
+        q=next(q for q in config["queries"] if q["key"]=="rayban")
+        self.assertTrue(bot.title_matches_query(q,"Ray-Ban Meta Wayfarer Gen 2 RW4012 Matte Zwart"))
+        self.assertTrue(bot.title_matches_query(q,"Ray-Ban Meta Gen 2 RW4012"))
+        self.assertTrue(bot.title_matches_query(q,"Rayban Meta Wayfarer Gen 2"))
+        self.assertFalse(bot.title_matches_query(q,"Ray-Ban Meta Wayfarer Gen 1 RW4006"))
+        self.assertEqual(bot.group_of(q,"Ray-Ban Meta Gen 2 RW4012"),"wayfarer-gen-2")
+
+    def test_marktplaats_v2_search_result_is_normalized(self):
+        row={"itemId":"m123","title":"Ray-Ban Meta Gen 2 RW4012",
+             "priceModel":{"modelType":"fixed","askingPrice":32500},
+             "translations":[{"locale":"nl-NL","description":"Wayfarer Gen 2"}],
+             "_links":{"mp:advertisement-website-link":{"href":"https://link.marktplaats.nl/m123"}}}
+        parsed=bot.parse_listing(row)
+        self.assertEqual(parsed["price"],325)
+        self.assertEqual(parsed["ptype"],"FIXED")
+        self.assertEqual(parsed["id"],"m123")
+        self.assertIn("Wayfarer",parsed["text"])
+
 
 if __name__ == "__main__":
     unittest.main()
