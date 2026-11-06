@@ -1,12 +1,14 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { createAiResearchPlan, getAiResearchModel, isAiResearchEnabled, reviewAiOffers } from "@/lib/ai-research";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 45;
 
 type Condition = "used" | "new" | "unknown";
-type Offer = { title: string; description: string; price: number; url: string; source: string; condition: Condition; kind: "marktplaats" | "web" };
+type MatchType = "exact" | "variant" | "related" | "accessory" | "unrelated";
+type Offer = { title: string; description: string; price: number; url: string; source: string; condition: Condition; kind: "marktplaats" | "web"; matchType?: MatchType; matchConfidence?: number; matchReason?: string };
 const USED_HOSTS = ["marktplaats.nl", "ebay.nl", "2dehands.be", "tweakers.net", "backmarket.nl", "refurbed.nl"];
 const NEW_HOSTS = ["ray-ban.com", "bol.com", "coolblue.nl", "mediamarkt.nl", "amazon.nl", "kamera-express.nl", "cameranu.nl", "apple.com", "samsung.com", "sony.nl", "nikon.nl", "fujifilm.com", "alternate.nl"];
 const USED_WORDS = /\b(tweedehands|gebruikt|used|pre-owned|occasion|refurbished|vraag\s*&\s*aanbod)\b/i;
@@ -238,59 +240,139 @@ export async function POST(request: NextRequest) {
   const includeNew = body.includeNew !== false;
   if (!includeUsed && !includeNew) return NextResponse.json({ error: "Выбери хотя бы один режим: б/у или новый товар." }, { status: 400 });
   if (query.length < 3 || query.length > 100) return NextResponse.json({ error: "Укажите точную модель или название (от 3 до 100 символов)." }, { status: 400 });
-  // Marktplaats stays the primary used-price source; search web indexes separately to avoid double counting it.
+  // AI planning and the primary Marktplaats lookup run together. The search engine still
+  // supplies the evidence; the model only improves query coverage and product matching.
   const usedQuery = 'site:ebay.nl OR site:2dehands.be OR site:tweakers.net "' + query + '" tweedehands used occasion';
   const newQuery = '"' + query + '" prijs nieuw kopen Nederland price';
-  const [marketResult, usedResult, newResult] = await Promise.allSettled([
-    includeUsed ? searchMarktplaats(query, maxPrice) : Promise.resolve([]),
-    includeUsed ? searchWeb(usedQuery) : Promise.resolve([]),
-    includeNew ? searchWeb(newQuery) : Promise.resolve([]),
+  const [marketResult, planResult] = await Promise.all([
+    includeUsed ? searchMarktplaats(query, maxPrice).then((value) => ({ status: "fulfilled" as const, value }))
+      .catch((reason) => ({ status: "rejected" as const, reason }))
+      : Promise.resolve({ status: "fulfilled" as const, value: [] as Offer[] }),
+    createAiResearchPlan(query, includeUsed, includeNew)
+      .then((value) => ({ status: "fulfilled" as const, value }))
+      .catch((reason) => {
+        console.error("Deal Radar AI search planning failed:", reason);
+        return { status: "rejected" as const, reason };
+      }),
   ]);
+
+  const plan = planResult.status === "fulfilled" ? planResult.value : null;
+  const usedSearchQueries = includeUsed
+    ? [usedQuery, ...(plan?.usedQueries || []).map((term) => 'site:ebay.nl OR site:2dehands.be OR site:tweakers.net "' + term + '" tweedehands used occasion')]
+    : [];
+  const newSearchQueries = includeNew
+    ? [newQuery, ...(plan?.newQueries || []).map((term) => '"' + term + '" prijs nieuw Nederland price')]
+    : [];
+  const searchQueries = Array.from(new Set([...usedSearchQueries, ...newSearchQueries])).slice(0, 5);
+  const webSearchResults = await Promise.all(searchQueries.map((searchQuery) =>
+    searchWeb(searchQuery).then((value) => ({ status: "fulfilled" as const, value }))
+      .catch((reason) => ({ status: "rejected" as const, reason }))
+  ));
+  const searchRows = webSearchResults.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+  const uniqueRows = Array.from(new Map(searchRows.map((item) => [item.url, item])).values()).slice(0, 16);
+  const allWeb = (await Promise.all(uniqueRows.map(fetchWebOffer))).filter((item): item is Offer => item !== null);
   const marktplaats = marketResult.status === "fulfilled" ? marketResult.value : [];
-  const searchRows = [
-    ...(usedResult.status === "fulfilled" ? usedResult.value : []),
-    ...(newResult.status === "fulfilled" ? newResult.value : []),
+
+  const marketAiCandidates = marktplaats
+    .map((offer, index) => ({ offer, id: "mp_" + index, score: relevance(offer.title + " " + offer.description, query) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 18);
+  const webAiCandidates = allWeb.map((offer, index) => ({ offer, id: "web_" + index }));
+  const aiCandidates = [
+    ...marketAiCandidates.map(({ offer, id }) => ({ id, title: offer.title, description: offer.description, price: offer.price, source: offer.source, condition: offer.condition })),
+    ...webAiCandidates.map(({ offer, id }) => ({ id, title: offer.title, description: offer.description, price: offer.price, source: offer.source, condition: offer.condition })),
   ];
-  const uniqueRows = Array.from(new Map(searchRows.map((x) => [x.url, x])).values()).slice(0, 12);
-  const allWeb = (await Promise.all(uniqueRows.map(fetchWebOffer))).filter((x): x is Offer => x !== null);
-  const relevantMarket = marktplaats.filter((x) => relevance(x.title + " " + x.description, query) >= 0.45);
-  const relevantWeb = allWeb.filter((x) => relevance(x.title + " " + x.description, query) >= 0.45);
-  const usedWeb = relevantWeb.filter((x) => x.condition === "used");
-  const newWeb = relevantWeb.filter((x) => x.condition === "new");
-  const mpUsedPrices = relevantMarket.filter((x) => x.condition === "used").map((x) => x.price);
+  let aiReview = null;
+  if (isAiResearchEnabled() && aiCandidates.length) {
+    try {
+      aiReview = await reviewAiOffers(query, aiCandidates);
+    } catch (error) {
+      console.error("Deal Radar AI offer review failed:", error);
+    }
+  }
+  const verdicts = new Map((aiReview?.offers || []).map((verdict) => [verdict.id, verdict]));
+  const annotate = (offer: Offer, id: string): Offer => {
+    const verdict = verdicts.get(id);
+    if (verdict) {
+      return {
+        ...offer,
+        condition: verdict.condition === "unknown" ? offer.condition : verdict.condition,
+        matchType: verdict.matchType,
+        matchConfidence: verdict.confidence,
+        matchReason: verdict.reason,
+      };
+    }
+    const score = relevance(offer.title + " " + offer.description, query);
+    return {
+      ...offer,
+      matchType: score >= 0.45 ? "exact" : "unrelated",
+      matchConfidence: score,
+      matchReason: score >= 0.45 ? "Совпадение по поисковому запросу; AI-проверка не дала отдельного вердикта" : "Недостаточное совпадение с запросом",
+    };
+  };
+  const marketByIndex = new Map(marketAiCandidates.map(({ offer, id }) => [id, annotate(offer, id)]));
+  const relevantMarket = marktplaats
+    .map((offer, index) => marketByIndex.get("mp_" + index) || annotate(offer, "mp_unreviewed_" + index))
+    .filter((offer) => offer.matchType === "exact" && (offer.matchConfidence ?? 0) >= 0.45);
+  const relevantWeb = webAiCandidates
+    .map(({ offer, id }) => annotate(offer, id))
+    .filter((offer) => ["exact", "variant", "related"].includes(offer.matchType || "unrelated")
+      && (offer.matchConfidence ?? 0) >= 0.45);
+  const exactWeb = relevantWeb.filter((offer) => offer.matchType === "exact");
+  const usedWeb = exactWeb.filter((offer) => offer.condition === "used");
+  const newWeb = exactWeb.filter((offer) => offer.condition === "new");
+  const mpUsedPrices = relevantMarket.filter((offer) => offer.condition === "used").map((offer) => offer.price);
   // Use Marktplaats alone when there are enough local comparables; external used prices only fill small samples.
-  const usedPrices = mpUsedPrices.length >= 3 ? mpUsedPrices : [...mpUsedPrices, ...usedWeb.map((x) => x.price)];
+  const usedPrices = mpUsedPrices.length >= 3 ? mpUsedPrices : [...mpUsedPrices, ...usedWeb.map((offer) => offer.price)];
   const newPrices = [
-    ...relevantMarket.filter((x) => x.condition === "new").map((x) => x.price),
-    ...newWeb.map((x) => x.price),
+    ...relevantMarket.filter((offer) => offer.condition === "new").map((offer) => offer.price),
+    ...newWeb.map((offer) => offer.price),
   ];
   const usedMedian = median(usedPrices);
   const newMedian = median(newPrices);
   const expectedResale = usedMedian !== null ? usedMedian * 0.95 : newMedian !== null ? newMedian * 0.62 : null;
   const netResale = expectedResale === null ? null : expectedResale * 0.96 * 0.92 - 10;
-  const listings = relevantMarket.map((x) => {
-    const profit = netResale === null ? null : Number((netResale - x.price).toFixed(2));
-    const roi = profit === null || x.price <= 0 ? null : profit / x.price;
+  const listings = relevantMarket.map((offer) => {
+    const profit = netResale === null ? null : Number((netResale - offer.price).toFixed(2));
+    const roi = profit === null || offer.price <= 0 ? null : profit / offer.price;
     const status = usedPrices.length >= 8 && profit !== null && profit >= 50 && roi !== null && roi >= 0.30 ? "strong"
       : usedPrices.length >= 3 && profit !== null && profit >= 40 && roi !== null && roi >= 0.20 ? "good" : "candidate";
-    return { ...x, estimatedProfit: profit, profitRoi: roi, status };
+    return { ...offer, estimatedProfit: profit, profitRoi: roi, status };
   }).sort((a, b) => (b.estimatedProfit ?? -Infinity) - (a.estimatedProfit ?? -Infinity));
+
+  const exactCount = relevantMarket.length + exactWeb.length;
+  const variantCount = relevantWeb.filter((offer) => offer.matchType === "variant").length;
+  const warnings = [
+    ...(marketResult.status === "rejected" && includeUsed ? ["Не удалось получить объявления Marktplaats: " + String(marketResult.reason)] : []),
+    ...(webSearchResults.some((result) => result.status === "rejected") ? ["Некоторые поисковые запросы временно не сработали; показаны доступные результаты."] : []),
+    ...(usedPrices.length < 3 ? ["Мало актуальных б/у сравнений: не считайте прибыль подтверждённой."] : []),
+    ...(!isAiResearchEnabled() ? ["AI-анализ не активирован: добавьте OPENAI_API_KEY в Vercel и GitHub Actions Secrets. Пока работают поисковые и детерминированные фильтры."] : []),
+    ...(isAiResearchEnabled() && !aiReview ? ["AI-проверка временно недоступна; результаты отфильтрованы резервными правилами совпадения."] : []),
+    "Цены — цены предложений, не подтверждённые цены закрытых сделок. Проверяйте товар и продавца перед покупкой.",
+  ];
+
   return NextResponse.json({
     query, maxPrice, includeUsed, includeNew, checkedAt: new Date().toISOString(),
     sources: {
-      marktplaats: { count: relevantMarket.length, medianPrice: median(relevantMarket.map((x) => x.price)) },
-      otherUsed: { count: usedWeb.length, medianPrice: median(usedWeb.map((x) => x.price)) },
+      marktplaats: { count: relevantMarket.length, medianPrice: median(relevantMarket.map((offer) => offer.price)) },
+      otherUsed: { count: usedWeb.length, medianPrice: median(usedWeb.map((offer) => offer.price)) },
       newRetail: { count: newWeb.length, medianPrice: newMedian },
     },
+    ai: {
+      enabled: isAiResearchEnabled(),
+      available: Boolean(plan || aiReview),
+      model: getAiResearchModel(),
+      productSummary: plan?.productSummary || "",
+      keyAttributes: plan?.keyAttributes || [],
+      marketSummary: aiReview?.summary || "",
+      exactMatches: exactCount,
+      variants: variantCount,
+      reviewedOffers: aiReview?.offers.length || 0,
+    },
+    searchQueries,
     usedMedian, newMedian,
     expectedResalePrice: expectedResale === null ? null : Number(expectedResale.toFixed(2)),
     netResalePrice: netResale === null ? null : Number(netResale.toFixed(2)),
-    sampleCount: usedPrices.length, listings, webOffers: relevantWeb.slice(0, 12),
-    warnings: [
-      ...(includeUsed && marketResult.status === "rejected" ? ["Не удалось получить объявления Marktplaats: " + String(marketResult.reason)] : []),
-      ...(usedResult.status === "rejected" || newResult.status === "rejected" ? ["Веб-поиск временно ограничен; доступные цены всё равно показаны."] : []),
-      ...(usedPrices.length < 3 ? ["Мало актуальных б/у сравнений: не считайте прибыль подтверждённой."] : []),
-      "Цены — цены предложений, не подтверждённые цены закрытых сделок. Проверяйте товар и продавца перед покупкой.",
-    ],
+    sampleCount: usedPrices.length, listings, webOffers: relevantWeb.slice(0, 12), warnings,
   }, { headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
 }
