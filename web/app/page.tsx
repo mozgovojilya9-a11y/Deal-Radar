@@ -10,11 +10,12 @@ type TelegramProfile = { id: number; firstName: string; lastName: string; userna
 type MatchType = "exact" | "variant" | "related" | "accessory" | "unrelated";
 type ResearchListing = { title: string; price: number; url: string; source: string; condition: "used" | "new" | "unknown"; kind: "marktplaats" | "web"; estimatedProfit?: number | null; profitRoi?: number | null; status?: string; matchType?: MatchType; matchConfidence?: number; matchReason?: string };
 type ProductResearch = {
-  query: string; maxPrice: number; checkedAt: string; usedMedian: number | null; newMedian: number | null;
+  query: string; maxPrice: number; checkedAt: string; usedMedian: number | null; usedReferencePrice: number | null; newMedian: number | null;
   expectedResalePrice: number | null; netResalePrice: number | null; sampleCount: number;
   sources: { marktplaats: { count: number; medianPrice: number | null }; otherUsed: { count: number; medianPrice: number | null }; newRetail: { count: number; medianPrice: number | null } };
   ai?: { enabled: boolean; available: boolean; model: string; productSummary: string; keyAttributes: string[]; marketSummary: string; exactMatches: number; variants: number; reviewedOffers: number };
   searchQueries?: string[];
+  marktplaatsSearchQueries?: string[];
   listings: ResearchListing[]; webOffers: ResearchListing[]; warnings: string[];
 };
 type UserSettings = { categories: string[]; minDiscount: number; maxDistanceKm: number | null; minPrice: number | null; maxPrice: number | null };
@@ -702,12 +703,13 @@ export default function HomePage() {
                   </section>
                 ) : null}
                 <div className="research-summary-grid">
-                  <div><small>Б/у рынок · медиана</small><strong>{researchResult.usedMedian == null ? "—" : euro(researchResult.usedMedian)}</strong><span>{researchResult.sampleCount} сравнений</span></div>
+                  <div><small>Б/у рынок · медиана</small><strong>{researchResult.usedMedian == null ? "—" : euro(researchResult.usedMedian)}</strong><span>Осторожный ориентир: {researchResult.usedReferencePrice == null ? "—" : euro(researchResult.usedReferencePrice)} · {researchResult.sampleCount} сравнений</span></div>
                   <div><small>Новый товар · медиана</small><strong>{researchResult.newMedian == null ? "—" : euro(researchResult.newMedian)}</strong><span>{researchResult.sources.newRetail.count} источников</span></div>
                   <div><small>Ожидаемая цена перепродажи</small><strong>{researchResult.expectedResalePrice == null ? "—" : euro(researchResult.expectedResalePrice)}</strong><span>с консервативным запасом</span></div>
                 </div>
                 <div className="research-sources"><span>Marktplaats: <b>{researchResult.sources.marktplaats.count}</b></span><span>Другие б/у площадки: <b>{researchResult.sources.otherUsed.count}</b></span><span>Магазины: <b>{researchResult.sources.newRetail.count}</b></span></div>
-                <h4>Объявления Marktplaats до {euro(researchResult.maxPrice)}</h4>
+                {researchResult.marktplaatsSearchQueries?.length ? <p className="research-muted">Gemini расширил поиск Marktplaats: {researchResult.marktplaatsSearchQueries.join(" · ")}</p> : null}
+                 <h4>Объявления Marktplaats до {euro(researchResult.maxPrice)}</h4>
                 {researchResult.listings.length ? <div className="research-offers">{researchResult.listings.slice(0, 8).map((item, index) => (
                   <a className="research-offer" href={item.url} target="_blank" rel="noopener noreferrer" key={item.url + index}>
                     <span><b>{item.title}</b><small>{item.source}</small></span><strong>{euro(item.price)}</strong>
