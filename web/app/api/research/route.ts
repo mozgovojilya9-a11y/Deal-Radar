@@ -256,7 +256,7 @@ export async function POST(request: NextRequest) {
   if (!userId) return NextResponse.json({ error: "Откройте исследование внутри Telegram." }, { status: 401 });
   if (!rateAllowed(userId)) return NextResponse.json({ error: "Лимит исследований: не более 4 запусков в минуту." }, { status: 429 });
   const query = String(body.query || "").trim().replace(/\s+/g, " ");
-  const maxPrice = Math.min(800, Math.max(10, Number(body.maxPrice) || 800));
+  const maxPrice = Math.min(5000, Math.max(10, Number(body.maxPrice) || 5000));
   const maxDistanceKm = Math.min(100, Math.max(5, Number(body.maxDistanceKm) || 100));
   const includeUsed = body.includeUsed !== false;
   const includeNew = body.includeNew !== false;
