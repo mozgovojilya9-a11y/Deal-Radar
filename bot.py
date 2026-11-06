@@ -73,11 +73,13 @@ def fetch_marktplaats_v2(cfg, query, pages):
     for page in range(min(pages, 3)):
         params = {
             "query": query, "offset": page * 100, "limit": 100, "locale": "nl-NL",
-            "searchDescription": "true", "postCode": cfg.get("postcode", ""),
+            "searchDescription": "true",
             "distance": int(cfg.get("distance_km", 50) * 1000),
             "sortBy": "default", "sortOrder": "descending",
         }
-        params = {key: value for key, value in params.items() if value not in ("", None)}
+        postcode = str(cfg.get("postcode") or "").strip().upper()
+        if re.fullmatch(r"\d{4}[A-Z]{2}", postcode):
+            params["postCode"] = postcode
         req = urllib.request.Request("https://api.marktplaats.nl/v2/search?" + urllib.parse.urlencode(params), headers=HEADERS)
         with urllib.request.urlopen(req, timeout=25) as response:
             data = json.load(response)
