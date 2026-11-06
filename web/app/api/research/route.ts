@@ -92,6 +92,15 @@ function median(values: number[]) {
   const i = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[i] : Number(((sorted[i - 1] + sorted[i]) / 2).toFixed(2));
 }
+function conservativeQuartile(values: number[]) {
+  if (!values.length) return null;
+  if (values.length < 4) return median(values);
+  const sorted = [...values].sort((a, b) => a - b);
+  const position = (sorted.length - 1) * 0.25;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  return Number((sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower)).toFixed(2));
+}
 function unwrap(raw: string) {
   try {
     const u = new URL(raw, "https://html.duckduckgo.com");
@@ -253,11 +262,11 @@ export async function POST(request: NextRequest) {
   const includeNew = body.includeNew !== false;
   if (!includeUsed && !includeNew) return NextResponse.json({ error: "Выбери хотя бы один режим: б/у или новый товар." }, { status: 400 });
   if (query.length < 3 || query.length > 100) return NextResponse.json({ error: "Укажите точную модель или название (от 3 до 100 символов)." }, { status: 400 });
-  // AI planning and the primary Marktplaats lookup run together. The search engine still
-  // supplies the evidence; the model only improves query coverage and product matching.
+  // Gemini identifies the exact product and proposes Dutch/English phrases.
+  // Its used-market phrases are now searched on Marktplaats, not only on external sites.
   const usedQuery = 'site:ebay.nl OR site:2dehands.be OR site:tweakers.net "' + query + '" tweedehands used occasion';
   const newQuery = '"' + query + '" prijs nieuw kopen Nederland price';
-  const [marketResult, planResult] = await Promise.all([
+  const [primaryMarketResult, planResult] = await Promise.all([
     includeUsed ? searchMarktplaats(query, maxPrice, maxDistanceKm).then((value) => ({ status: "fulfilled" as const, value }))
       .catch((reason) => ({ status: "rejected" as const, reason }))
       : Promise.resolve({ status: "fulfilled" as const, value: [] as Offer[] }),
@@ -270,6 +279,28 @@ export async function POST(request: NextRequest) {
   ]);
 
   const plan = planResult.status === "fulfilled" ? planResult.value : null;
+  const usedMarktplaatsQueries = includeUsed
+    ? Array.from(new Set([query, ...(plan?.usedQueries || [])].map((term) => term.trim()).filter(Boolean))).slice(0, 4)
+    : [];
+  const extraMarketResults = await Promise.all(usedMarktplaatsQueries.slice(1).map((term) =>
+    searchMarktplaats(term, maxPrice, maxDistanceKm)
+      .then((value) => ({ status: "fulfilled" as const, value }))
+      .catch((reason) => ({ status: "rejected" as const, reason }))
+  ));
+  const marketParts = [
+    ...(primaryMarketResult.status === "fulfilled" ? [primaryMarketResult.value] : []),
+    ...extraMarketResults.filter((result) => result.status === "fulfilled").map((result) => result.value),
+  ];
+  const uniqueMarket = Array.from(new Map(
+    marketParts.flat().map((offer) => [offer.url || (offer.title + "|" + offer.price), offer]),
+  ).values());
+  const marketFailures = [
+    ...(primaryMarketResult.status === "rejected" ? [primaryMarketResult.reason] : []),
+    ...extraMarketResults.filter((result) => result.status === "rejected").map((result) => result.reason),
+  ];
+  const marketResult = marketParts.length
+    ? { status: "fulfilled" as const, value: uniqueMarket }
+    : { status: "rejected" as const, reason: marketFailures[0] || new Error("Marktplaats search unavailable") };
   const usedSearchQueries = includeUsed
     ? [usedQuery, ...(plan?.usedQueries || []).map((term) => 'site:ebay.nl OR site:2dehands.be OR site:tweakers.net "' + term + '" tweedehands used occasion')]
     : [];
@@ -288,8 +319,8 @@ export async function POST(request: NextRequest) {
 
   const marketAiCandidates = marktplaats
     .map((offer, index) => ({ offer, id: "mp_" + index, score: relevance(offer.title + " " + offer.description, query) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 18);
+    .sort((a, b) => b.score - a.score || a.offer.price - b.offer.price)
+    .slice(0, 20);
   const webAiCandidates = allWeb.map((offer, index) => ({ offer, id: "web_" + index }));
   const aiCandidates = [
     ...marketAiCandidates.map(({ offer, id }) => ({ id, title: offer.title, description: offer.description, price: offer.price, source: offer.source, condition: offer.condition })),
@@ -344,8 +375,9 @@ export async function POST(request: NextRequest) {
     ...newWeb.map((offer) => offer.price),
   ];
   const usedMedian = median(usedPrices);
+  const usedReferencePrice = conservativeQuartile(usedPrices);
   const newMedian = median(newPrices);
-  const expectedResale = usedMedian !== null ? usedMedian * 0.95 : newMedian !== null ? newMedian * 0.62 : null;
+  const expectedResale = usedReferencePrice !== null ? usedReferencePrice * 0.95 : newMedian !== null ? newMedian * 0.62 : null;
   const netResale = expectedResale === null ? null : expectedResale * 0.96 * 0.92 - 10;
   const listings = relevantMarket.map((offer) => {
     const profit = netResale === null ? null : Number((netResale - offer.price).toFixed(2));
@@ -383,9 +415,13 @@ export async function POST(request: NextRequest) {
       exactMatches: exactCount,
       variants: variantCount,
       reviewedOffers: aiReview?.offers.length || 0,
+      googleSearchQueries: plan?.googleSearchQueries || [],
+      googleSearchSources: plan?.groundedSources || [],
+      googleSearchEntryPointHtml: plan?.searchEntryPointHtml || "",
     },
     searchQueries,
-    usedMedian, newMedian,
+    marktplaatsSearchQueries: usedMarktplaatsQueries,
+    usedMedian, usedReferencePrice, newMedian,
     expectedResalePrice: expectedResale === null ? null : Number(expectedResale.toFixed(2)),
     netResalePrice: netResale === null ? null : Number(netResale.toFixed(2)),
     sampleCount: usedPrices.length, listings, webOffers: relevantWeb.slice(0, 12), warnings,
