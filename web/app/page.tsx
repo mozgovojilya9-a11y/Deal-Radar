@@ -362,7 +362,7 @@ export default function HomePage() {
             ].map((item) => {
               const total = scannerStats?.rejectedTotal ?? 0;
               const width = total > 0 ? Math.min(100, (item.value / total) * 100) : 0;
-              return <div className="rejection-row" key={item.color}><div className="rejection-label"><span>{item.label}</span><strong>{scannerStats ? item.value.toLocaleString("ru-RU") : "—"}</strong></div><div className="rejection-track"><i className={"rejection-fill " + item.color} style={{ width: width + "%" }} /></div></div>;
+              return <div className="rejection-row" key={item.label}><div className="rejection-label"><span>{item.label}</span><strong>{scannerStats ? item.value.toLocaleString("ru-RU") : "—"}</strong></div><div className="rejection-track"><i className={"rejection-fill " + item.color} style={{ width: width + "%" }} /></div></div>;
             })}
             <p className="analytics-note">«Результаты поиска» включают повторы. «Уникальные» считаются по ID Marktplaats. Кандидаты не считаются отсеянными: они остаются в отдельном блоке, пока сканер собирает сопоставимые цены.</p>
           </div>
@@ -454,7 +454,7 @@ export default function HomePage() {
               {reviewDeals.length ? <div className="deal-grid">{reviewDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div> : <p className="tier-empty">Кандидатов пока нет.</p>}
             </section>
           </div>
-        )}}
+        )}
       </section>
 
       ) : null}
