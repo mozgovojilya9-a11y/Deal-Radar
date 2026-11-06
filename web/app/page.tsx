@@ -8,11 +8,11 @@ type Tab = "home" | "strong" | "categories" | "saved" | "analytics" | "profile";
 type Sort = "profit" | "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
 type MatchType = "exact" | "variant" | "related" | "accessory" | "unrelated";
-type ResearchListing = { title: string; price: number; url: string; source: string; condition: "used" | "new" | "unknown"; kind: "marktplaats" | "web"; estimatedProfit?: number | null; profitRoi?: number | null; status?: string; matchType?: MatchType; matchConfidence?: number; matchReason?: string };
+type ResearchListing = { title: string; price: number; url: string; source: string; condition: "used" | "new" | "refurbished" | "unknown"; kind: "marktplaats" | "web"; estimatedProfit?: number | null; profitRoi?: number | null; status?: string; matchType?: MatchType; matchConfidence?: number; matchReason?: string };
 type ProductResearch = {
   query: string; maxPrice: number | null; checkedAt: string; usedMedian: number | null; usedReferencePrice: number | null; newMedian: number | null;
   expectedResalePrice: number | null; netResalePrice: number | null; sampleCount: number;
-  sources: { marktplaats: { count: number; medianPrice: number | null }; otherUsed: { count: number; medianPrice: number | null }; newRetail: { count: number; medianPrice: number | null } };
+  sources: { marktplaats: { count: number; medianPrice: number | null }; otherUsed: { count: number; medianPrice: number | null }; newRetail: { count: number; medianPrice: number | null }; refurbished?: { count: number; medianPrice: number | null } };
   ai?: { enabled: boolean; available: boolean; model: string; productSummary: string; keyAttributes: string[]; marketSummary: string; exactMatches: number; variants: number; reviewedOffers: number; googleSearchQueries: string[]; groundedSources: Array<{ title: string; url: string }>; valuation?: { estimatedUsedPrice: number | null; estimatedNewPrice: number | null; confidence: number; sampleCount: number; rationale: string; googleSearchQueries: string[]; groundedSources: Array<{ title: string; url: string }> } | null };
   searchQueries?: string[];
   marktplaatsSearchQueries?: string[];
@@ -709,7 +709,7 @@ export default function HomePage() {
                       </div>
                     ) : null}
                     {researchResult.ai.googleSearchQueries?.length ? <small className="research-ai-note">Gemini проверил модель через Google Search: {researchResult.ai.googleSearchQueries.join(" · ")}</small> : null}
-                    {researchResult.ai.valuation?.googleSearchQueries?.length ? <small className="research-ai-note">Поиск цен: {researchResult.ai.valuation.googleSearchQueries.join(" · ")}</small> : null}
+                    {researchResult.ai.valuation?.googleSearchQueries?.length ? <small className="research-ai-note">Поиск цен: {researchResult.ai.valuation.googleSearchQueries.join(" · ")}</small> : null}\n                    {researchResult.ai.valuation?.groundedSources?.length ? <div className="research-web-links">{researchResult.ai.valuation.groundedSources.map((source) => <a href={source.url} target="_blank" rel="noopener noreferrer" key={source.url}>{source.title}</a>)}</div> : null}
                     {researchResult.ai.groundedSources?.length ? <div className="research-web-links">{researchResult.ai.groundedSources.map((source) => <a href={source.url} target="_blank" rel="noopener noreferrer" key={source.url}>{source.title}</a>)}</div> : null}
                     {!researchResult.ai.enabled ? <small className="research-ai-note">Облачный AI не подключён; отображаются резервные результаты без grounded-проверки.</small> : null}
                   </section>
@@ -719,7 +719,7 @@ export default function HomePage() {
                   <div><small>Новый товар · медиана</small><strong>{researchResult.newMedian == null ? "—" : euro(researchResult.newMedian)}</strong><span>{researchResult.sources.newRetail.count} источников</span></div>
                   <div><small>Ожидаемая цена перепродажи</small><strong>{researchResult.expectedResalePrice == null ? "—" : euro(researchResult.expectedResalePrice)}</strong><span>с консервативным запасом</span></div>
                 </div>
-                <div className="research-sources"><span>Marktplaats: <b>{researchResult.sources.marktplaats.count}</b></span><span>Другие б/у площадки: <b>{researchResult.sources.otherUsed.count}</b></span><span>Магазины: <b>{researchResult.sources.newRetail.count}</b></span></div>
+                <div className="research-sources"><span>Marktplaats: <b>{researchResult.sources.marktplaats.count}</b></span><span>Другие б/у площадки: <b>{researchResult.sources.otherUsed.count}</b></span><span>Магазины: <b>{researchResult.sources.newRetail.count}</b></span><span>Восстановленные: <b>{researchResult.sources.refurbished?.count ?? 0}</b></span></div>
                 {researchResult.marktplaatsSearchQueries?.length ? <p className="research-muted">Gemini расширил поиск Marktplaats: {researchResult.marktplaatsSearchQueries.join(" · ")}</p> : null}
                  <h4>Объявления Marktplaats {researchResult.maxPrice == null ? "без ограничения цены" : "до " + euro(researchResult.maxPrice)}</h4>
                 {researchResult.listings.length ? <div className="research-offers">{researchResult.listings.slice(0, 8).map((item, index) => (
@@ -730,7 +730,7 @@ export default function HomePage() {
                 ))}</div> : <p className="research-muted">Подходящих объявлений до указанного лимита не найдено.</p>}
                 <h4>Веб-источники: новые и подержанные товары</h4>
                 {researchResult.webOffers.length ? <div className="research-web-links">{researchResult.webOffers.slice(0, 10).map((item, index) => (
-                  <a href={item.url} target="_blank" rel="noopener noreferrer" key={item.url + index}><span>{item.title}</span><b>{euro(item.price)}</b><small title={item.matchReason || ""}>{item.source} · {item.condition === "used" ? "б/у" : item.condition === "new" ? "новый" : "состояние не определено"} · {item.matchType === "exact" ? "точная модель" : item.matchType === "variant" ? "другая версия" : item.matchType === "related" ? "похожий товар" : "совпадение не подтверждено"}</small></a>
+                  <a href={item.url} target="_blank" rel="noopener noreferrer" key={item.url + index}><span>{item.title}</span><b>{euro(item.price)}</b><small title={item.matchReason || ""}>{item.source} · {item.condition === "used" ? "б/у" : item.condition === "new" ? "новый" : item.condition === "refurbished" ? "восстановленный" : "состояние не определено"} · {item.matchType === "exact" ? "точная модель" : item.matchType === "variant" ? "другая версия" : item.matchType === "related" ? "похожий товар" : "совпадение не подтверждено"}</small></a>
                 ))}</div> : <p className="research-muted">Веб-поиск не вернул достоверных цен. Marktplaats проверен отдельно.</p>}
                 {researchResult.warnings.map((warning) => <p className="research-warning" key={warning}>ⓘ {warning}</p>)}
               </div>
