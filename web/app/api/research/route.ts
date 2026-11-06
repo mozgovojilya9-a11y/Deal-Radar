@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 type Condition = "used" | "new" | "unknown";
-type Offer = { title: string; price: number; url: string; source: string; condition: Condition; kind: "marktplaats" | "web" };
+type Offer = { title: string; description: string; price: number; url: string; source: string; condition: Condition; kind: "marktplaats" | "web" };
 const USED_HOSTS = ["marktplaats.nl", "ebay.nl", "2dehands.be", "tweakers.net", "backmarket.nl", "refurbed.nl"];
 const NEW_HOSTS = ["ray-ban.com", "bol.com", "coolblue.nl", "mediamarkt.nl", "amazon.nl", "kamera-express.nl", "cameranu.nl", "apple.com", "samsung.com", "sony.nl", "nikon.nl", "fujifilm.com", "alternate.nl"];
 const USED_WORDS = /\b(tweedehands|gebruikt|used|pre-owned|occasion|refurbished|vraag\s*&\s*aanbod)\b/i;
@@ -152,13 +152,14 @@ async function fetchWebOffer(row: { url: string; title: string; snippet: string 
   const base = row.title + " " + row.snippet;
   let html = "";
   try {
-    const response = await fetch(row.url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; DealRadarResearch/1.0)", Accept: "text/html" }, signal: AbortSignal.timeout(7000), redirect: "follow", cache: "no-store" });
+    const response = await fetch(row.url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; DealRadarResearch/1.0)", Accept: "text/html" }, signal: AbortSignal.timeout(7000), redirect: "error", cache: "no-store" });
     if (response.ok && safeUrl(response.url)) html = (await response.text()).slice(0, 700000);
   } catch { /* Search result snippet can contain the price. */ }
+  const pageText = stripHtml(html).slice(0, 6000);
   const structured = structuredPrices(html);
-  const price = structured[0] ?? textPrices(base + " " + stripHtml(html).slice(0, 6000))[0] ?? null;
+  const price = structured[0] ?? textPrices(base + " " + pageText)[0] ?? null;
   if (price === null || BAD_WORDS.test(base)) return null;
-  return { title: row.title || host, price, url: row.url, source: host, condition: conditionFor(host, base), kind: "web" };
+  return { title: row.title || host, description: pageText, price, url: row.url, source: host, condition: conditionFor(host, base + " " + pageText), kind: "web" };
 }
 function parseMarktplaats(data: Record<string, unknown>, maxPrice: number): Offer[] {
   const embedded = (data._embedded && typeof data._embedded === "object" ? data._embedded : {}) as Record<string, unknown>;
@@ -182,7 +183,7 @@ function parseMarktplaats(data: Record<string, unknown>, maxPrice: number): Offe
     if (!safeUrl(listingUrl)) continue;
     const words = title + " " + description + " " + String(row.condition || "");
     const condition = USED_WORDS.test(words) ? "used" : NEW_WORDS.test(words) ? "new" : "used";
-    result.push({ title, price, url: listingUrl, source: "marktplaats.nl", condition, kind: "marktplaats" });
+    result.push({ title, description, price, url: listingUrl, source: "marktplaats.nl", condition, kind: "marktplaats" });
   }
   return result;
 }
@@ -205,30 +206,45 @@ async function searchMarktplaats(query: string, maxPrice: number) {
   }
   return parseMarktplaats(data, maxPrice);
 }
-function relevance(title: string, query: string) {
+function relevance(candidate: string, query: string) {
+  const text = candidate.toLowerCase();
+  const normalized = text.replace(/[\s-]/g, "");
+  const code = query.match(/\b(?:rw\d{4}|a7[ivv]?|z\d{1,2}|eos\s*r\d{1,2}|wh-?1000xm\d)\b/i)?.[0]?.toLowerCase();
+  if (code) return normalized.includes(code.replace(/[\s-]/g, "")) ? 1 : 0;
+
+  const storage = query.match(/\b(16|32|64|128|256|512|1024|2048)\s?gb\b/i)?.[1];
+  if (storage && !new RegExp("\\b" + storage + "\\s?gb\\b", "i").test(candidate)) return 0;
+  const generation = query.match(/\b(?:gen(?:eration)?|generatie)\s*[.-]?\s*(\d+)\b/i)?.[1];
+  if (generation && !new RegExp("\\b(?:gen(?:eration)?|generatie)\\s*[.-]?\\s*" + generation + "\\b", "i").test(candidate)) return 0;
+  const diagonal = query.match(/\b(32|40|42|43|48|49|50|55|58|60|65|70|75|77|83|85|98)\s?(?:inch|inches|in|")\b/i)?.[1];
+  if (diagonal && !new RegExp("\\b" + diagonal + "\\s?(?:inch|inches|in|")?\\b", "i").test(candidate)) return 0;
+
   const tokens = query.toLowerCase().split(/[^a-z0-9]+/).filter((x) => x.length >= 3);
   if (!tokens.length) return 1;
-  const text = title.toLowerCase();
-  const code = query.match(/\b(?:rw\d{4}|a7[ivv]?|z\d{1,2}|eos\s*r\d{1,2}|wh-?1000xm\d)\b/i)?.[0]?.toLowerCase();
-  if (code && text.replace(/[\s-]/g, "").includes(code.replace(/[\s-]/g, ""))) return 1;
   return tokens.filter((x) => text.includes(x)).length / tokens.length;
 }
 
 export async function POST(request: NextRequest) {
   const token = process.env.TELEGRAM_TOKEN;
   if (!token) return NextResponse.json({ error: "TELEGRAM_TOKEN не настроен." }, { status: 503 });
-  let body: { initData?: string; query?: string; maxPrice?: number };
+  let body: { initData?: string; query?: string; maxPrice?: number; includeUsed?: boolean; includeNew?: boolean };
   try { body = await request.json() as typeof body; } catch { return NextResponse.json({ error: "Некорректный JSON." }, { status: 400 }); }
   const userId = verifyInitData(body.initData || "", token);
   if (!userId) return NextResponse.json({ error: "Откройте исследование внутри Telegram." }, { status: 401 });
   if (!rateAllowed(userId)) return NextResponse.json({ error: "Лимит исследований: не более 4 запусков в минуту." }, { status: 429 });
   const query = String(body.query || "").trim().replace(/\s+/g, " ");
   const maxPrice = Math.min(800, Math.max(10, Number(body.maxPrice) || 800));
+  const includeUsed = body.includeUsed !== false;
+  const includeNew = body.includeNew !== false;
+  if (!includeUsed && !includeNew) return NextResponse.json({ error: "Выбери хотя бы один режим: б/у или новый товар." }, { status: 400 });
   if (query.length < 3 || query.length > 100) return NextResponse.json({ error: "Укажите точную модель или название (от 3 до 100 символов)." }, { status: 400 });
-  const usedQuery = 'site:marktplaats.nl OR site:ebay.nl OR site:2dehands.be OR site:tweakers.net "' + query + '" tweedehands used occasion';
+  // Marktplaats stays the primary used-price source; search web indexes separately to avoid double counting it.
+  const usedQuery = 'site:ebay.nl OR site:2dehands.be OR site:tweakers.net "' + query + '" tweedehands used occasion';
   const newQuery = '"' + query + '" prijs nieuw kopen Nederland price';
   const [marketResult, usedResult, newResult] = await Promise.allSettled([
-    searchMarktplaats(query, maxPrice), searchWeb(usedQuery), searchWeb(newQuery),
+    includeUsed ? searchMarktplaats(query, maxPrice) : Promise.resolve([]),
+    includeUsed ? searchWeb(usedQuery) : Promise.resolve([]),
+    includeNew ? searchWeb(newQuery) : Promise.resolve([]),
   ]);
   const marktplaats = marketResult.status === "fulfilled" ? marketResult.value : [];
   const searchRows = [
@@ -237,12 +253,17 @@ export async function POST(request: NextRequest) {
   ];
   const uniqueRows = Array.from(new Map(searchRows.map((x) => [x.url, x])).values()).slice(0, 12);
   const allWeb = (await Promise.all(uniqueRows.map(fetchWebOffer))).filter((x): x is Offer => x !== null);
-  const relevantMarket = marktplaats.filter((x) => relevance(x.title, query) >= 0.30);
-  const relevantWeb = allWeb.filter((x) => relevance(x.title, query) >= 0.25);
+  const relevantMarket = marktplaats.filter((x) => relevance(x.title + " " + x.description, query) >= 0.45);
+  const relevantWeb = allWeb.filter((x) => relevance(x.title + " " + x.description, query) >= 0.45);
   const usedWeb = relevantWeb.filter((x) => x.condition === "used");
   const newWeb = relevantWeb.filter((x) => x.condition === "new");
-  const usedPrices = [...relevantMarket.filter((x) => x.condition === "used").map((x) => x.price), ...usedWeb.map((x) => x.price)];
-  const newPrices = [...relevantMarket.filter((x) => x.condition === "new").map((x) => x.price), ...newWeb.map((x) => x.price)];
+  const mpUsedPrices = relevantMarket.filter((x) => x.condition === "used").map((x) => x.price);
+  // Use Marktplaats alone when there are enough local comparables; external used prices only fill small samples.
+  const usedPrices = mpUsedPrices.length >= 3 ? mpUsedPrices : [...mpUsedPrices, ...usedWeb.map((x) => x.price)];
+  const newPrices = [
+    ...relevantMarket.filter((x) => x.condition === "new").map((x) => x.price),
+    ...newWeb.map((x) => x.price),
+  ];
   const usedMedian = median(usedPrices);
   const newMedian = median(newPrices);
   const expectedResale = usedMedian !== null ? usedMedian * 0.95 : newMedian !== null ? newMedian * 0.62 : null;
@@ -255,7 +276,7 @@ export async function POST(request: NextRequest) {
     return { ...x, estimatedProfit: profit, profitRoi: roi, status };
   }).sort((a, b) => (b.estimatedProfit ?? -Infinity) - (a.estimatedProfit ?? -Infinity));
   return NextResponse.json({
-    query, maxPrice, checkedAt: new Date().toISOString(),
+    query, maxPrice, includeUsed, includeNew, checkedAt: new Date().toISOString(),
     sources: {
       marktplaats: { count: relevantMarket.length, medianPrice: median(relevantMarket.map((x) => x.price)) },
       otherUsed: { count: usedWeb.length, medianPrice: median(usedWeb.map((x) => x.price)) },
@@ -266,7 +287,7 @@ export async function POST(request: NextRequest) {
     netResalePrice: netResale === null ? null : Number(netResale.toFixed(2)),
     sampleCount: usedPrices.length, listings, webOffers: relevantWeb.slice(0, 12),
     warnings: [
-      ...(marketResult.status === "rejected" ? ["Не удалось получить объявления Marktplaats: " + String(marketResult.reason)] : []),
+      ...(includeUsed && marketResult.status === "rejected" ? ["Не удалось получить объявления Marktplaats: " + String(marketResult.reason)] : []),
       ...(usedResult.status === "rejected" || newResult.status === "rejected" ? ["Веб-поиск временно ограничен; доступные цены всё равно показаны."] : []),
       ...(usedPrices.length < 3 ? ["Мало актуальных б/у сравнений: не считайте прибыль подтверждённой."] : []),
       "Цены — цены предложений, не подтверждённые цены закрытых сделок. Проверяйте товар и продавца перед покупкой.",

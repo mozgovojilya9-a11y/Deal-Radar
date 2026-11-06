@@ -195,6 +195,8 @@ export default function HomePage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [researchQuery, setResearchQuery] = useState("");
   const [researchMaxPrice, setResearchMaxPrice] = useState("800");
+  const [researchIncludeUsed, setResearchIncludeUsed] = useState(true);
+  const [researchIncludeNew, setResearchIncludeNew] = useState(true);
   const [researchLoading, setResearchLoading] = useState(false);
   const [researchError, setResearchError] = useState("");
   const [researchResult, setResearchResult] = useState<ProductResearch | null>(null);
@@ -372,7 +374,7 @@ export default function HomePage() {
       const response = await fetch("/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData, query, maxPrice })
+        body: JSON.stringify({ initData, query, maxPrice, includeUsed: researchIncludeUsed, includeNew: researchIncludeNew })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Не удалось провести исследование.");
@@ -497,7 +499,11 @@ export default function HomePage() {
             <div className="research-form">
               <label className="research-query"><span>Что ищем?</span><input value={researchQuery} onChange={(event) => setResearchQuery(event.target.value)} placeholder="Например: Ray-Ban Meta Wayfarer Gen 2 RW4012" maxLength={100} /></label>
               <label className="research-budget"><span>Максимальная цена, €</span><input type="number" min="10" max="800" value={researchMaxPrice} onChange={(event) => setResearchMaxPrice(String(Math.min(800, Math.max(10, Number(event.target.value) || 10))))} /></label>
-              <button type="button" className="primary-button research-submit" onClick={runProductResearch} disabled={researchLoading}>{researchLoading ? "Ищем по площадкам…" : "Искать и анализировать"}</button>
+              <fieldset className="research-condition"><legend>Источники для сравнения</legend>
+                <label><input type="checkbox" checked={researchIncludeUsed} onChange={(event) => setResearchIncludeUsed(event.target.checked)} /> Подержанные</label>
+                <label><input type="checkbox" checked={researchIncludeNew} onChange={(event) => setResearchIncludeNew(event.target.checked)} /> Новые</label>
+              </fieldset>
+              <button type="button" className="primary-button research-submit" onClick={runProductResearch} disabled={researchLoading || (!researchIncludeUsed && !researchIncludeNew)}>{researchLoading ? "Ищем по площадкам…" : "Искать и анализировать"}</button>
             </div>
             {researchError ? <p className="research-error" role="alert">{researchError}</p> : null}
             {researchLoading ? <div className="research-loading"><span className="research-pulse" />Сравниваем объявления, б/у цены и новые товары в магазинах…</div> : null}

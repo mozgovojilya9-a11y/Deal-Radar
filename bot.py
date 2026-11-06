@@ -464,7 +464,8 @@ def title_matches_query(q, title):
 
 def primary_rejection(q, it, cfg):
     """Return the first primary filter that rejects a listing, or None."""
-    if not title_matches_query(q, it["title"]):
+    searchable_text = it.get("text") or it.get("title") or ""
+    if not title_matches_query(q, searchable_text if q.get("match_description") else it["title"]):
         return "title"
     if it.get("external_link") or has_external_website_link(it.get("description") or ""):
         return "external_link"
@@ -630,7 +631,8 @@ def run_once(cfg, db, dry=False):
         if not isinstance(deal, dict) or not deal.get("listing_id"):
             continue
         q = queries_by_key.get(str(deal.get("category_key") or ""))
-        if not title_matches_query(q, deal.get("title") or ""):
+        cached_text = " ".join([deal.get("title") or "", deal.get("description") or ""])
+        if not title_matches_query(q, cached_text if q.get("match_description") else (deal.get("title") or "")):
             continue
         if has_external_website_link(deal.get("description") or ""):
             continue
@@ -664,6 +666,8 @@ def run_once(cfg, db, dry=False):
             time.sleep(random.uniform(2, 4))
             continue
         metrics["checked"] += len(raw)
+        if q.get("key") == "rayban":
+            log(f"[{qkey}] rows={len(raw)} variants={len(q.get('search_variants') or [q.get('query')])}")
         candidates = {}
         for listing in raw:
             item = parse_listing(listing)

@@ -267,6 +267,19 @@ class ScannerTests(unittest.TestCase):
         q=next(q for q in config["queries"] if q["key"]=="rayban")
         self.assertTrue(bot.title_matches_query(q,"Meta Wayfarer Gen 2 RW4012"))
 
+    def test_rayban_code_in_description_is_accepted(self):
+        with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as handle:
+            config=json.load(handle)
+        q=next(q for q in config["queries"] if q["key"]=="rayban")
+        row=listing("rb-gen2-description", 230, datetime.now(timezone.utc).isoformat(),
+                    title="Ray-Ban Meta Wayfarer slimme bril")
+        row["description"]="Modelnummer RW4012, Meta Wayfarer Gen 2"
+        item=bot.parse_listing(row)
+        self.assertIsNone(bot.primary_rejection(q, item, {
+            "distance_km":50, "max_product_price_eur":800
+        }))
+        self.assertEqual(bot.group_of(q, item["text"]), "wayfarer-gen-2")
+
 
 if __name__ == "__main__":
     unittest.main()
