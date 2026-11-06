@@ -390,7 +390,7 @@ export async function POST(request: NextRequest) {
   }
   // Local comparable listings remain the primary evidence. Gemini can refine the
   // estimate modestly, or provide a conservative fallback when local samples are thin.
-  const aiUsedPrice = (marketValuation?.confidence ?? 0) >= 0.55
+  const aiUsedPrice = marketValuation && marketValuation.confidence >= 0.55
     ? marketValuation.estimatedUsedPrice
     : null;
   const usedReferencePrice = localUsedReferencePrice !== null && aiUsedPrice !== null
@@ -400,7 +400,7 @@ export async function POST(request: NextRequest) {
       : aiUsedPrice !== null
         ? Number((aiUsedPrice * 0.90).toFixed(2))
         : null;
-  const groundedNewPrice = (marketValuation?.confidence ?? 0) >= 0.55
+  const groundedNewPrice = marketValuation && marketValuation.confidence >= 0.55
     ? marketValuation.estimatedNewPrice
     : null;
   const newRetailReference = newMedian ?? groundedNewPrice;
