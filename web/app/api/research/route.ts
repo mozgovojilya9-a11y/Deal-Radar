@@ -28,7 +28,8 @@ function verifyInitData(raw: string, token: string): string | null {
   const now = Math.floor(Date.now() / 1000);
   if (authDate > now + 60 || now - authDate > 86400) return null;
   params.delete("hash");
-  const check = Array.from(params.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => k + "=" + v).join("\n");
+  const check = Array.from(params.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => k + "=" + v).join("
+");
   const secret = createHmac("sha256", "WebAppData").update(token).digest();
   const expected = createHmac("sha256", secret).update(check).digest();
   const actual = Buffer.from(hash, "hex");
@@ -69,10 +70,6 @@ function safeUrl(value: string) {
 }
 function conditionFor(host: string, text: string): Condition {
   if (REFURBISHED_HOSTS.some((d) => host === d || host.endsWith("." + d)) || REFURBISHED_WORDS.test(text)) return "refurbished";
-  if (USED_HOSTS.some((d) => host === d || host.endsWith("." + d)) || USED_WORDS.test(text)) return "used";
-  if (NEW_HOSTS.some((d) => host === d || host.endsWith("." + d)) || NEW_WORDS.test(text)) return "new";
-  return "unknown";
-}
   if (USED_HOSTS.some((d) => host === d || host.endsWith("." + d)) || USED_WORDS.test(text)) return "used";
   if (NEW_HOSTS.some((d) => host === d || host.endsWith("." + d)) || NEW_WORDS.test(text)) return "new";
   return "unknown";
@@ -368,7 +365,8 @@ export async function POST(request: NextRequest) {
       && isConsoleHardwareOffer(offer.title, query));
   const exactWeb = relevantWeb.filter((offer) => offer.matchType === "exact");
   const usedWeb = exactWeb.filter((offer) => offer.condition === "used");
-  const newWeb = exactWeb.filter((offer) => offer.condition === "new");\n  const refurbishedWeb = exactWeb.filter((offer) => offer.condition === "refurbished");
+  const newWeb = exactWeb.filter((offer) => offer.condition === "new");
+  const refurbishedWeb = exactWeb.filter((offer) => offer.condition === "refurbished");
   const mpUsedPrices = relevantMarket.filter((offer) => offer.condition === "used").map((offer) => offer.price);
   // Use Marktplaats alone when there are enough local comparables; external used prices only fill small samples.
   const usedPrices = mpUsedPrices.length >= 3 ? mpUsedPrices : [...mpUsedPrices, ...usedWeb.map((offer) => offer.price)];
@@ -438,7 +436,8 @@ export async function POST(request: NextRequest) {
     sources: {
       marktplaats: { count: relevantMarket.length, medianPrice: median(relevantMarket.map((offer) => offer.price)) },
       otherUsed: { count: usedWeb.length, medianPrice: median(usedWeb.map((offer) => offer.price)) },
-      newRetail: { count: newWeb.length, medianPrice: newMedian },\n      refurbished: { count: refurbishedWeb.length, medianPrice: median(refurbishedWeb.map((offer) => offer.price)) },
+      newRetail: { count: newWeb.length, medianPrice: newMedian },
+      refurbished: { count: refurbishedWeb.length, medianPrice: median(refurbishedWeb.map((offer) => offer.price)) },
       geminiGrounded: { usedPrice: marketValuation?.estimatedUsedPrice ?? null, newPrice: marketValuation?.estimatedNewPrice ?? null, confidence: marketValuation?.confidence ?? 0 },
     },
     ai: {
