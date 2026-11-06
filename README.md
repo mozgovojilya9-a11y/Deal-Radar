@@ -1,142 +1,105 @@
 # Deal Radar — Marktplaats → Telegram Mini App
 
-Deal Radar searches configured Marktplaats categories near the configured Dutch postcode, estimates asking-price medians from its rolling history, and sends qualifying deals to Telegram. It also publishes qualifying deals to Supabase for the Telegram Mini App.
+Deal Radar scans configured Marktplaats categories near a Dutch postcode, estimates asking-price medians from observed listings, and publishes qualifying offers to the Telegram Mini App.
 
-## Project layout
+## Architecture — no hosted database
 
-- `bot.py` — Python standard-library-only Marktplaats scanner, filters, market median and Telegram notification.
-- `config.json` — postcode, radius, categories, price limits and discount thresholds.
-- `.github/workflows/deals.yml` — scheduled Python scanner (every 15 minutes).
-- `web/` — Next.js Telegram Mini App.
-- `supabase/schema.sql` — database schema for the Mini App.
-- `.github/workflows/mini-app-build.yml` — type-checks and production-builds the web app.
+- `bot.py` — Python scanner, filters, rolling price comparison, Telegram notifications, and JSON feed generation.
+- `config.json` — postcode, radius, search queries, price limits, and discount thresholds.
+- `.github/workflows/deals.yml` — scheduled scan every 15 minutes and manual workflow dispatch.
+- `deals-data` branch — stores the public feed at `data/deals.json`; this branch is separate from the app code.
+- `web/` — Next.js Mini App deployed on Vercel. Its `/api/deals` route reads and caches the JSON feed from GitHub.
+- Favorites and display preferences are stored in each user's browser (`localStorage`); they are not synchronized between devices.
+- The scanner's rolling comparison state is kept in a local SQLite file (`state.db`) and restored with GitHub Actions cache. This is not a hosted database and is best-effort: cache eviction can reset the price history.
 
-## 1. Connect Supabase (required for the Mini App feed)
+Supabase is not required by this project. The web app does not need a Supabase URL or service-role key.
 
-1. Create a Supabase project.
-2. Open **SQL Editor** and run the complete contents of `supabase/schema.sql`.
-3. In Supabase project settings, copy:
-   - Project URL.
-   - Server-side service-role secret key (keep it private).
-4. Add these GitHub repository secrets under **Settings → Secrets and variables → Actions**:
-   - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-   - Existing `TELEGRAM_TOKEN`
-   - Existing `TELEGRAM_CHAT_ID`
-5. Run **Actions → deals → Run workflow** once to verify that the scanner can publish new qualifying deals.
+## 1. GitHub Actions setup
 
-The bot upserts qualified deals by `listing_id`, so repeated detections update the existing row instead of creating duplicates. Only deals which pass the existing filters/market-discount threshold are published. The Mini App does not invent sample listings.
-
-The Mini App reads Supabase only from Next.js server routes. The service-role key must never be exposed to browser JavaScript or named with the `NEXT_PUBLIC_` prefix. Row Level Security is enabled and anonymous browser access is not granted.
-
-## 2. Vercel configuration
-
-The Vercel project is linked to this repository. Configure it as follows:
-
-- **Root Directory:** `web`
-- **Framework Preset:** Next.js
-- **Node.js:** 24.x (or a Vercel-supported current LTS)
-- **Deployment Protection / SSO:** production URL must be publicly accessible to Telegram. Do not leave Vercel login protection on the Telegram-facing production domain.
-
-Add these server-only Production Environment Variables in Vercel:
-
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `TELEGRAM_TOKEN`
-
-Use the same Supabase values as GitHub Actions. `TELEGRAM_TOKEN` is used only by the server to validate Telegram Mini App `initData`. Never use `NEXT_PUBLIC_TELEGRAM_TOKEN` or `NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY`.
-
-After setting the root directory and variables, redeploy the `main` branch. The production URL should return the Deal Radar interface rather than a 404.
-
-## 3. Connect Telegram Mini App
-
-After the public Vercel deployment is ready:
-
-1. Open [@BotFather](https://t.me/BotFather).
-2. Send `/setmenubutton` and select the Deal Radar bot.
-3. Set the button title to `Open Deal Radar` (or `Открыть Deal Radar`).
-4. Paste the public HTTPS Production URL from Vercel.
-5. Open the bot chat and tap its menu button.
-
-The app loads Telegram's official WebApp script. The server validates the raw `initData` signature with `TELEGRAM_TOKEN`, checks that `auth_date` is recent, and does not trust `initDataUnsafe` as authentication.
-
-## 4. GitHub Actions secrets
-
-For the scheduled scanner, configure the following repository secrets:
+Under **Settings → Secrets and variables → Actions**, configure:
 
 | Secret | Purpose |
 |---|---|
-| `TELEGRAM_TOKEN` | Send Telegram notifications |
-| `TELEGRAM_CHAT_ID` | Destination chat |
-| `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-side database upsert |
+| `TELEGRAM_TOKEN` | Send bot notifications and validate Telegram Mini App `initData` |
+| `TELEGRAM_CHAT_ID` | Destination chat for deal alerts |
 
-The bot can still scan and notify Telegram when Supabase credentials are absent, but the Mini App feed will not receive new rows. Once Supabase is set up, rerun the workflow.
+The scanner workflow requires **read and write access to repository contents** because it publishes `data/deals.json` to the `deals-data` branch. The workflow already declares `contents: write`.
 
-## 5. Local development
+The `deals-data` branch must contain `data/deals.json`. Its initial content can be:
 
-Python 3.9+ and Node.js 24+.
+    {
+      "updatedAt": null,
+      "deals": []
+    }
 
-Python scanner:
+Open **Actions → deals → Run workflow** to start a scan manually. After that, GitHub Actions runs the scanner every 15 minutes. Each run restores the existing feed, scans Marktplaats, and publishes only changed JSON. The Mini App refreshes its catalog every five minutes and the API cache is short-lived.
 
-```bash
-export TELEGRAM_TOKEN="..."
-export TELEGRAM_CHAT_ID="..."
-export SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co"
-export SUPABASE_SERVICE_ROLE_KEY="..."
-python bot.py --dry
-```
+## 2. Vercel setup
+
+The Vercel project should be connected to this repository with:
+
+- **Root Directory:** `web`
+- **Framework:** Next.js
+- **Production branch:** `main`
+- **Production URL:** public HTTPS URL reachable by Telegram
+
+Add this server-only Production Environment Variable:
+
+- `TELEGRAM_TOKEN`
+
+No `SUPABASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` variables are needed. The GitHub feed is public JSON; no database credentials are sent to the browser.
+
+## 3. Telegram Mini App
+
+1. Open [@BotFather](https://t.me/BotFather).
+2. Use `/setmenubutton` and select the Deal Radar bot.
+3. Set the button title, for example `Open Deal Radar`.
+4. Paste the Vercel Production URL.
+5. Open the bot and tap the menu button.
+
+The app uses Telegram's official WebApp script. The server validates the signed `initData`; it does not trust `initDataUnsafe` as authentication.
+
+## 4. Local development
+
+Requirements: Python 3.9+ and Node.js 24+.
+
+Scanner (from the repository root):
+
+    export TELEGRAM_TOKEN="..."
+    export TELEGRAM_CHAT_ID="..."
+    python bot.py --dry
 
 Mini App:
 
-```bash
-cd web
-cp .env.example .env.local
-# Fill the server-only values in .env.local
-npm install
-npm run dev
-```
+    cd web
+    cp .env.example .env.local
+    # Set TELEGRAM_TOKEN in .env.local
+    npm install
+    npm run dev
 
-For a production compile:
+Before deploying, run:
 
-```bash
-npm run typecheck
-npm run build
-```
+    npm run typecheck
+    npm run build
 
-## 6. What is currently implemented
+## 5. What the app includes
 
-- Responsive dark Deal Radar interface designed for Telegram mobile WebView.
-- Deal cards with image (when Marktplaats provides one), price, market estimate, discount, location and risk flags.
-- Category filter, title search, sorting and local favorites.
-- Listing detail panel and direct link to the original Marktplaats listing.
-- Telegram Mini App SDK startup and server-side HMAC validation of `initData`.
-- Supabase REST integration using Python's standard-library `urllib` and server-side Next.js `fetch`.
-- Upsert/deduplication by Marktplaats listing ID.
-- CI workflow for Next.js type-check and production build.
+- Responsive dark interface designed for Telegram mobile WebView.
+- Real Marktplaats listing cards with image (when available), asking price, estimated market price, discount, location, and risk flags.
+- Category filter, title search, sorting, listing details, and a direct link to the original listing.
+- Local favorites and local display preferences.
+- Telegram Mini App startup and server-side HMAC validation.
+- JSON catalog cached by the Vercel API route; no Supabase dependency.
 
-The repository branch and deployment still need the external Supabase project/keys configured. The Mini App feed remains empty until the bot detects and publishes qualifying deals.
+The feed starts empty. It is populated only when the scanner discovers qualifying deals; the app does not generate demo listings.
 
-## 7. Important limitations and safety
+## 6. Limitations and safety
 
-- Marktplaats has no public API for this search use case. The scanner uses an internal website endpoint which may change or block data-center IP addresses. GitHub Actions may receive HTTP 403; inspect workflow logs.
-- The market reference is the median of observed asking prices, not completed transaction prices. It is an estimate, not a guarantee.
-- Initial price history is sparse. The scanner may need multiple cycles before enough model/category observations exist to calculate a reliable comparison.
-- The Actions cache for `state.db` is best-effort, not durable storage. Cache eviction can reset price history. Supabase separately stores the Mini App's qualifying deal feed.
-- The current configuration includes postcode `7671` and a 50 km radius. Consider making this GitHub repository **Private** if you do not want to reveal the search area.
-- Never commit Telegram tokens, Supabase service-role keys, `.env.local`, or `state.db`.
+- Marktplaats does not offer a public API for this search use case. The scanner uses an internal website endpoint that can change or block data-center IP addresses. Inspect the `deals` workflow logs if a scan fails.
+- The market reference is a median of observed asking prices, not completed sale prices. It is an estimate, not a guarantee.
+- Initial market history is sparse. The scanner may need multiple successful runs before it has enough observations to identify a meaningful discount.
+- `state.db` is restored using GitHub Actions cache. Cache eviction can reset price history; the public feed is stored separately on `deals-data`.
+- The current config includes postcode `7671` and a 50 km radius. Make the repository private if you do not want to expose the search area.
+- Never commit Telegram tokens, `.env.local`, or `state.db`.
 
-Deal Radar finds candidates. Check condition, authenticity, seller reputation and safe payment before buying.
-
-## 8. Personal settings, favorites, scanner status and price history
-
-After the original `supabase/schema.sql` has been run, run the additive migration
-`supabase/migrations/20261106010000_personal_radar_features.sql` in Supabase → SQL Editor.
-It adds `favorites`, `user_settings`, `bot_status` and `deal_price_history` without replacing the existing `deals` table.
-
-- Personal settings (selected categories, minimum discount and display distance) are saved per Telegram user. These settings filter the Mini App feed; the scanner's actual postcode and search radius remain in `config.json`.
-- Favorites are stored per Telegram user in Supabase and synchronize when the same user opens the Mini App on another device.
-- The bot writes counts from each scan to `bot_status`.
-- Price observations are recorded for newly published deals and on later scans for listings already marked as sent by the scanner.
-
-The new API routes require a valid Telegram `initData` signature. No Telegram user ID is accepted from an untrusted request body.
+Deal Radar finds candidates, not guaranteed bargains. Check condition, authenticity, seller reputation, and safe payment before buying.

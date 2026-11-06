@@ -119,7 +119,7 @@ export default function HomePage() {
       const storedSettings = JSON.parse(localStorage.getItem("deal-radar-settings") || "null");
       if (storedSettings && typeof storedSettings === "object") {
         const next = {
-          categories: Array.isArray(storedSettings.categories) ? storedSettings.categories.filter((key) => typeof key === "string") : [],
+          categories: Array.isArray(storedSettings.categories) ? storedSettings.categories.filter((key: unknown): key is string => typeof key === "string") : [],
           minDiscount: Number.isInteger(storedSettings.minDiscount) ? Math.min(90, Math.max(0, Number(storedSettings.minDiscount))) : 0,
           maxDistanceKm: typeof storedSettings.maxDistanceKm === "number" && storedSettings.maxDistanceKm > 0 ? storedSettings.maxDistanceKm : null
         };
