@@ -235,9 +235,9 @@ function readSettings(raw: unknown): UserSettings {
   return {
     categories,
     minDiscount: typeof stored.minDiscount === "number" && Number.isInteger(stored.minDiscount) ? Math.min(90, Math.max(0, stored.minDiscount)) : 0,
-    maxDistanceKm: positive(stored.maxDistanceKm, 100),
+    maxDistanceKm: typeof stored.maxDistanceKm === "number" && Number.isFinite(stored.maxDistanceKm) ? Math.min(100, Math.max(5, stored.maxDistanceKm)) : null,
     minPrice: positive(stored.minPrice),
-    maxPrice: stored.maxPrice === 800 ? null : positive(stored.maxPrice, 5000)
+    maxPrice: stored.maxPrice === 800 ? null : positive(stored.maxPrice)
   };
 }
 
