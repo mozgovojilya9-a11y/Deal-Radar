@@ -562,9 +562,8 @@ def primary_rejection(q, it, cfg):
         return "invalid"
     if it.get("ptype") not in (None, "FIXED"):
         return "price_type"
-    absolute_cap = float(cfg.get("max_product_price_eur", 5000))
-    category_cap = min(float(q.get("max_price", absolute_cap)), absolute_cap)
-    if not (float(q.get("min_price", 0)) <= it["price"] <= category_cap):
+    minimum_price = float(q.get("min_price", 0) or 0)
+    if float(it["price"]) < minimum_price:
         return "price_range"
     if it.get("dist_km") is not None and it["dist_km"] > cfg["distance_km"] + 1:
         return "distance"
@@ -1116,7 +1115,7 @@ def run_once(cfg, db, dry=False):
             continue
         q = queries_by_key.get(str(deal.get("category_key") or ""))
         cached_price = deal.get("price")
-        if not isinstance(cached_price, (int, float)) or cached_price <= 0 or cached_price > float(cfg.get("max_product_price_eur", 5000)):
+        if not isinstance(cached_price, (int, float)) or cached_price <= 0:
             continue
         cached_text = " ".join([deal.get("title") or "", deal.get("description") or ""])
         match_text = cached_text if (isinstance(q, dict) and q.get("match_description")) else (deal.get("title") or "")
