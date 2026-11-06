@@ -289,6 +289,18 @@ class ScannerTests(unittest.TestCase):
         self.assertFalse(bot.title_matches_query(q, "Ray-Ban Wayfarer Gen 1 RW4006"))
         self.assertEqual(bot.group_of(q, "Ray-Ban Wayfarer Gen 2 RW4012"), "wayfarer-gen-2")
 
+    def test_existing_feed_drops_cached_products_over_800_euros(self):
+        os.makedirs(os.path.dirname(os.environ["DEAL_FEED"]), exist_ok=True)
+        old_deal = {
+            "listing_id": "old-900", "category_key": "ps5", "title": "PS5 console",
+            "description": "", "price": 900, "listing_url": "https://www.marktplaats.nl/v/old-900",
+            "status": "strong", "estimated_profit": 100, "profit_roi": 0.4,
+        }
+        with open(os.environ["DEAL_FEED"], "w", encoding="utf-8") as handle:
+            json.dump({"deals": [old_deal], "updatedAt": None}, handle)
+        self.assertTrue(self.run_scan([]))
+        self.assertEqual(bot.load_feed()["deals"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

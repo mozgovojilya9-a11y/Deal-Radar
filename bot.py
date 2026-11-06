@@ -631,6 +631,9 @@ def run_once(cfg, db, dry=False):
         if not isinstance(deal, dict) or not deal.get("listing_id"):
             continue
         q = queries_by_key.get(str(deal.get("category_key") or ""))
+        cached_price = deal.get("price")
+        if not isinstance(cached_price, (int, float)) or cached_price > float(cfg.get("max_product_price_eur", 800)):
+            continue
         cached_text = " ".join([deal.get("title") or "", deal.get("description") or ""])
         if not title_matches_query(q, cached_text if q.get("match_description") else (deal.get("title") or "")):
             continue
