@@ -251,7 +251,7 @@ export default function HomePage() {
       <section className="stats-grid">
         <div className="stat-card"><span className="stat-label">В ленте сейчас</span><strong>{deals.length}</strong><span className="stat-caption">актуальных предложений</span></div>
         <div className="stat-card accent-stat"><span className="stat-label">Максимальная скидка</span><strong>{deals.length ? Math.round(strongest * 100) + "%" : "—"}</strong><span className="stat-caption">от наблюдаемой цены рынка</span></div>
-        <div className="stat-card"><span className="stat-label">Последний скан</span><strong className="stat-time">{botStats?.last_run_at ? new Date(botStats.last_run_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : updatedAt ? new Date(updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "—"}</strong><span className="stat-caption">{botStats ? `Проверено ${botStats.last_run_found} · новых ${botStats.last_run_new}${botStats.last_run_errors ? ` · ошибок ${botStats.last_run_errors}` : ""}` : "Статистика появится после запуска бота"}</span></div>
+        <div className="stat-card"><span className="stat-label">Каталог обновлён</span><strong className="stat-time">{updatedAt ? new Date(updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "—"}</strong><span className="stat-caption">последнее поступление новых предложений</span></div>
       </section>
 
       <section className="content-section" id="deals">
@@ -282,7 +282,7 @@ export default function HomePage() {
             <div className="state-icon">!</div>
             <h3>Лента пока не подключена</h3>
             <p>{error}</p>
-            <span>Нужны таблица Supabase и серверные переменные окружения. Инструкция есть в README репозитория.</span>
+            <span>Проверьте доступность каталога и попробуйте обновить страницу ещё раз.</span>
             <button className="secondary-button" onClick={() => void loadDeals()}>Попробовать снова</button>
           </div>
         ) : loading && filtered.length === 0 ? (
@@ -334,7 +334,7 @@ export default function HomePage() {
               {CATEGORIES.filter((item) => item.key).map((item) => <button type="button" key={item.key} className={settingsDraft.categories.includes(item.key) ? "preference-chip active" : "preference-chip"} onClick={() => setSettingsDraft((old) => ({ ...old, categories: old.categories.includes(item.key) ? old.categories.filter((key) => key !== item.key) : [...old.categories, item.key] }))}>{item.label}</button>)}
             </div>
           </div>
-          <div className="settings-actions"><span>{settingsMessage}</span><button className="secondary-button" onClick={() => void saveSettings()} disabled={settingsSaving || !telegramInitData}>{settingsSaving ? "Сохраняем…" : "Сохранить настройки"}</button></div>
+          <div className="settings-actions"><span>{settingsMessage}</span><button className="secondary-button" onClick={saveSettings}>Сохранить настройки</button></div>
           <p className="settings-note">Эти фильтры влияют на ленту приложения. Базовый регион и радиус сканера задаются в config.json.</p>
         </div>
       ) : null}
@@ -355,20 +355,6 @@ export default function HomePage() {
               <div className="detail-price"><strong>{euro(selected.price)}</strong><span>Рынок ≈ {euro(selected.market_price)}</span></div>
               <p>{selected.description || "Описание отсутствует в исходном объявлении."}</p>
               <div className="detail-facts"><span>⌖ {selected.city || "Нидерланды"}</span><span>Обнаружено {dateLabel(selected.detected_at)}</span></div>
-              <div className="price-history">
-                <strong>История цены</strong>
-                {priceHistory.length ? <>
-                  <div className="history-bars">
-                    {priceHistory.map((point, index) => {
-                      const values = priceHistory.map((item) => Number(item.price));
-                      const min = Math.min(...values), max = Math.max(...values);
-                      const height = max === min ? 55 : 18 + ((Number(point.price) - min) / (max - min)) * 62;
-                      return <div className="history-point" key={point.observed_at + index} title={`${euro(point.price)} · ${dateLabel(point.observed_at)}`}><span className="history-bar" style={{ height: height + "%" }} /><small>{dateLabel(point.observed_at)}</small></div>;
-                    })}
-                  </div>
-                  <p>{priceHistory.length} наблюдений. История пополняется при следующих сканированиях.</p>
-                </> : <p>Пока мало данных. История начнёт собираться после следующих запусков бота.</p>}
-              </div>
               {selected.warning_flags?.length ? <div className="warning-list"><strong>Обрати внимание</strong>{selected.warning_flags.map((flag) => <span key={flag}>⚠ {flag}</span>)}</div> : null}
               <a className="primary-button full-button" href={selected.listing_url} target="_blank" rel="noreferrer">Открыть на Marktplaats ↗</a>
               <button className="secondary-button full-button" onClick={() => toggleSaved(selected.listing_id)}>{saved.includes(selected.listing_id) ? "Убрать из избранного" : "Добавить в избранное"}</button>
