@@ -74,7 +74,7 @@
       "min_price": 60,
       "max_price": 300,
       "threshold": 0.2,
-      "require_regex": "(?=.*\\bairpods[\\s-]*pro\\b)(?=.*(?:\\bpro[\\s-]*3\\b|\\b3(?:rd)?[\\s.-]*(?:gen(?:eration)?|e[\\s-]*generatie)\\b|\\bthird[\\s-]*generation\\b))"
+      "require_regex": "(?=.*\\bairpods[\\s-]*pro\\b)(?=.*(?:\\bpro[\\s-]*3\\b|\\b3(?:rd)?[\\s.-]*(?:gen(?:eration)?|e[\\s-]*generatie)\\b|\\bgen(?:eration)?[\\s.-]*3\\b|\\bthird[\\s-]*generation\\b))"
     },
     {
       "key": "airpods-max",
@@ -100,7 +100,7 @@
       "include_any": [
         "airpods"
       ],
-      "require_regex": "(?=.*\\bairpods\\b)(?=.*(?:\\bairpods[\\s-]*5\\b|\\b5(?:th)?[\\s.-]*(?:gen(?:eration)?|e[\\s-]*generatie)\\b|\\bfifth[\\s-]*generation\\b))",
+      "require_regex": "(?=.*\\bairpods\\b)(?=.*(?:\\bairpods[\\s-]*5\\b|\\b5(?:th)?[\\s.-]*(?:gen(?:eration)?|e[\\s-]*generatie)\\b|\\bgen(?:eration)?[\\s.-]*5\\b|\\bfifth[\\s-]*generation\\b))",
       "exclude": [
         "pro",
         "max",
