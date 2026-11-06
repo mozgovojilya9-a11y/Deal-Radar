@@ -629,7 +629,7 @@ export default function HomePage() {
                     <div className="research-ai-top">
                       <span className="research-ai-kicker">AI MARKET ANALYST</span>
                       <b className={researchResult.ai.available ? "research-ai-live" : "research-ai-off"}>
-                        {researchResult.ai.available ? "AI-анализ выполнен" : researchResult.ai.enabled ? "AI временно недоступен" : "AI не подключён"}
+                        {researchResult.ai.available ? "AI-анализ выполнен" : researchResult.ai.enabled ? "AI временно недоступен" : "Локальный AI — в сканере"}
                       </b>
                     </div>
                     <p>{researchResult.ai.productSummary || "Сопоставление найденных объявлений с поисковой моделью."}</p>
@@ -642,7 +642,7 @@ export default function HomePage() {
                       <span>Другие версии <b>{researchResult.ai.variants}</b></span>
                       <span>Проверено AI <b>{researchResult.ai.reviewedOffers}</b></span>
                     </div>
-                    {!researchResult.ai.enabled ? <small className="research-ai-note">Добавьте OPENAI_API_KEY в переменные Vercel, чтобы включить интеллектуальное сопоставление.</small> : null}
+                    {!researchResult.ai.enabled ? <small className="research-ai-note">Облачный AI отключён ради нулевой стоимости. Локальная AI-проверка объявлений выполняется сканером через Ollama на Mac.</small> : null}
                   </section>
                 ) : null}
                 <div className="research-summary-grid">
