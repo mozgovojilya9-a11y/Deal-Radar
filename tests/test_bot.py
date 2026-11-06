@@ -308,7 +308,7 @@ class ScannerTests(unittest.TestCase):
             }
         }
         try:
-            with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}):
+            with mock.patch.dict(os.environ, {"OLLAMA_HOST": "http://127.0.0.1:11434"}):
                 with mock.patch.object(bot, "request_ai_listing_review", return_value=verdict) as request_ai:
                     first = bot.review_listings_with_ai(db, CFG["queries"][0], [item])
                     second = bot.review_listings_with_ai(db, CFG["queries"][0], [item])
