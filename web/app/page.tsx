@@ -1,20 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Deal } from "@/lib/supabase";
+import type { Deal } from "@/lib/deals";
 
 type Tab = "home" | "categories" | "saved" | "profile";
 type Sort = "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
 type UserSettings = { categories: string[]; minDiscount: number; maxDistanceKm: number | null };
-type BotStats = { last_run_at: string; last_run_found: number; last_run_new: number; last_run_errors: number };
-type PricePoint = { price: number; market_price: number | null; discount: number | null; observed_at: string };
 const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, maxDistanceKm: null };
-function telegramHeaders(json = false): Record<string, string> {
-  const initData = typeof window !== "undefined" ? window.Telegram?.WebApp?.initData || "" : "";
-  return { ...(json ? { "Content-Type": "application/json" } : {}), ...(initData ? { Authorization: `tma ${initData}` } : {}) };
-}
-
 const CATEGORIES = [
   { key: "", label: "Все", icon: "✦" },
   { key: "iphone-16", label: "iPhone 16", icon: "▣" },
@@ -112,11 +105,7 @@ export default function HomePage() {
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [settingsDraft, setSettingsDraft] = useState<UserSettings>(DEFAULT_SETTINGS);
-  const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState("");
-  const [botStats, setBotStats] = useState<BotStats | null>(null);
-  const [priceHistory, setPriceHistory] = useState<PricePoint[]>([]);
-  const [telegramInitData, setTelegramInitData] = useState("");
 
   useEffect(() => {
     try { setSaved(JSON.parse(localStorage.getItem("deal-radar-favorites") || "[]") as string[]); }
