@@ -4,7 +4,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const designDocument = readFileSync(join(process.cwd(), "design", "index.html"), "utf8");
-const designCss = designDocument.match(/<style>([\\s\\S]*?)<\\/style>/i)?.[1];
+const styleStart = designDocument.indexOf("<style>");
+const styleEnd = designDocument.indexOf("</style>", styleStart);
+const designCss = styleStart >= 0 && styleEnd > styleStart
+  ? designDocument.slice(styleStart + "<style>".length, styleEnd)
+  : undefined;
 if (!designCss) throw new Error("Design CSS was not found in design/index.html");
 
 export const metadata: Metadata = {
