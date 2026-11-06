@@ -98,6 +98,16 @@ export async function GET(request: NextRequest) {
       })
       : [];
     if (category && /^[a-z0-9-]{1,64}$/i.test(category)) deals = deals.filter((deal) => deal.category_key === category);
+    const minPriceRaw = request.nextUrl.searchParams.get("minPrice");
+    const maxPriceRaw = request.nextUrl.searchParams.get("maxPrice");
+    if (minPriceRaw !== null) {
+      const minPrice = Number(minPriceRaw);
+      if (Number.isFinite(minPrice) && minPrice >= 0) deals = deals.filter((deal) => deal.price >= minPrice);
+    }
+    if (maxPriceRaw !== null) {
+      const maxPrice = Number(maxPriceRaw);
+      if (Number.isFinite(maxPrice) && maxPrice > 0) deals = deals.filter((deal) => deal.price <= maxPrice);
+    }
 
     deals.sort((a, b) => {
       const rank = (deal: Deal) => deal.status === "candidate" ? 1 : deal.status === "good" ? 2 : 3;
