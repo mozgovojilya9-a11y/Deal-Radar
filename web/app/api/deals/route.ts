@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
     const feed = await response.json() as Partial<DealFeed>;
     const category = request.nextUrl.searchParams.get("category") || "";
     const sortParam = request.nextUrl.searchParams.get("sort");
-    const sort = sortParam === "newest" || sortParam === "price" ? sortParam : "discount";
+    const sort = sortParam === "newest" || sortParam === "price" || sortParam === "discount" ? sortParam : "profit";
 
     let deals = Array.isArray(feed.deals) ? feed.deals.filter(isDeal).filter((deal) => deal.active !== false && isRecent(deal)) : [];
     if (category && /^[a-z0-9-]{1,64}$/i.test(category)) deals = deals.filter((deal) => deal.category_key === category);
@@ -97,7 +97,8 @@ export async function GET(request: NextRequest) {
       if (tier) return tier;
       if (sort === "newest") return Date.parse(b.detected_at) - Date.parse(a.detected_at);
       if (sort === "price") return a.price - b.price;
-      return (b.discount ?? -1) - (a.discount ?? -1);
+      if (sort === "discount") return (b.discount ?? -1) - (a.discount ?? -1);
+      return (b.estimated_profit ?? -1) - (a.estimated_profit ?? -1);
     });
     deals = deals.slice(0, MAX_DEALS);
 

@@ -7,8 +7,14 @@ export type Deal = {
   price: number;
   market_price: number | null;
   discount: number | null;
+  expected_resale_price?: number | null;
+  estimated_profit?: number | null;
+  profit_roi?: number | null;
+  price_reference_type?: "marktplaats" | "new_retail" | "insufficient_data";
+  new_price?: number | null;
+  model_year?: number | null;
   status?: DealStatus;
-  market_confidence?: "high" | "preliminary" | "none";
+  market_confidence?: "high" | "preliminary" | "retail_proxy" | "none";
   market_samples?: number;
   evaluation_reason?: string | null;
   category_key: string;
@@ -29,6 +35,8 @@ export type ScannerStats = {
   unique: number;
   duplicates: number;
   rejectedTitle: number;
+  rejectedExternalLink: number;
+  rejectedOldModel: number;
   rejectedInvalid: number;
   rejectedPriceType: number;
   rejectedPriceRange: number;
@@ -44,6 +52,8 @@ export type ScannerStats = {
   rejectedDateUnknown: number;
   rejectedRisk: number;
   rejectedDiscount: number;
+  rejectedProfit: number;
+  retailProxyEvaluated: number;
   candidateNoMarket: number;
   candidatePreliminary: number;
   primaryRejected: number;

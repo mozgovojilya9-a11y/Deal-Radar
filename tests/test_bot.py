@@ -57,7 +57,7 @@ class ScannerTests(unittest.TestCase):
             db.close()
 
     def test_catalog_receives_deal_without_telegram(self):
-        seed = [listing(str(i), 400) for i in range(1, 7)]
+        seed = [listing(str(i), 400, date=datetime.now(timezone.utc).isoformat()) for i in range(1, 7)]
         self.assertTrue(self.run_scan(seed))
         self.assertEqual(bot.load_feed()["deals"], [])
         now = datetime.now(timezone.utc).isoformat()
@@ -183,6 +183,52 @@ class ScannerTests(unittest.TestCase):
     def test_no_telegram_sender_exists(self):
         for name in ("tg", "send", "format_deal", "get_chat_id"):
             self.assertFalse(hasattr(bot, name), name)
+
+    def test_external_website_links_are_rejected_and_email_is_allowed(self):
+        now = datetime.now(timezone.utc).isoformat()
+        linked = listing("linked", 150, now)
+        linked["description"] = "Visit our shop https://example-store.nl/product"
+        clean = listing("clean", 150, now)
+        clean["description"] = "See our listing on https://www.marktplaats.nl/v/clean"
+        self.assertTrue(self.run_scan([linked, clean]))
+        self.assertEqual([d["listing_id"] for d in bot.load_feed()["deals"]], ["clean"])
+        self.assertTrue(bot.has_external_website_link("shop.example.nl"))
+        self.assertFalse(bot.has_external_website_link("seller@gmail.com"))
+
+    def test_iphone_64gb_160_euro_is_unprofitable_at_127_market_median(self):
+        cfg={"profitability":{"market_resale_factor":0.95,"buyer_negotiation_rate":0.04,"selling_fee_rate":0.08,"fixed_selling_cost_eur":10,"min_profit_eur":40,"min_roi":0.2}}
+        result=bot.calculate_resale_economics({"min_profit_eur":55,"min_roi":0.25},160,127,12,"marktplaats",cfg=cfg)
+        self.assertFalse(result["profitable"])
+        self.assertLess(result["estimated_profit"],-60)
+
+    def test_iphone_variants_and_storage_do_not_share_market_group(self):
+        with open(os.path.join(ROOT,"config.json"),encoding="utf-8") as handle: config=json.load(handle)
+        q=next(q for q in config["queries"] if q["key"]=="iphone-12")
+        self.assertEqual(bot.group_of(q,"iPhone 12 64GB"),"64gb")
+        self.assertEqual(bot.group_of(q,"iPhone 12 Pro 128GB"),"128gb-pro")
+        self.assertEqual(bot.group_of(q,"iPhone 12 without storage"),"unknown")
+
+    def test_current_tv_generations_and_old_tv_rejection(self):
+        q={"group_type":"television","min_model_year":2023}
+        base={"id":"tv","price":500,"ptype":"FIXED","dist_km":1,"external_link":False}
+        old=dict(base,title="Samsung QE55Q80B",text="Samsung QE55Q80B")
+        self.assertEqual(bot.primary_rejection(q,old,{"distance_km":50}),"old_model")
+        self.assertEqual(bot.television_model_year("LG OLED55C2"),2022)
+        self.assertEqual(bot.television_model_year("LG OLED55C6"),2026)
+        self.assertEqual(bot.television_model_year("65QNED82B6B"),2026)
+        self.assertEqual(bot.television_model_year("55E7NQ"),2024)
+        self.assertEqual(bot.television_model_year("55P6L"),2026)
+        self.assertEqual(bot.television_model_year("65PUS8001/12"),2026)
+        self.assertEqual(bot.television_model_year("Samsung QE55Q80B bought in 2025"),2022)
+        self.assertIsNone(bot.television_model_year("Generic 55 inch 4K Smart TV"))
+
+    def test_camera_categories_use_model_specific_filters(self):
+        with open(os.path.join(ROOT,"config.json"),encoding="utf-8") as handle: config=json.load(handle)
+        sony=next(q for q in config["queries"] if q["key"]=="camera-sony")
+        canon=next(q for q in config["queries"] if q["key"]=="camera-canon")
+        self.assertTrue(bot.title_matches_query(sony,"Sony A7 IV systeemcamera body"))
+        self.assertFalse(bot.title_matches_query(sony,"Sony camera tas"))
+        self.assertTrue(bot.title_matches_query(canon,"Canon EOS R6 Mark II body"))
 
 
 if __name__ == "__main__":

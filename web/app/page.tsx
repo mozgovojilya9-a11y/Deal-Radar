@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Deal, ScannerStats } from "@/lib/deals";
 
 type Tab = "home" | "categories" | "saved" | "analytics" | "profile";
-type Sort = "discount" | "newest" | "price";
+type Sort = "profit" | "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
 type UserSettings = { categories: string[]; minDiscount: number; maxDistanceKm: number | null; minPrice: number | null; maxPrice: number | null };
 const DEFAULT_SETTINGS: UserSettings = { categories: [], minDiscount: 0, maxDistanceKm: null, minPrice: null, maxPrice: null };
@@ -21,6 +21,12 @@ const CATEGORIES = [
   { key: "ps5", label: "PlayStation 5", icon: "⌘" },
   { key: "ps4", label: "PlayStation 4", icon: "⌘" },
   { key: "televisions", label: "Телевизоры", icon: "▣" },
+  { key: "camera-sony", label: "Камеры Sony", icon: "◎" },
+  { key: "camera-canon", label: "Камеры Canon", icon: "◎" },
+  { key: "camera-nikon", label: "Камеры Nikon", icon: "◎" },
+  { key: "camera-fujifilm", label: "Камеры Fujifilm", icon: "◎" },
+  { key: "camera-panasonic", label: "Камеры Panasonic", icon: "◎" },
+  { key: "action-camera-gopro", label: "Экшн-камеры GoPro", icon: "◎" },
   { key: "drones", label: "Дроны", icon: "◇" },
   { key: "bag-michael-kors", label: "Сумки Michael Kors", icon: "▱" },
   { key: "backpack-michael-kors", label: "Рюкзаки Michael Kors", icon: "▱" },
@@ -123,7 +129,12 @@ function DealCard({ deal, saved, onSave, onOpen }: {
           <strong>{euro(deal.price)}</strong>
           <span className="old-price">{hasEstimate ? "≈ " + euro(deal.market_price) : "Рынок уточняется"}</span>
         </div>
-        {hasEstimate && discount !== null ? (
+        {deal.estimated_profit != null ? (
+          <div className={"saving-line" + (candidate ? " preliminary-saving" : "")}>
+            <span>{candidate ? "Предварительная прибыль" : "Прибыль после расходов"}</span>
+            <strong>{euro(deal.estimated_profit)}</strong>
+          </div>
+        ) : hasEstimate && discount !== null ? (
           <div className={"saving-line" + (candidate ? " preliminary-saving" : "")}>
             <span>{candidate ? "Предварительная разница" : "Ориентир экономии"}</span>
             <strong>{euro(Number(deal.market_price) - Number(deal.price))}</strong>
@@ -142,7 +153,7 @@ function DealCard({ deal, saved, onSave, onOpen }: {
 export default function HomePage() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [category, setCategory] = useState("");
-  const [sort, setSort] = useState<Sort>("discount");
+  const [sort, setSort] = useState<Sort>("profit");
   const [tab, setTab] = useState<Tab>("home");
   const [search, setSearch] = useState("");
   const [saved, setSaved] = useState<string[]>([]);
@@ -354,11 +365,14 @@ export default function HomePage() {
             <div className="rejection-heading"><div><div className="eyebrow">FILTER BREAKDOWN</div><h3>Почему объявления отсеялись</h3></div><strong>{scannerStats ? scannerStats.rejectedTotal.toLocaleString("ru-RU") : "—"} <small>всего</small></strong></div>
             {[
               { label: "Не подошли по названию / модели", value: scannerStats?.rejectedTitle ?? 0, color: "age" },
+              { label: "В объявлении есть внешний сайт", value: scannerStats?.rejectedExternalLink ?? 0, color: "risk" },
+              { label: "Устаревшая / нераспознанная модель ТВ", value: scannerStats?.rejectedOldModel ?? 0, color: "age" }
               { label: "Цена или формат цены не подошли", value: (scannerStats?.rejectedPriceType ?? 0) + (scannerStats?.rejectedPriceRange ?? 0) + (scannerStats?.rejectedInvalid ?? 0), color: "risk" },
               { label: "За пределами радиуса", value: scannerStats?.rejectedDistance ?? 0, color: "samples" },
               { label: "Старше 30 дней / дата неизвестна", value: (scannerStats?.rejectedAge ?? 0) + (scannerStats?.rejectedDateUnknown ?? 0), color: "age" },
               { label: "Рискованные объявления", value: scannerStats?.rejectedRisk ?? 0, color: "risk" },
-              { label: "Скидка ниже порога хорошей цены", value: scannerStats?.rejectedDiscount ?? 0, color: "discount" }
+              { label: "Скидка ниже порога хорошей цены", value: scannerStats?.rejectedDiscount ?? 0, color: "discount" },
+              { label: "Не проходит по чистой прибыли / ROI", value: scannerStats?.rejectedProfit ?? 0, color: "discount" }
             ].map((item) => {
               const total = scannerStats?.rejectedTotal ?? 0;
               const width = total > 0 ? Math.min(100, (item.value / total) * 100) : 0;
@@ -395,7 +409,7 @@ export default function HomePage() {
 
         <div className="toolbar">
           <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Найти товар..." /></label>
-          <label className="sort-select"><span>Сортировка</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="discount">По скидке</option><option value="newest">Сначала новые</option><option value="price">Сначала дешевле</option></select></label>
+          <label className="sort-select"><span>Сортировка</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="profit">По прибыли</option><option value="discount">По скидке</option><option value="newest">Сначала новые</option><option value="price">Сначала дешевле</option></select></label>
         </div>
 
         <div className="category-strip">
@@ -508,6 +522,8 @@ export default function HomePage() {
               <div className="eyebrow">{selected.category_label} · {selected.status === "candidate" ? "ТРЕБУЕТ ПРОВЕРКИ" : selected.status === "good" ? "ХОРОШАЯ ЦЕНА" : selected.discount == null ? "ВЫГОДНО" : "−" + Math.round(Number(selected.discount) * 100) + "%"}</div>
               <h2>{selected.title}</h2>
               <div className="detail-price"><strong>{euro(selected.price)}</strong><span>{selected.market_price != null ? "Рынок ≈ " + euro(selected.market_price) : "Рыночная цена пока не подтверждена"}</span></div>
+              {selected.estimated_profit != null ? <div className="detail-facts"><span>Ожидаемая прибыль: {euro(selected.estimated_profit)}</span><span>ROI: {selected.profit_roi != null ? Math.round(selected.profit_roi * 100) + "%" : "—"}</span></div> : null}
+              {selected.new_price != null ? <div className="candidate-detail-note">Новый товар: {euro(selected.new_price)} · расчёт сделан с запасом на торг, комиссию и расходы</div> : null}
               {selected.evaluation_reason ? <div className="candidate-detail-note">{selected.evaluation_reason}</div> : null}
               {selected.market_samples ? <div className="detail-facts"><span>Сравнений: {selected.market_samples}</span><span>Уверенность: {selected.market_confidence === "high" ? "высокая" : "предварительная"}</span></div> : null}
               <p>{selected.description || "Описание отсутствует в исходном объявлении."}</p>

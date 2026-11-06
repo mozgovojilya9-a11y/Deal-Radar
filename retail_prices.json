@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "updated_at": "2026-11-06",
+  "description": "Fresh Dutch new-retail prices by exact scanner model group. Re-check after 45 days; no generic MSRP assumptions.",
+  "references": {
+    "camera-sony|a7iv": {
+      "new_price_eur": 2099,
+      "source_url": "https://www.kieskeurig.nl/systeemcamera/product/15070747-sony-a7-iv-body",
+      "checked_at": "2026-11-06",
+      "resale_factor": 0.62,
+      "product": "Sony A7 IV Body"
+    },
+    "camera-fujifilm|xt5": {
+      "new_price_eur": 1999,
+      "source_url": "https://eshop.fujifilm-x.com/nl/fujifilm-x-t5-body.html",
+      "checked_at": "2026-11-06",
+      "resale_factor": 0.62,
+      "product": "Fujifilm X-T5 Body"
+    },
+    "camera-nikon|z6iii": {
+      "new_price_eur": 2499,
+      "source_url": "https://www.nikon.nl/nl_NL/product/cameras",
+      "checked_at": "2026-11-06",
+      "resale_factor": 0.62,
+      "product": "Nikon Z6III Body"
+    },
+    "camera-nikon|z50ii": {
+      "new_price_eur": 899,
+      "source_url": "https://www.nikon.nl/nl_NL/product/cameras",
+      "checked_at": "2026-11-06",
+      "resale_factor": 0.62,
+      "product": "Nikon Z50II"
+    },
+    "camera-nikon|zf": {
+      "new_price_eur": 2299,
+      "source_url": "https://www.nikon.nl/nl_NL/product/cameras",
+      "checked_at": "2026-11-06",
+      "resale_factor": 0.62,
+      "product": "Nikon Z f"
+    },
+    "camera-nikon|z8": {
+      "new_price_eur": 3999,
+      "source_url": "https://www.nikon.nl/nl_NL/product/cameras",
+      "checked_at": "2026-11-06",
+      "resale_factor": 0.62,
+      "product": "Nikon Z8"
+    }
+  }
+}

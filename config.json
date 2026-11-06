@@ -28,7 +28,8 @@
       "min_price": 150,
       "max_price": 800,
       "threshold": 0.2,
-      "group_regex": "\\b(pro|slim|digital|disc)\\b"
+      "group_regex": "\\b(pro|slim|digital|disc)\\b",
+      "min_profit_eur": 50
     },
     {
       "key": "ps4",
@@ -51,7 +52,8 @@
       "min_price": 60,
       "max_price": 350,
       "threshold": 0.25,
-      "group_regex": "\\b(pro|slim)\\b"
+      "group_regex": "\\b(pro|slim)\\b",
+      "min_profit_eur": 50
     },
     {
       "key": "airpods-pro-3",
@@ -301,7 +303,8 @@
       "min_price": 25,
       "max_price": 200,
       "threshold": 0.3,
-      "group_regex": "\\b(re-?kanken|laptop ?\\d{2}|mini|no\\.? ?2|big)\\b"
+      "group_regex": "\\b(re-?kanken|laptop ?\\d{2}|mini|no\\.? ?2|big)\\b",
+      "min_profit_eur": 35
     },
     {
       "key": "bag-northface",
@@ -327,7 +330,8 @@
       ],
       "min_price": 25,
       "max_price": 250,
-      "threshold": 0.3
+      "threshold": 0.3,
+      "min_profit_eur": 35
     },
     {
       "key": "bag-osprey",
@@ -341,7 +345,8 @@
       ],
       "min_price": 40,
       "max_price": 300,
-      "threshold": 0.3
+      "threshold": 0.3,
+      "min_profit_eur": 35
     },
     {
       "key": "bag-deuter",
@@ -355,7 +360,8 @@
       ],
       "min_price": 30,
       "max_price": 250,
-      "threshold": 0.3
+      "threshold": 0.3,
+      "min_profit_eur": 35
     },
     {
       "key": "bag-eastpak",
@@ -369,7 +375,8 @@
       ],
       "min_price": 15,
       "max_price": 120,
-      "threshold": 0.35
+      "threshold": 0.35,
+      "min_profit_eur": 35
     },
     {
       "key": "iphone-16",
@@ -397,7 +404,11 @@
       "exclude_regex": [
         "^(?:scherm|display|lcd|oled|touchscreen|sensor\\s*flex|camera|batterij|accu|speaker|luidspreker|onderdeel(?:en)?|service\\s*pack|repair|reparatie)\\b",
         "\\b(?:service\\s*pack|sensor\\s*flex|pulled|vervangingsscherm|replacement\\s*part|losse?\\s+scherm|voor\\s+onderdelen)\\b"
-      ]
+      ],
+      "min_profit_eur": 55,
+      "min_roi": 0.25,
+      "group_type": "model_required",
+      "strict_group": true
     },
     {
       "key": "iphone-15",
@@ -425,7 +436,11 @@
       "exclude_regex": [
         "^(?:scherm|display|lcd|oled|touchscreen|sensor\\s*flex|camera|batterij|accu|speaker|luidspreker|onderdeel(?:en)?|service\\s*pack|repair|reparatie)\\b",
         "\\b(?:service\\s*pack|sensor\\s*flex|pulled|vervangingsscherm|replacement\\s*part|losse?\\s+scherm|voor\\s+onderdelen)\\b"
-      ]
+      ],
+      "min_profit_eur": 55,
+      "min_roi": 0.25,
+      "group_type": "model_required",
+      "strict_group": true
     },
     {
       "key": "iphone-14",
@@ -453,7 +468,11 @@
       "exclude_regex": [
         "^(?:scherm|display|lcd|oled|touchscreen|sensor\\s*flex|camera|batterij|accu|speaker|luidspreker|onderdeel(?:en)?|service\\s*pack|repair|reparatie)\\b",
         "\\b(?:service\\s*pack|sensor\\s*flex|pulled|vervangingsscherm|replacement\\s*part|losse?\\s+scherm|voor\\s+onderdelen)\\b"
-      ]
+      ],
+      "min_profit_eur": 55,
+      "min_roi": 0.25,
+      "group_type": "model_required",
+      "strict_group": true
     },
     {
       "key": "iphone-13",
@@ -481,7 +500,11 @@
       "exclude_regex": [
         "^(?:scherm|display|lcd|oled|touchscreen|sensor\\s*flex|camera|batterij|accu|speaker|luidspreker|onderdeel(?:en)?|service\\s*pack|repair|reparatie)\\b",
         "\\b(?:service\\s*pack|sensor\\s*flex|pulled|vervangingsscherm|replacement\\s*part|losse?\\s+scherm|voor\\s+onderdelen)\\b"
-      ]
+      ],
+      "min_profit_eur": 55,
+      "min_roi": 0.25,
+      "group_type": "model_required",
+      "strict_group": true
     },
     {
       "key": "iphone-12",
@@ -509,7 +532,11 @@
       "exclude_regex": [
         "^(?:scherm|display|lcd|oled|touchscreen|sensor\\s*flex|camera|batterij|accu|speaker|luidspreker|onderdeel(?:en)?|service\\s*pack|repair|reparatie)\\b",
         "\\b(?:service\\s*pack|sensor\\s*flex|pulled|vervangingsscherm|replacement\\s*part|losse?\\s+scherm|voor\\s+onderdelen)\\b"
-      ]
+      ],
+      "min_profit_eur": 55,
+      "min_roi": 0.25,
+      "group_type": "model_required",
+      "strict_group": true
     },
     {
       "key": "televisions",
@@ -557,7 +584,10 @@
       "threshold": 0.26,
       "group_type": "television",
       "strict_group": true,
-      "good_threshold": 0.18
+      "good_threshold": 0.18,
+      "min_model_year": 2023,
+      "min_profit_eur": 70,
+      "min_roi": 0.25
     },
     {
       "key": "drones",
@@ -596,7 +626,9 @@
       "min_price": 100,
       "max_price": 2500,
       "threshold": 0.28,
-      "good_threshold": 0.19
+      "good_threshold": 0.19,
+      "min_profit_eur": 90,
+      "min_roi": 0.25
     },
     {
       "key": "bag-michael-kors",
@@ -628,7 +660,8 @@
       "min_price": 25,
       "max_price": 500,
       "threshold": 0.3,
-      "good_threshold": 0.2
+      "good_threshold": 0.2,
+      "min_profit_eur": 35
     },
     {
       "key": "backpack-michael-kors",
@@ -660,7 +693,8 @@
       "min_price": 35,
       "max_price": 450,
       "threshold": 0.3,
-      "good_threshold": 0.2
+      "good_threshold": 0.2,
+      "min_profit_eur": 35
     },
     {
       "key": "microphone-shure",
@@ -692,7 +726,8 @@
       "min_price": 35,
       "max_price": 700,
       "threshold": 0.28,
-      "good_threshold": 0.19
+      "good_threshold": 0.19,
+      "min_profit_eur": 35
     },
     {
       "key": "microphone-rode",
@@ -724,7 +759,8 @@
       "min_price": 35,
       "max_price": 650,
       "threshold": 0.28,
-      "good_threshold": 0.19
+      "good_threshold": 0.19,
+      "min_profit_eur": 35
     },
     {
       "key": "microphone-dji",
@@ -754,7 +790,8 @@
       "min_price": 35,
       "max_price": 450,
       "threshold": 0.28,
-      "good_threshold": 0.19
+      "good_threshold": 0.19,
+      "min_profit_eur": 35
     },
     {
       "key": "microphone-sennheiser",
@@ -784,7 +821,8 @@
       "min_price": 40,
       "max_price": 900,
       "threshold": 0.28,
-      "good_threshold": 0.19
+      "good_threshold": 0.19,
+      "min_profit_eur": 35
     },
     {
       "key": "headphones-sony",
@@ -816,7 +854,8 @@
       "min_price": 35,
       "max_price": 550,
       "threshold": 0.27,
-      "good_threshold": 0.18
+      "good_threshold": 0.18,
+      "min_profit_eur": 35
     },
     {
       "key": "headphones-bose",
@@ -848,7 +887,8 @@
       "min_price": 45,
       "max_price": 650,
       "threshold": 0.27,
-      "good_threshold": 0.18
+      "good_threshold": 0.18,
+      "min_profit_eur": 35
     },
     {
       "key": "headphones-sennheiser",
@@ -877,7 +917,8 @@
       "min_price": 35,
       "max_price": 650,
       "threshold": 0.27,
-      "good_threshold": 0.18
+      "good_threshold": 0.18,
+      "min_profit_eur": 35
     },
     {
       "key": "headphones-jbl",
@@ -907,7 +948,8 @@
       "min_price": 25,
       "max_price": 400,
       "threshold": 0.27,
-      "good_threshold": 0.18
+      "good_threshold": 0.18,
+      "min_profit_eur": 35
     },
     {
       "key": "headphones-beats",
@@ -937,8 +979,291 @@
       "min_price": 35,
       "max_price": 450,
       "threshold": 0.27,
-      "good_threshold": 0.18
+      "good_threshold": 0.18,
+      "min_profit_eur": 35
+    },
+    {
+      "key": "camera-sony",
+      "label": "Камеры Sony Alpha",
+      "query": "sony systeemcamera",
+      "include_any": [
+        "sony"
+      ],
+      "exclude": [
+        "lens only",
+        "lens-only",
+        "objectief only",
+        "camera strap",
+        "camerariem",
+        "cage only",
+        "body cap",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "camera bag",
+        "cameratas",
+        "tas",
+        "bag",
+        "case",
+        "hoesje",
+        "cover",
+        "strap",
+        "battery only",
+        "accu only",
+        "charger",
+        "lader"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:a7\\s*(?:iv|v|c\\s*ii|iii)|a6700|a6400|zv-e10\\s*(?:ii)?|zv-1\\s*(?:ii)?)\\b",
+      "strict_group": true,
+      "min_price": 180,
+      "max_price": 3500,
+      "threshold": 0.28,
+      "good_threshold": 0.19,
+      "min_profit_eur": 100,
+      "min_roi": 0.22,
+      "require_regex": "\\b(?:a7\\s*(?:iv|v|c\\s*ii|iii)|a6700|a6400|zv-e10\\s*(?:ii)?|zv-1\\s*(?:ii)?)\\b"
+    },
+    {
+      "key": "camera-canon",
+      "label": "Камеры Canon EOS",
+      "query": "canon eos systeemcamera",
+      "include_any": [
+        "canon",
+        "eos"
+      ],
+      "exclude": [
+        "lens only",
+        "lens-only",
+        "objectief only",
+        "camera strap",
+        "camerariem",
+        "cage only",
+        "body cap",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "camera bag",
+        "cameratas",
+        "tas",
+        "bag",
+        "case",
+        "hoesje",
+        "cover",
+        "strap",
+        "battery only",
+        "accu only",
+        "charger",
+        "lader"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:eos\\s*r(?:50|10|7|8|6\\s*ii|5\\s*ii|6|5)|r50|r10|r7|r8|r6\\s*(?:mark\\s*)?ii|r5\\s*(?:mark\\s*)?ii|g7x\\s*(?:ii|iii))\\b",
+      "strict_group": true,
+      "min_price": 150,
+      "max_price": 5000,
+      "threshold": 0.28,
+      "good_threshold": 0.19,
+      "min_profit_eur": 100,
+      "min_roi": 0.22,
+      "require_regex": "\\b(?:eos\\s*r(?:50|10|7|8|6\\s*ii|5\\s*ii|6|5)|r50|r10|r7|r8|r6\\s*(?:mark\\s*)?ii|r5\\s*(?:mark\\s*)?ii|g7x\\s*(?:ii|iii))\\b"
+    },
+    {
+      "key": "camera-nikon",
+      "label": "Камеры Nikon Z",
+      "query": "nikon z systeemcamera",
+      "include_any": [
+        "nikon"
+      ],
+      "exclude": [
+        "lens only",
+        "lens-only",
+        "objectief only",
+        "camera strap",
+        "camerariem",
+        "cage only",
+        "body cap",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "camera bag",
+        "cameratas",
+        "tas",
+        "bag",
+        "case",
+        "hoesje",
+        "cover",
+        "strap",
+        "battery only",
+        "accu only",
+        "charger",
+        "lader"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:z\\s*(?:5\\s*ii|6\\s*iii|f|8|9|50\\s*ii|30))\\b",
+      "strict_group": true,
+      "min_price": 180,
+      "max_price": 6000,
+      "threshold": 0.28,
+      "good_threshold": 0.19,
+      "min_profit_eur": 100,
+      "min_roi": 0.22,
+      "require_regex": "\\b(?:z\\s*(?:5\\s*ii|6\\s*iii|f|8|9|50\\s*ii|30))\\b"
+    },
+    {
+      "key": "camera-fujifilm",
+      "label": "Камеры Fujifilm",
+      "query": "fujifilm x camera",
+      "include_any": [
+        "fujifilm",
+        "fuji"
+      ],
+      "exclude": [
+        "lens only",
+        "lens-only",
+        "objectief only",
+        "camera strap",
+        "camerariem",
+        "cage only",
+        "body cap",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "camera bag",
+        "cameratas",
+        "tas",
+        "bag",
+        "case",
+        "hoesje",
+        "cover",
+        "strap",
+        "battery only",
+        "accu only",
+        "charger",
+        "lader"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:x100\\s*vi|x-t\\s*(?:5|50|6)|x-s\\s*20|x-h\\s*2(?:s)?)\\b",
+      "strict_group": true,
+      "min_price": 200,
+      "max_price": 4000,
+      "threshold": 0.28,
+      "good_threshold": 0.19,
+      "min_profit_eur": 100,
+      "min_roi": 0.22,
+      "require_regex": "\\b(?:x100\\s*vi|x-t\\s*(?:5|50|6)|x-s\\s*20|x-h\\s*2(?:s)?)\\b"
+    },
+    {
+      "key": "camera-panasonic",
+      "label": "Камеры Panasonic Lumix",
+      "query": "panasonic lumix camera",
+      "include_any": [
+        "panasonic",
+        "lumix"
+      ],
+      "exclude": [
+        "lens only",
+        "lens-only",
+        "objectief only",
+        "camera strap",
+        "camerariem",
+        "cage only",
+        "body cap",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "camera bag",
+        "cameratas",
+        "tas",
+        "bag",
+        "case",
+        "hoesje",
+        "cover",
+        "strap",
+        "battery only",
+        "accu only",
+        "charger",
+        "lader"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:s5\\s*ii\\s*x?|s9|gh\\s*7|g9\\s*ii)\\b",
+      "strict_group": true,
+      "min_price": 180,
+      "max_price": 4500,
+      "threshold": 0.28,
+      "good_threshold": 0.19,
+      "min_profit_eur": 100,
+      "min_roi": 0.22,
+      "require_regex": "\\b(?:s5\\s*ii\\s*x?|s9|gh\\s*7|g9\\s*ii)\\b"
+    },
+    {
+      "key": "action-camera-gopro",
+      "label": "Экшн-камеры GoPro",
+      "query": "gopro hero camera",
+      "include_any": [
+        "gopro",
+        "hero"
+      ],
+      "exclude": [
+        "lens only",
+        "lens-only",
+        "objectief only",
+        "camera strap",
+        "camerariem",
+        "cage only",
+        "body cap",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "camera bag",
+        "cameratas",
+        "tas",
+        "bag",
+        "case",
+        "hoesje",
+        "cover",
+        "strap",
+        "battery only",
+        "accu only",
+        "charger",
+        "lader"
+      ],
+      "group_type": "model_required",
+      "group_regex": "\\b(?:hero\\s*(?:11|12|13|14)|max\\s*2)\\b",
+      "strict_group": true,
+      "min_price": 70,
+      "max_price": 900,
+      "threshold": 0.28,
+      "good_threshold": 0.19,
+      "min_profit_eur": 45,
+      "min_roi": 0.25,
+      "require_regex": "\\b(?:hero\\s*(?:11|12|13|14)|max\\s*2)\\b"
     }
   ],
-  "candidate_min_samples": 3
+  "candidate_min_samples": 3,
+  "profitability": {
+    "market_resale_factor": 0.95,
+    "buyer_negotiation_rate": 0.04,
+    "selling_fee_rate": 0.08,
+    "fixed_selling_cost_eur": 10,
+    "extra_cost_eur": 0,
+    "min_profit_eur": 40,
+    "min_roi": 0.2,
+    "strong_min_roi": 0.3,
+    "new_resale_factor": 0.62,
+    "retail_proxy_min_profit_eur": 70,
+    "retail_proxy_min_roi": 0.35,
+    "retail_reference_max_age_days": 45
+  }
 }

@@ -5,7 +5,8 @@ Deal Radar scans configured Marktplaats categories near a Dutch postcode, estima
 ## Architecture — no hosted database
 
 - `bot.py` — Python scanner, model-aware filters, rolling price comparison, and JSON feed generation. It counts unique listing IDs and duplicate search hits separately. Listings without enough comparable prices are kept as review candidates without a fabricated discount.
-- `config.json` — postcode, 50 km radius, 34 product searches, price limits, discount thresholds, up to 5 result pages per query (up to 500 results), candidate review rules, and a 30-day maximum listing age.
+- `retail_prices.json` — source-backed current-new-price references keyed by exact model group; references older than 45 days are ignored. This is a curated fallback cache, not a live web crawler. With neither Marktplaats comparables nor an exact fresh retail reference, a listing stays a candidate with no invented profit.
+- `config.json` — postcode, 50 km radius, 40 product searches, price limits, discount thresholds, up to 5 result pages per query (up to 500 results), candidate review rules, and a 30-day maximum listing age.
 - `.github/workflows/deals.yml` — scheduled scan every 10 minutes and manual dispatch.
 - `deals-data` branch — stores `data/deals.json` as a single replaceable commit; the workflow creates the branch on its first run.
 - `web/` — Next.js Mini App deployed from GitHub (Vercel and/or Netlify). `/api/deals` reads the GitHub JSON feed and caches it for one minute.
@@ -60,3 +61,6 @@ npm run dev
 - No Supabase and no dependency on your laptop remaining online.
 
 The catalog contains only real Marktplaats listings; no demo listings are generated. The homepage ranks strong verified deals first, good-value deals next, and candidates that need more price comparisons in a separate section. The scanner reviews up to 500 results per configured query within 50 km and accepts listings published within the previous 30 days; this is a broad search, not an exhaustive crawl of all Marktplaats listings. Market-price estimates use asking prices, not completed sales. Inspect the item, seller history, and safe payment options before buying.
+
+
+Profit estimates reserve 5% against the observed Marktplaats median, 4% for buyer negotiation, 8% for selling costs and €10 in fixed costs by default. Each category has a minimum net-profit and ROI requirement. Market estimates use asking prices rather than completed sales; profit is not guaranteed. Inspect each item and seller before purchase.
