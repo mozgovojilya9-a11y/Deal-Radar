@@ -233,6 +233,7 @@ class ScannerTests(unittest.TestCase):
             "Sony PS5 CFI-1216A",
         ):
             self.assertTrue(bot.title_matches_query(ps5, title), title)
+        self.assertNotEqual(bot.group_of(ps5, "Sony PS5 CFI-1216A"), "unknown")
         for title in (
             "PlayStation 5 FIFA 25 game",
             "PS5 God of War Ragnarok",

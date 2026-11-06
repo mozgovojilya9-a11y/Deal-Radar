@@ -22,7 +22,7 @@ FEED_PATH = os.environ.get("DEAL_FEED", os.path.join(HERE, "data", "deals.json")
 RETAIL_PATH = os.environ.get("DEAL_RETAIL_PRICES", os.path.join(HERE, "retail_prices.json"))
 API = "https://www.marktplaats.nl/lrp/api/search"
 SCANNER_DATA_VERSION = "4"
-FEED_SCHEMA_VERSION = 2
+FEED_SCHEMA_VERSION = 3
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
     "Accept": "application/json",

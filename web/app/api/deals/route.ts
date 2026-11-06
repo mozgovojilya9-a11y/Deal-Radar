@@ -84,7 +84,7 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) throw new Error(`GitHub feed returned HTTP ${response.status}`);
     const feed = await response.json() as Partial<DealFeed>;
-    const valuationReady = feed.valuationVersion === 2;
+    const valuationReady = feed.valuationVersion === 3;
     const category = request.nextUrl.searchParams.get("category") || "";
     const sortParam = request.nextUrl.searchParams.get("sort");
     const sort = sortParam === "newest" || sortParam === "price" || sortParam === "discount" ? sortParam : "profit";
