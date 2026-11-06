@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PLIST="\${HOME}/Library/LaunchAgents/com.dealradar.local-scan.plist"
-LOG_DIR="\${HOME}/Library/Logs/DealRadar"
+PLIST="${HOME}/Library/LaunchAgents/com.dealradar.local-scan.plist"
+LOG_DIR="${HOME}/Library/Logs/DealRadar"
 mkdir -p "$(dirname "$PLIST")" "$LOG_DIR"
 python3 - "$ROOT" "$PLIST" "$LOG_DIR" <<'PY'
 import os
@@ -29,4 +29,4 @@ launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 launchctl enable "gui/$(id -u)/com.dealradar.local-scan"
 echo "Installed: local Deal Radar scan every 15 minutes while Mac is logged in and Ollama is running."
-echo "Logs: \${LOG_DIR}"
+echo "Logs: ${LOG_DIR}"
