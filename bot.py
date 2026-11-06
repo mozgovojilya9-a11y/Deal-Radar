@@ -153,20 +153,29 @@ def group_of(q, text):
     found = sorted({norm(m.group(0)) for m in re.finditer(rx, text, re.I)})
     return "-".join(found) if found else "other"
 
-def accept(q, it, cfg):
-    title = it["title"].lower()
+def title_matches_query(q, title):
+    """Apply model-specific title filters to both live listings and cached feed cards."""
+    if not q:
+        return False
+    lowered = title.lower()
     inc = q.get("include_any")
-    if inc and not any(w.lower() in title for w in inc):
+    if inc and not any(w.lower() in lowered for w in inc):
         return False
     required = q.get("require_regex")
-    if required and not re.search(required, it["title"], re.I):
+    if required and not re.search(required, title, re.I):
         return False
     for w in q.get("exclude", []):
-        if re.search(r"(?<!\w)" + re.escape(w.lower()) + r"(?!\w)", title):
+        if re.search(r"(?<!\w)" + re.escape(w.lower()) + r"(?!\w)", lowered):
             return False
     for rx in q.get("exclude_regex", []):
-        if re.search(rx, it["title"], re.I):
+        if re.search(rx, title, re.I):
             return False
+    return True
+
+
+def accept(q, it, cfg):
+    if not title_matches_query(q, it["title"]):
+        return False
     if not it["id"] or it["price"] is None or it["price"] <= 0:
         return False
     if it["ptype"] not in (None, "FIXED"):
@@ -278,11 +287,16 @@ def run_once(cfg, db, dry=False):
     skipped_samples = 0
     skipped_discount = 0
     feed_doc = load_feed()
-    feed_deals = {
-        str(deal.get("listing_id")): deal
-        for deal in feed_doc.get("deals", [])
-        if isinstance(deal, dict) and deal.get("listing_id")
-    }
+    queries_by_key = {q["key"]: q for q in cfg["queries"]}
+    feed_deals = {}
+    for deal in feed_doc.get("deals", []):
+        if not isinstance(deal, dict) or not deal.get("listing_id"):
+            continue
+        # Remove cached cards that no longer match the active model filters.
+        q = queries_by_key.get(str(deal.get("category_key") or ""))
+        if not title_matches_query(q, deal.get("title") or ""):
+            continue
+        feed_deals[str(deal["listing_id"])] = deal
     for q in cfg["queries"]:
         qkey = q["key"]
         existing = db.execute("SELECT COUNT(*) FROM listings WHERE qkey=?", (qkey,)).fetchone()[0]
