@@ -252,7 +252,7 @@ export async function POST(request: NextRequest) {
   const requestedMaxPrice = Number(body.maxPrice);
   const maxPrice = Number.isFinite(requestedMaxPrice) && requestedMaxPrice >= 10
     ? requestedMaxPrice
-    : 5000;
+    : 800;
   const includeUsed = body.includeUsed !== false;
   const includeNew = body.includeNew !== false;
   if (!includeUsed && !includeNew) return NextResponse.json({ error: "Выбери хотя бы один режим: б/у или новый товар." }, { status: 400 });
