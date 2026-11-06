@@ -1182,7 +1182,7 @@ def calculate_resale_economics(q, asking_price, reference_price, sample_count, r
 
 def make_feed_deal(q, it, med, discount, flags, grp, status, market_samples, reason=None,
                    economics=None, reference_type="marktplaats", new_price=None, model_year=None,
-                   market_median_price=None):
+                   market_median_price=None, market_sources=None):
     confidence = "retail_proxy" if reference_type == "new_retail" else ("high" if market_samples >= q.get("min_samples", 8) else ("preliminary" if med is not None else "none"))
     economics = economics or {}
     return {
@@ -1200,6 +1200,7 @@ def make_feed_deal(q, it, med, discount, flags, grp, status, market_samples, rea
         "model_year": model_year,
         "status": status, "market_confidence": confidence,
         "market_samples": int(market_samples), "evaluation_reason": reason,
+        "market_sources": market_sources or [],
         "category_key": q["key"], "category_label": q["label"],
         "model_group": grp, "city": it.get("city") or "",
         "distance_km": round(float(it["dist_km"]), 2) if it.get("dist_km") is not None else None,
@@ -1423,6 +1424,7 @@ def run_once(cfg, db, dry=False):
                         reference = {
                             "source_url": (web_reference.get("sources") or [{}])[0].get("url", ""),
                             "rationale": web_reference.get("rationale", ""),
+                            "grounded": True,
                             "resale_factor": cfg.get("profitability", {}).get("market_resale_factor", 0.95),
                         }
                     elif web_reference.get("new_price_eur"):
@@ -1514,7 +1516,8 @@ def run_once(cfg, db, dry=False):
             feed_deals[listing_id] = make_feed_deal(
                 q, item, market_display_price, discount, flags, group, status, sample_count, reason,
                 economics=economics, reference_type=reference_type, new_price=new_price, model_year=model_year,
-                market_median_price=median_price if reference_type == "marktplaats" else None
+                market_median_price=median_price if reference_type == "marktplaats" else None,
+                market_sources=(web_reference or {}).get("sources", []) if reference and reference.get("grounded") else []
             )
             if ai_decision:
                 feed_deals[listing_id]["ai_review"] = {
