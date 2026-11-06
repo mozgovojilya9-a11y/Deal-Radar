@@ -28,8 +28,7 @@ function verifyInitData(raw: string, token: string): string | null {
   const now = Math.floor(Date.now() / 1000);
   if (authDate > now + 60 || now - authDate > 86400) return null;
   params.delete("hash");
-  const check = Array.from(params.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => k + "=" + v).join("
-");
+  const check = Array.from(params.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => k + "=" + v).join("\n");
   const secret = createHmac("sha256", "WebAppData").update(token).digest();
   const expected = createHmac("sha256", secret).update(check).digest();
   const actual = Buffer.from(hash, "hex");
