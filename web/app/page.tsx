@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import type { Deal, ScannerStats } from "@/lib/deals";
 
 type Tab = "home" | "strong" | "categories" | "saved" | "analytics" | "profile";
@@ -506,7 +507,7 @@ export default function HomePage() {
     }
   }
 
-  async function sendProductQuestion(event?: React.FormEvent<HTMLFormElement>) {
+  async function sendProductQuestion(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     const question = advisorInput.trim();
     if (!selected || !question || advisorLoading) return;
