@@ -1,10 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { createAiResearchPlan, getAiResearchModel, isAiResearchEnabled, reviewAiOffers } from "@/lib/ai-research";
+import { createAiResearchPlan, getAiResearchModel, isAiResearchEnabled, researchMarketValuation, reviewAiOffers } from "@/lib/ai-research";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 45;
+export const maxDuration = 60;
 
 type Condition = "used" | "new" | "unknown";
 type MatchType = "exact" | "variant" | "related" | "accessory" | "unrelated";
@@ -370,9 +370,41 @@ export async function POST(request: NextRequest) {
     ...newWeb.map((offer) => offer.price),
   ];
   const usedMedian = median(usedPrices);
-  const usedReferencePrice = conservativeQuartile(usedPrices);
+  const localUsedReferencePrice = conservativeQuartile(usedPrices);
   const newMedian = median(newPrices);
-  const expectedResale = usedReferencePrice !== null ? usedReferencePrice * 0.95 : newMedian !== null ? newMedian * 0.62 : null;
+  let marketValuation = null;
+  if (isAiResearchEnabled()) {
+    try {
+      marketValuation = await researchMarketValuation(
+        query,
+        [...relevantMarket, ...relevantWeb].map((offer) => ({
+          title: offer.title, price: offer.price, source: offer.source,
+          condition: offer.condition, url: offer.url,
+        })),
+        includeUsed,
+        includeNew,
+      );
+    } catch (error) {
+      console.warn("Deal Radar grounded market valuation failed:", error);
+    }
+  }
+  // Local comparable listings remain the primary evidence. Gemini can refine the
+  // estimate modestly, or provide a conservative fallback when local samples are thin.
+  const aiUsedPrice = marketValuation?.confidence >= 0.55
+    ? marketValuation.estimatedUsedPrice
+    : null;
+  const usedReferencePrice = localUsedReferencePrice !== null && aiUsedPrice !== null
+    ? Number((localUsedReferencePrice * 0.75 + aiUsedPrice * 0.25).toFixed(2))
+    : localUsedReferencePrice !== null
+      ? localUsedReferencePrice
+      : aiUsedPrice !== null
+        ? Number((aiUsedPrice * 0.90).toFixed(2))
+        : null;
+  const groundedNewPrice = marketValuation?.confidence >= 0.55
+    ? marketValuation.estimatedNewPrice
+    : null;
+  const newRetailReference = newMedian ?? groundedNewPrice;
+  const expectedResale = usedReferencePrice !== null ? usedReferencePrice * 0.95 : newRetailReference !== null ? newRetailReference * 0.62 : null;
   const netResale = expectedResale === null ? null : expectedResale * 0.96 * 0.92 - 10;
   const listings = relevantMarket.map((offer) => {
     const profit = netResale === null ? null : Number((netResale - offer.price).toFixed(2));
@@ -389,7 +421,8 @@ export async function POST(request: NextRequest) {
     ...(webSearchResults.some((result) => result.status === "rejected") ? ["Некоторые поисковые запросы временно не сработали; показаны доступные результаты."] : []),
     ...(usedPrices.length < 3 ? ["Мало актуальных б/у сравнений: не считайте прибыль подтверждённой."] : []),
     ...(!isAiResearchEnabled() ? ["Ручной веб-отчёт работает без облачного AI API. Бесплатная локальная AI-проверка выполняется сканером на вашем Mac через Ollama."] : []),
-    ...(isAiResearchEnabled() && !aiReview ? ["AI-проверка временно недоступна; результаты отфильтрованы резервными правилами совпадения."] : []),
+    ...(isAiResearchEnabled() && !aiReview ? ["AI-проверка совпадений временно недоступна; результаты отфильтрованы резервными правилами."] : []),
+    ...(isAiResearchEnabled() && !marketValuation ? ["Gemini Google Search не смог подтвердить отдельную рыночную оценку; использованы найденные цены объявлений."] : []),
     "Цены — цены предложений, не подтверждённые цены закрытых сделок. Проверяйте товар и продавца перед покупкой.",
   ];
 
@@ -399,14 +432,24 @@ export async function POST(request: NextRequest) {
       marktplaats: { count: relevantMarket.length, medianPrice: median(relevantMarket.map((offer) => offer.price)) },
       otherUsed: { count: usedWeb.length, medianPrice: median(usedWeb.map((offer) => offer.price)) },
       newRetail: { count: newWeb.length, medianPrice: newMedian },
+      geminiGrounded: { usedPrice: marketValuation?.estimatedUsedPrice ?? null, newPrice: marketValuation?.estimatedNewPrice ?? null, confidence: marketValuation?.confidence ?? 0 },
     },
     ai: {
       enabled: isAiResearchEnabled(),
-      available: Boolean(plan || aiReview),
+      available: Boolean(plan || aiReview || marketValuation),
       model: getAiResearchModel(),
       productSummary: plan?.productSummary || "",
       keyAttributes: plan?.keyAttributes || [],
-      marketSummary: aiReview?.summary || "",
+      marketSummary: marketValuation?.rationale || aiReview?.summary || "",
+      valuation: marketValuation ? {
+        estimatedUsedPrice: marketValuation.estimatedUsedPrice,
+        estimatedNewPrice: marketValuation.estimatedNewPrice,
+        confidence: marketValuation.confidence,
+        sampleCount: marketValuation.sampleCount,
+        rationale: marketValuation.rationale,
+        googleSearchQueries: marketValuation.googleSearchQueries,
+        groundedSources: marketValuation.groundedSources,
+      } : null,
       exactMatches: exactCount,
       variants: variantCount,
       reviewedOffers: aiReview?.offers.length || 0,
