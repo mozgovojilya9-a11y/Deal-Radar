@@ -65,53 +65,67 @@ function cleanStrings(value: unknown, limit: number, length: number): string[] {
     .slice(0, limit);
 }
 
+function toGeminiSchema(schema: JsonRecord): JsonRecord {
+  const typeMap: Record<string, string> = {
+    object: "OBJECT", array: "ARRAY", string: "STRING", number: "NUMBER",
+    integer: "INTEGER", boolean: "BOOLEAN",
+  };
+  const output: JsonRecord = {};
+  if (typeof schema.type === "string") output.type = typeMap[schema.type] || "STRING";
+  if (schema.description) output.description = schema.description;
+  if (Array.isArray(schema.required)) output.required = schema.required;
+  if (schema.properties && typeof schema.properties === "object") {
+    output.properties = Object.fromEntries(
+      Object.entries(schema.properties as Record<string, unknown>)
+        .map(([key, value]) => [key, toGeminiSchema(value as JsonRecord)]),
+    );
+  }
+  if (schema.items && typeof schema.items === "object") output.items = toGeminiSchema(schema.items as JsonRecord);
+  if (Array.isArray(schema.enum)) output.enum = schema.enum;
+  return output;
+}
+
 async function requestStructuredJson<T>(
-  name: string,
+  _name: string,
   schema: JsonRecord,
   system: string,
   user: string,
   maxTokens: number,
 ): Promise<T | null> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
 
-  const model = process.env.OPENAI_MODEL || "gpt-6-luna";
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const model = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+  const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/"
+    + encodeURIComponent(model) + ":generateContent";
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: {
-      Authorization: "Bearer " + apiKey,
+      "x-goog-api-key": apiKey,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model,
-      reasoning_effort: "none",
-      max_completion_tokens: maxTokens,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: { name, strict: true, schema },
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: [{ text: user }] }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: maxTokens,
+        responseMimeType: "application/json",
+        responseSchema: toGeminiSchema(schema),
       },
     }),
-    signal: AbortSignal.timeout(8500),
+    signal: AbortSignal.timeout(12000),
     cache: "no-store",
   });
 
   if (!response.ok) {
-    throw new Error("AI provider returned HTTP " + response.status);
+    throw new Error("Gemini provider returned HTTP " + response.status);
   }
   const payload = await response.json() as {
-    choices?: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> | null } }>;
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
-  const content = payload.choices?.[0]?.message?.content;
-  const raw = typeof content === "string"
-    ? content
-    : Array.isArray(content)
-      ? content.map((part) => part.text || "").join("")
-      : "";
-  if (!raw) throw new Error("AI provider returned an empty response");
+  const raw = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
+  if (!raw) throw new Error("Gemini provider returned an empty response");
   return JSON.parse(raw) as T;
 }
 
@@ -194,9 +208,9 @@ export async function reviewAiOffers(
 }
 
 export function isAiResearchEnabled(): boolean {
-  return Boolean(process.env.OPENAI_API_KEY);
+  return Boolean(process.env.GEMINI_API_KEY);
 }
 
 export function getAiResearchModel(): string {
-  return process.env.OPENAI_MODEL || "gpt-6-luna";
+  return process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 }
