@@ -65,16 +65,65 @@ function cleanStrings(value: unknown, limit: number, length: number): string[] {
     .slice(0, limit);
 }
 
+function toGeminiSchema(schema: JsonRecord): JsonRecord {
+  const typeMap: Record<string, string> = {
+    object: "OBJECT", array: "ARRAY", string: "STRING", number: "NUMBER",
+    integer: "INTEGER", boolean: "BOOLEAN",
+  };
+  const output: JsonRecord = {};
+  if (typeof schema.type === "string") output.type = typeMap[schema.type] || "STRING";
+  if (Array.isArray(schema.required)) output.required = schema.required;
+  if (schema.properties && typeof schema.properties === "object") {
+    output.properties = Object.fromEntries(
+      Object.entries(schema.properties as Record<string, unknown>)
+        .map(([key, value]) => [key, toGeminiSchema(value as JsonRecord)]),
+    );
+  }
+  if (schema.items && typeof schema.items === "object") output.items = toGeminiSchema(schema.items as JsonRecord);
+  if (Array.isArray(schema.enum)) output.enum = schema.enum;
+  return output;
+}
+
 async function requestStructuredJson<T>(
   _name: string,
-  _schema: JsonRecord,
-  _system: string,
-  _user: string,
-  _maxTokens: number,
+  schema: JsonRecord,
+  system: string,
+  user: string,
+  maxTokens: number,
 ): Promise<T | null> {
-  // The hosted web app deliberately makes no paid or metered AI calls.
-  // Free local Ollama analysis is performed by the scheduled/local Python scanner.
-  return null;
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  const model = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+  const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/"
+    + encodeURIComponent(model) + ":generateContent";
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "x-goog-api-key": apiKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents: [{ role: "user", parts: [{ text: user }] }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: maxTokens,
+        responseMimeType: "application/json",
+        responseSchema: toGeminiSchema(schema),
+      },
+    }),
+    signal: AbortSignal.timeout(12000),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error("Gemini API returned HTTP " + response.status);
+  }
+  const payload = await response.json() as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const raw = payload.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") || "";
+  if (!raw) throw new Error("Gemini API returned an empty response");
+  return JSON.parse(raw) as T;
 }
 
 export async function createAiResearchPlan(
@@ -156,9 +205,9 @@ export async function reviewAiOffers(
 }
 
 export function isAiResearchEnabled(): boolean {
-  return false;
+  return Boolean(process.env.GEMINI_API_KEY);
 }
 
 export function getAiResearchModel(): string {
-  return "Local Ollama (scanner only)";
+  return process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 }
