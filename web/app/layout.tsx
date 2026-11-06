@@ -1,6 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
-import "./globals.css";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const designDocument = readFileSync(join(process.cwd(), "design", "index.html"), "utf8");
+const designCss = designDocument.match(/<style>([\\s\\S]*?)<\\/style>/i)?.[1];
+if (!designCss) throw new Error("Design CSS was not found in design/index.html");
 
 export const metadata: Metadata = {
   title: "Deal Radar — умный поиск выгодных покупок",
@@ -19,6 +24,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ru">
+      <head><style dangerouslySetInnerHTML={{ __html: designCss }} /></head>
       <body>
         <Script src="https://telegram.org/js/telegram-web-app.js?64" strategy="beforeInteractive" />
         {children}
