@@ -8,6 +8,7 @@ on:
       - "bot.py"
       - "config.json"
       - "tests/**"
+      - "scripts/**"
       - ".github/workflows/mini-app-build.yml"
   pull_request:
     branches: [main]
@@ -42,6 +43,7 @@ jobs:
         run: |
           python -m py_compile bot.py
           python -m json.tool config.json > /dev/null
+          bash -n scripts/run_local_radar.sh scripts/install_macos_schedule.sh
       - name: Scanner tests (offline)
         working-directory: .
         run: python -m unittest discover -s tests
