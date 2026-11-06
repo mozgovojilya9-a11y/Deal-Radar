@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Marktplaats deal scanner -> in-app JSON catalog. Only the Python standard library."""
+# Gemini free-tier integration is configured through GEMINI_API_KEY; no paid API is used.
 import argparse
 import json
 import os
