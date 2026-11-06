@@ -859,9 +859,12 @@ def get_ai_search_variants(db, q):
         "SELECT fingerprint, queries_json, checked_at FROM ai_search_plans WHERE qkey=?",
         (qkey,),
     ).fetchone()
-    if cached and cached[0] == fingerprint and now - int(cached[2]) < 7 * 86400:
+    if cached and cached[0] == fingerprint:
         try:
-            return clean_ai_search_variants(q, json.loads(cached[1]), limit=2)
+            cached_queries = json.loads(cached[1])
+            cache_ttl = 7 * 86400 if cached_queries else 6 * 3600
+            if now - int(cached[2]) < cache_ttl:
+                return clean_ai_search_variants(q, cached_queries, limit=2)
         except (TypeError, json.JSONDecodeError):
             pass
     try:
@@ -883,7 +886,7 @@ def review_listings_with_ai(db, q, items, max_new=None):
     """Use cached AI decisions; only send new/changed listings to the model."""
     if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("OLLAMA_HOST")):
         return {}
-    max_new = max_new or int(os.environ.get("AI_REVIEW_MAX_PER_QUERY", "8"))
+    max_new = max_new or int(q.get("ai_review_max_per_query") or os.environ.get("AI_REVIEW_MAX_PER_QUERY", "4"))
     max_new = max(1, min(max_new, 24))
     key = str(q.get("key") or "")
     decisions = {}
