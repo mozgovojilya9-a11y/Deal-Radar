@@ -366,7 +366,7 @@ export default function HomePage() {
             {[
               { label: "Не подошли по названию / модели", value: scannerStats?.rejectedTitle ?? 0, color: "age" },
               { label: "В объявлении есть внешний сайт", value: scannerStats?.rejectedExternalLink ?? 0, color: "risk" },
-              { label: "Устаревшая / нераспознанная модель ТВ", value: scannerStats?.rejectedOldModel ?? 0, color: "age" }
+              { label: "Устаревшая / нераспознанная модель ТВ", value: scannerStats?.rejectedOldModel ?? 0, color: "age" },
               { label: "Цена или формат цены не подошли", value: (scannerStats?.rejectedPriceType ?? 0) + (scannerStats?.rejectedPriceRange ?? 0) + (scannerStats?.rejectedInvalid ?? 0), color: "risk" },
               { label: "За пределами радиуса", value: scannerStats?.rejectedDistance ?? 0, color: "samples" },
               { label: "Старше 30 дней / дата неизвестна", value: (scannerStats?.rejectedAge ?? 0) + (scannerStats?.rejectedDateUnknown ?? 0), color: "age" },
