@@ -695,7 +695,7 @@ def run_once(cfg, db, dry=False):
                     reason = f"Предварительная оценка по {sample_count} похожим объявлениям; нужна большая выборка"
                 elif reference_type == "insufficient_data":
                     metrics["candidateNoMarket"] += 1
-                    reason = "Нет средней цены Marktplaats и актуальной цены нового товара для точного сравнения; прибыль не выдумывается"
+                    reason = "Недостаточно данных: нет средней цены Marktplaats и актуальной цены нового товара для точного сравнения; прибыль не выдумывается"
                 elif economics and economics["profitable"]:
                     reason = "Цена нового товара даёт ориентир, но спрос и стоимость б/у нужно подтвердить"
                 else:
