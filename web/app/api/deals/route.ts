@@ -102,7 +102,8 @@ export async function GET(request: NextRequest) {
       deals,
       count: deals.length,
       updatedAt: typeof feed.updatedAt === "string" ? feed.updatedAt : null,
-      scannedAt: typeof feed.scannedAt === "string" ? feed.scannedAt : null
+      scannedAt: typeof feed.scannedAt === "string" ? feed.scannedAt : null,
+      scannerStats: feed.scannerStats && typeof feed.scannerStats === "object" ? feed.scannerStats : null
     }, {
       headers: {
         "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",

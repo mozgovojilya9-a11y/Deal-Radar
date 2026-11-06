@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Deal } from "@/lib/deals";
+import type { Deal, ScannerStats } from "@/lib/deals";
 
-type Tab = "home" | "categories" | "saved" | "profile";
+type Tab = "home" | "categories" | "saved" | "analytics" | "profile";
 type Sort = "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
 type UserSettings = { categories: string[]; minDiscount: number; maxDistanceKm: number | null; minPrice: number | null; maxPrice: number | null };
@@ -137,6 +137,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [scannerStats, setScannerStats] = useState<ScannerStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const requestId = useRef(0);
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
@@ -195,6 +196,7 @@ export default function HomePage() {
       if (id !== requestId.current) return;
       setDeals(Array.isArray(data.deals) ? data.deals as Deal[] : []);
       setUpdatedAt(data.scannedAt || data.updatedAt || new Date().toISOString());
+      setScannerStats(data.scannerStats && typeof data.scannerStats === "object" ? data.scannerStats as ScannerStats : null);
       setError("");
     } catch (err) {
       if (id !== requestId.current) return;
@@ -283,7 +285,7 @@ export default function HomePage() {
         </div>
       </header>
 
-      <section className="hero">
+      <section className={"hero" + (tab === "home" ? "" : " hero-compact")}>
         <div className="hero-copy">
           <div className="eyebrow"><span className="eyebrow-line" /> RADAR IS ACTIVE</div>
           <h1>Лови цену.<br /><em>Не переплачивай.</em></h1>
@@ -307,12 +309,60 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="stats-grid">
-        <div className="stat-card"><span className="stat-label">В ленте сейчас</span><strong>{deals.length}</strong><span className="stat-caption">актуальных предложений</span></div>
-        <div className="stat-card accent-stat"><span className="stat-label">Максимальная скидка</span><strong>{deals.length ? Math.round(strongest * 100) + "%" : "—"}</strong><span className="stat-caption">от наблюдаемой цены рынка</span></div>
-        <div className="stat-card"><span className="stat-label">Каталог обновлён</span><strong className="stat-time">{updatedAt ? new Date(updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "—"}</strong><span className="stat-caption">последнее сканирование · {ageLabel(updatedAt)}</span></div>
+      <section className="stats-grid scanner-overview">
+        <div className="stat-card"><span className="stat-label">Проверено сканером</span><strong>{scannerStats ? scannerStats.checked.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">объявлений за последний запуск</span></div>
+        <div className="stat-card accent-stat"><span className="stat-label">Выгодных в каталоге</span><strong>{deals.length}</strong><span className="stat-caption">прошли оценку цены и фильтры</span></div>
+        <div className="stat-card"><span className="stat-label">Кандидатов оценено</span><strong>{scannerStats ? scannerStats.candidates.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">после первичного отбора</span></div>
+        <div className="stat-card"><span className="stat-label">Отсеяно правилами</span><strong>{scannerStats ? scannerStats.rejectedTotal.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">возраст, риски, данные и скидка</span></div>
       </section>
 
+      {tab === "analytics" ? (
+        <section className="content-section analytics-section">
+          <div className="section-heading">
+            <div><div className="eyebrow">SCANNER PERFORMANCE</div><h2>Аналитика сканера</h2><p>Результаты последнего запуска Marktplaats scanner</p></div>
+            <span className="scanner-live"><i /> {scannerStats ? "Данные получены" : "Ожидаем первый отчёт"}</span>
+          </div>
+          <div className="analytics-summary">
+            <div className="analytics-primary"><span>Объявлений проверено</span><strong>{scannerStats ? scannerStats.checked.toLocaleString("ru-RU") : "—"}</strong><small>{scannerStats ? "за один запуск · " + ageLabel(scannerStats.finishedAt) : "статистика появится после публикации нового сканирования"}</small></div>
+            <div className="analytics-primary green"><span>Выгодных добавлено за запуск</span><strong>{scannerStats ? scannerStats.newDeals.toLocaleString("ru-RU") : "—"}</strong><small>Всего активных предложений в каталоге: {deals.length}</small></div>
+          </div>
+          <div className="analytics-grid">
+            <div className="analytics-card"><span>Прошли базовые фильтры</span><strong>{scannerStats ? scannerStats.accepted.toLocaleString("ru-RU") : "—"}</strong><small>подходящие по модели, цене и ключевым словам</small></div>
+            <div className="analytics-card"><span>Кандидаты оценены</span><strong>{scannerStats ? scannerStats.candidates.toLocaleString("ru-RU") : "—"}</strong><small>для сравнения с рыночной стоимостью</small></div>
+            <div className="analytics-card"><span>Ошибки поисковых запросов</span><strong>{scannerStats ? scannerStats.failedQueries + " / " + scannerStats.queryCount : "—"}</strong><small>ошибившиеся запросы из общего числа</small></div>
+            <div className="analytics-card"><span>Максимальная скидка в каталоге</span><strong>{deals.length ? Math.round(strongest * 100) + "%" : "—"}</strong><small>от ориентировочной рыночной цены</small></div>
+          </div>
+          <div className="rejection-panel">
+            <div className="rejection-heading"><div><div className="eyebrow">FILTER BREAKDOWN</div><h3>Почему объявления отсеялись</h3></div><strong>{scannerStats ? scannerStats.rejectedTotal.toLocaleString("ru-RU") : "—"} <small>всего</small></strong></div>
+            {[
+              { label: "Слишком старые", value: scannerStats?.rejectedAge ?? 0, color: "age" },
+              { label: "Подозрительные / рисковые", value: scannerStats?.rejectedRisk ?? 0, color: "risk" },
+              { label: "Недостаточно рыночных данных", value: scannerStats?.rejectedSamples ?? 0, color: "samples" },
+              { label: "Скидка ниже заданного порога", value: scannerStats?.rejectedDiscount ?? 0, color: "discount" }
+            ].map((item) => {
+              const total = scannerStats?.rejectedTotal ?? 0;
+              const width = total > 0 ? Math.min(100, (item.value / total) * 100) : 0;
+              return <div className="rejection-row" key={item.color}><div className="rejection-label"><span>{item.label}</span><strong>{scannerStats ? item.value.toLocaleString("ru-RU") : "—"}</strong></div><div className="rejection-track"><i className={"rejection-fill " + item.color} style={{ width: width + "%" }} /></div></div>;
+            })}
+            <p className="analytics-note">Счётчики относятся к последнему запуску. Повторные объявления в разных поисковых категориях могут учитываться в общем количестве проверок более одного раза.</p>
+          </div>
+        </section>
+      ) : null}
+
+      {tab === "categories" ? (
+        <section className="content-section categories-section">
+          <div className="section-heading"><div><div className="eyebrow">BROWSE BY CATEGORY</div><h2>Категории товаров</h2><p>Выбери категорию, чтобы посмотреть подходящие предложения</p></div><span className="category-total">{deals.length} в каталоге</span></div>
+          <div className="category-browser">
+            <button className={"category-tile all-category" + (!category ? " selected" : "")} onClick={() => { setCategory(""); setTab("home"); }}><span className="category-symbol">✦</span><span><strong>Все категории</strong><small>{deals.length} предложений</small></span><b>↗</b></button>
+            {CATEGORIES.filter((item) => item.key).map((item) => {
+              const count = deals.filter((deal) => deal.category_key === item.key).length;
+              return <button className="category-tile" key={item.key} onClick={() => { setCategory(item.key); setTab("home"); }}><span className="category-symbol">{item.icon}</span><span><strong>{item.label}</strong><small>{count} {count === 1 ? "предложение" : "предложений"}</small></span><b>↗</b></button>;
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {(tab === "home" || tab === "saved") ? (
       <section className="content-section" id="deals">
         <div className="section-heading">
           <div>
@@ -385,6 +435,8 @@ export default function HomePage() {
         )}
       </section>
 
+      ) : null}
+
       <footer className="app-footer">
         <div className="footer-brand">DEAL RADAR <span>•</span> NL</div>
         <p>Цены объявлений — ориентир, а не гарантия цены продажи. Проверяй товар и продавца перед покупкой.</p>
@@ -393,7 +445,8 @@ export default function HomePage() {
 
       <nav className="bottom-nav" aria-label="Основная навигация">
         <button className={tab === "home" ? "nav-active" : ""} onClick={() => setTab("home")}><span>⌂</span>Главная</button>
-        <button className={tab === "categories" ? "nav-active" : ""} onClick={() => { setTab("categories"); document.getElementById("deals")?.scrollIntoView({ behavior: "smooth" }); }}><span>▦</span>Категории</button>
+        <button className={tab === "categories" ? "nav-active" : ""} onClick={() => setTab("categories")}><span>▦</span>Категории</button>
+        <button className={tab === "analytics" ? "nav-active" : ""} onClick={() => setTab("analytics")}><span>▥</span>Аналитика</button>
         <button className={tab === "saved" ? "nav-active" : ""} onClick={() => setTab("saved")}><span>♡</span>Избранное{saved.length ? <i>{saved.length}</i> : null}</button>
         <button className={tab === "profile" ? "nav-active" : ""} onClick={() => setTab("profile")}><span>◉</span>Профиль</button>
       </nav>

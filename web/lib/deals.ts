@@ -18,8 +18,24 @@ export type Deal = {
   active: boolean;
 };
 
+export type ScannerStats = {
+  checked: number;
+  accepted: number;
+  candidates: number;
+  newDeals: number;
+  rejectedAge: number;
+  rejectedRisk: number;
+  rejectedSamples: number;
+  rejectedDiscount: number;
+  rejectedTotal: number;
+  failedQueries: number;
+  queryCount: number;
+  finishedAt: string;
+};
+
 export type DealFeed = {
   updatedAt: string | null;
   scannedAt?: string | null;
+  scannerStats?: ScannerStats | null;
   deals: Deal[];
 };

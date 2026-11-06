@@ -409,6 +409,20 @@ def run_once(cfg, db, dry=False):
     feed_doc = {
         "updatedAt": now_iso if changed or not feed_doc.get("updatedAt") else feed_doc["updatedAt"],
         "scannedAt": now_iso,
+        "scannerStats": {
+            "checked": total_checked,
+            "accepted": total_accepted,
+            "candidates": total_candidates,
+            "newDeals": sent_count,
+            "rejectedAge": skipped_age,
+            "rejectedRisk": skipped_risk,
+            "rejectedSamples": skipped_samples,
+            "rejectedDiscount": skipped_discount,
+            "rejectedTotal": skipped_age + skipped_risk + skipped_samples + skipped_discount,
+            "failedQueries": fails,
+            "queryCount": len(cfg["queries"]),
+            "finishedAt": now_iso,
+        },
         "deals": fresh_deals,
     }
     if dry:
