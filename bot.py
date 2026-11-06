@@ -11,7 +11,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.environ.get("DEAL_CONFIG", os.path.join(HERE, "config.json"))
@@ -136,14 +136,74 @@ def parse_listing(l):
         "date": l.get("date"),
         "url": url,
     }
-def age_hours(s):
+def parse_listing_datetime(value):
+    """Parse ISO timestamps and the Dutch relative/date labels used by Marktplaats."""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    now = datetime.now(timezone.utc)
+
     try:
-        dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
-    except Exception:
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        pass
+
+    text = raw.lower().strip().rstrip(".")
+    relative_days = {
+        "vandaag": 0, "today": 0,
+        "gisteren": 1, "yesterday": 1,
+        "eergisteren": 2, "day before yesterday": 2,
+    }
+    if text in relative_days:
+        days = relative_days[text]
+        return now - timedelta(days=days)
+    relative_match = re.match(r"^(\d+)\s+(?:dag|dagen)\s+geleden$", text)
+    if relative_match:
+        return now - timedelta(days=int(relative_match.group(1)))
+    english_relative = re.match(r"^(\d+)\s+days?\s+ago$", text)
+    if english_relative:
+        return now - timedelta(days=int(english_relative.group(1)))
+
+    months = {
+        "jan": 1, "januari": 1, "feb": 2, "februari": 2,
+        "mrt": 3, "maa": 3, "maart": 3, "mar": 3,
+        "apr": 4, "april": 4, "mei": 5, "may": 5,
+        "jun": 6, "juni": 6, "jul": 7, "juli": 7,
+        "aug": 8, "augustus": 8, "sep": 9, "sept": 9, "september": 9,
+        "okt": 10, "oktober": 10, "oct": 10, "october": 10,
+        "nov": 11, "november": 11, "dec": 12, "december": 12,
+    }
+    match = re.match(r"^(\d{1,2})\s+([a-z]+)\s+(\d{2,4})$", text)
+    if match and match.group(2) in months:
+        day, month, year = int(match.group(1)), months[match.group(2)], int(match.group(3))
+        year += 2000 if year < 100 else 0
+        try:
+            # Marktplaats often provides a calendar date without a time.
+            # Use the end of that date, capped at now for today's listings.
+            dt = datetime(year, month, day, 23, 59, 59, tzinfo=timezone.utc)
+            return min(dt, now)
+        except ValueError:
+            return None
+
+    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y", "%d-%m-%y", "%d/%m/%y"):
+        try:
+            dt = datetime.strptime(text, fmt).replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+            return min(dt, now)
+        except ValueError:
+            continue
+    return None
+
+
+def age_hours(s):
+    dt = parse_listing_datetime(s)
+    if dt is None:
         return None
+    return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
 
 def group_of(q, text):
     rx = q.get("group_regex")

@@ -24,14 +24,54 @@ function isDeal(value: unknown): value is Deal {
     && typeof deal.detected_at === "string";
 }
 
+function listingTimestamp(value: string | null | undefined): number {
+  if (!value) return Number.NaN;
+  const direct = new Date(value).getTime();
+  if (Number.isFinite(direct)) return direct;
+
+  const text = value.trim().toLowerCase().replace(/\\.$/, "");
+  const now = Date.now();
+  const relativeDays: Record<string, number> = {
+    vandaag: 0, today: 0, gisteren: 1, yesterday: 1,
+    eergisteren: 2, "day before yesterday": 2
+  };
+  if (Object.prototype.hasOwnProperty.call(relativeDays, text)) {
+    return now - relativeDays[text] * 24 * 60 * 60 * 1000;
+  }
+  const relative = text.match(/^(\\d+)\\s+(?:dag|dagen)\\s+geleden$/)
+    || text.match(/^(\\d+)\\s+days?\\s+ago$/);
+  if (relative) return now - Number(relative[1]) * 24 * 60 * 60 * 1000;
+
+  const months: Record<string, number> = {
+    jan: 1, januari: 1, feb: 2, februari: 2, mrt: 3, maa: 3, maart: 3, mar: 3,
+    apr: 4, april: 4, mei: 5, may: 5, jun: 6, juni: 6, jul: 7, juli: 7,
+    aug: 8, augustus: 8, sep: 9, sept: 9, september: 9,
+    okt: 10, oktober: 10, oct: 10, october: 10, nov: 11, november: 11,
+    dec: 12, december: 12
+  };
+  const match = text.match(/^(\\d{1,2})\\s+([a-z]+)\\s+(\\d{2,4})$/);
+  if (match && months[match[2]]) {
+    const year = Number(match[3]) < 100 ? 2000 + Number(match[3]) : Number(match[3]);
+    const endOfDay = Date.UTC(year, months[match[2]] - 1, Number(match[1]), 23, 59, 59);
+    return Math.min(endOfDay, now);
+  }
+
+  const numeric = text.match(/^(\\d{1,2})[-/.](\\d{1,2})[-/.](\\d{2,4})$/);
+  if (numeric) {
+    const year = Number(numeric[3]) < 100 ? 2000 + Number(numeric[3]) : Number(numeric[3]);
+    return Math.min(Date.UTC(year, Number(numeric[2]) - 1, Number(numeric[1]), 23, 59, 59), now);
+  }
+  return Number.NaN;
+}
+
 function isRecent(deal: Deal) {
-  const postedAt = deal.posted_at ? new Date(deal.posted_at).getTime() : Number.NaN;
+  // Prefer the original Marktplaats date, including Dutch labels such as "18 okt 26" and "Eergisteren".
+  const postedAt = listingTimestamp(deal.posted_at);
   const detectedAt = new Date(deal.detected_at).getTime();
-  // Enforce the 7-day limit against the original listing date, not when our scanner found it.
-  const listingTimestamp = Number.isFinite(postedAt) ? postedAt : detectedAt;
-  return Number.isFinite(listingTimestamp)
-    && Date.now() - listingTimestamp <= MAX_FEED_AGE_HOURS * 60 * 60 * 1000
-    && listingTimestamp <= Date.now() + 5 * 60 * 1000;
+  const publishedAt = Number.isFinite(postedAt) ? postedAt : detectedAt;
+  return Number.isFinite(publishedAt)
+    && Date.now() - publishedAt <= MAX_FEED_AGE_HOURS * 60 * 60 * 1000
+    && publishedAt <= Date.now() + 5 * 60 * 1000;
 }
 
 export async function GET(request: NextRequest) {

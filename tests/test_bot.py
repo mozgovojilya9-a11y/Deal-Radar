@@ -4,7 +4,7 @@ import sys
 import tempfile
 import urllib.request
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -79,13 +79,20 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual([d["listing_id"] for d in bot.load_feed()["deals"]], ["99"])
 
     def test_listing_older_than_36_hours_but_under_7_days_is_eligible(self):
-        posted = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=6)).isoformat()
+        posted = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
         seed = [listing(f"old-{i}", 400, date=posted) for i in range(1, 7)]
         deal = listing("old-deal", 250, date=posted, title="PS5 met 2 controllers")
         self.assertTrue(self.run_scan(seed + [deal]))
         feed = bot.load_feed()
         self.assertEqual([item["listing_id"] for item in feed["deals"]], ["old-deal"])
         self.assertEqual(feed["deals"][0]["posted_at"], posted)
+
+    def test_dutch_marktplaats_date_labels_are_parsed(self):
+        now_label = f"{datetime.now(timezone.utc).day} {['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'][datetime.now(timezone.utc).month - 1]} {datetime.now(timezone.utc).year % 100:02d}"
+        self.assertLess(bot.age_hours(now_label), 1)
+        self.assertGreaterEqual(bot.age_hours("Eergisteren"), 47)
+        self.assertLessEqual(bot.age_hours("Eergisteren"), 49)
+        self.assertGreater(bot.age_hours("18 okt 26"), 7 * 24)
 
     def test_model_filters_reject_old_generations(self):
         rayban = {
