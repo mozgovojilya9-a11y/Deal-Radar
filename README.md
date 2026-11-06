@@ -19,24 +19,37 @@ Supabase is not used or required. Your laptop does not need to be running.
 
 Open **Actions → deals → Run workflow** to start a manual scan. The scanner needs no GitHub secrets: it reads Marktplaats and publishes the JSON feed. The workflow needs repository Contents read/write permission. It runs about every 10 minutes; GitHub may delay scheduled starts. Each category query scans up to 5 pages × 100 results, not every listing on the entire Marktplaats site. Listings older than 30 days are excluded.
 
-## AI product matching
+## Free local AI product matching
 
-Deal Radar can use OpenAI for query expansion and exact-product identity checks. The AI does not invent prices and does not calculate profit: market medians, resale estimates, ROI, and fees remain deterministic calculations from source-backed offers. Accessories and unrelated products are filtered; materially different variants are kept separate from exact-model price samples. AI decisions in the scheduled scanner are cached by listing text so the same unchanged listing is not repeatedly sent to the model.
+Deal Radar makes no paid AI API calls. The scheduled GitHub Actions scanner uses deterministic matching and price calculations, so it works without API keys. For stronger product-identity checks at no API cost, run the scanner locally on a Mac with [Ollama](https://ollama.com/download) and the `qwen2.5:3b` model. The model runs on your own computer; prompts and listing text are not sent to a hosted AI provider.
 
-### Enable AI in Vercel
+### One-time setup on macOS
 
-In **Vercel → Project → Settings → Environment Variables**, add:
+1. Install the free Ollama app: https://ollama.com/download
+2. Open Ollama and let its local service start.
+3. In Terminal, from the Deal Radar repository, run:
 
-- `OPENAI_API_KEY` — your server-side OpenAI API key.
-- `OPENAI_MODEL` — optional; defaults to `gpt-6-luna`.
+```bash
+ollama pull qwen2.5:3b
+bash scripts/run_local_radar.sh
+```
 
-Apply it to Production (and Preview if needed), then redeploy. Do not use a `NEXT_PUBLIC_` prefix.
+The first model download can be several GB. The scanner stores its local review cache and SQLite database under `~/Library/Application Support/DealRadar`. It publishes only the resulting JSON feed to the existing `deals-data` branch. Your Git remote must already be authenticated for push access.
 
-### Enable AI in the scheduled scanner
+### Optional automatic scans
 
-In **GitHub → Deal-Radar → Settings → Secrets and variables → Actions**, add a repository secret named `OPENAI_API_KEY` with the same key. The GitHub Actions scanner will then use AI reviews automatically. `OPENAI_MODEL` defaults to `gpt-6-luna`; `AI_REVIEW_MAX_PER_QUERY` defaults to 12 new/changed listings per category per scan.
+Run `bash scripts/install_macos_schedule.sh` to install a macOS LaunchAgent that runs the local scan every 15 minutes while the Mac is logged in and Ollama is running. Keep the Ollama app open. To remove the schedule:
 
-The project continues to work without an API key: existing search and rule-based matching remain active, and the manual research report clearly marks AI as disabled. AI output is treated as a product-match signal only; it cannot set offer prices, median values, or calculated profit.
+```bash
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.dealradar.local-scan.plist
+rm ~/Library/LaunchAgents/com.dealradar.local-scan.plist
+```
+
+The web-hosted manual research report deliberately uses free search and deterministic matching; local Ollama AI reviews are performed by the scanner and saved into the published deal feed. Price medians, resale estimates, fees and ROI are always calculated by code, never invented by the model.
+
+### Cost and availability
+
+No OpenAI/Gemini key, paid AI subscription, or paid model endpoint is required. Ollama and the model are free to run locally, but use your computer's memory, electricity and disk space. Local AI scans only happen while the Mac is awake, logged in, and Ollama is running. GitHub and Vercel free plans still have their own usage limits and terms.
 
 ## Vercel
 
