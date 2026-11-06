@@ -1317,5 +1317,6 @@
     "retail_proxy_min_profit_eur": 70,
     "retail_proxy_min_roi": 0.35,
     "retail_reference_max_age_days": 45
-  }
+  },
+  "nationwide_search": true
 }
