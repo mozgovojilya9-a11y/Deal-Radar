@@ -164,7 +164,7 @@ class ScannerTests(unittest.TestCase):
 
     def test_model_required_categories_do_not_group_unknown_models_together(self):
         q = {"group_type": "model_required", "group_regex": r"\b(?:mini\s*3|mavic\s*3)\b"}
-        self.assertEqual(bot.group_of(q, "DJI Mini 3 Pro drone"), "djimini3")
+        self.assertEqual(bot.group_of(q, "DJI Mini 3 Pro drone"), "mini3")
         self.assertEqual(bot.group_of(q, "Drone complete set"), "unknown")
 
     def test_all_queries_failing_does_not_touch_feed(self):

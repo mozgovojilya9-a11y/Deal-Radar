@@ -219,7 +219,7 @@ def group_of(q, text):
         )
         if not size_match:
             size_match = re.search(
-                r"\b(?:ue|qe|qn|kd|oled|pus|qned|tu|du|uq|un)(32|40|42|43|48|49|50|55|58|60|65|70|75|77|80|83|85|86|98)\b",
+                r"\b(?:ue|qe|qn|kd|oled|pus|qned|tu|du|uq|un)(32|40|42|43|48|49|50|55|58|60|65|70|75|77|80|83|85|86|98)(?=[a-z0-9]|\b)",
                 lowered,
             )
         size = size_match.group(1) if size_match else None
@@ -444,13 +444,16 @@ def run_once(cfg, db, dry=False):
             age = age_hours(item["date"])
             if age is None:
                 metrics["rejectedDateUnknown"] += 1
+                feed_deals.pop(listing_id, None)
                 continue
             if age < -5 / 60 or age > cfg.get("max_age_hours", 720):
                 metrics["rejectedAge"] += 1
+                feed_deals.pop(listing_id, None)
                 continue
             flags = risks(item)
             if flags is None:
                 metrics["rejectedRisk"] += 1
+                feed_deals.pop(listing_id, None)
                 continue
 
             if group == "unknown":
@@ -476,6 +479,7 @@ def run_once(cfg, db, dry=False):
                     metrics["goodDeals"] += 1
                 else:
                     metrics["rejectedDiscount"] += 1
+                    feed_deals.pop(listing_id, None)
                     continue
             else:
                 metrics["reviewCandidates"] += 1
