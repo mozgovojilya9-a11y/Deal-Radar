@@ -346,7 +346,7 @@ export async function POST(request: NextRequest) {
     ...(marketResult.status === "rejected" && includeUsed ? ["Не удалось получить объявления Marktplaats: " + String(marketResult.reason)] : []),
     ...(webSearchResults.some((result) => result.status === "rejected") ? ["Некоторые поисковые запросы временно не сработали; показаны доступные результаты."] : []),
     ...(usedPrices.length < 3 ? ["Мало актуальных б/у сравнений: не считайте прибыль подтверждённой."] : []),
-    ...(!isAiResearchEnabled() ? ["AI-анализ не активирован: добавьте OPENAI_API_KEY в Vercel и GitHub Actions Secrets. Пока работают поисковые и детерминированные фильтры."] : []),
+    ...(!isAiResearchEnabled() ? ["Ручной веб-отчёт работает без облачного AI API. Бесплатная локальная AI-проверка выполняется сканером на вашем Mac через Ollama."] : []),
     ...(isAiResearchEnabled() && !aiReview ? ["AI-проверка временно недоступна; результаты отфильтрованы резервными правилами совпадения."] : []),
     "Цены — цены предложений, не подтверждённые цены закрытых сделок. Проверяйте товар и продавца перед покупкой.",
   ];
