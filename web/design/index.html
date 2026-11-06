@@ -810,6 +810,359 @@ button:disabled { cursor: not-allowed; }
   .deal-card > .card-link { margin: 0 12px 12px; }
   .bottom-nav button { font-size: 10px; }
 }
+/* ======================================================================
+   DEAL RADAR — REDESIGN v3  (вставить В САМЫЙ КОНЕЦ <style>, перед </style>)
+   Имена классов не менялись. Блок переопределяет старые правила.
+   Идея: крупный читаемый текст, один акцент, чёткая иерархия карточки
+   (фото → скидка → цена → экономия → кнопка), липкий поиск, нижнее меню,
+   шторки вместо окон на телефоне.
+   ====================================================================== */
+
+/* ---------- 1. Основа ---------- */
+:root {
+  --bg: #090c11;
+  --panel: #10161e;
+  --panel-2: #172029;
+  --line: rgba(174,195,214,.14);
+  --muted: #9aa8b8;
+  --soft: #c5cfda;
+  --r-s: 10px; --r-m: 14px; --r-l: 20px;
+  --shadow: 0 10px 30px rgba(0,0,0,.28);
+  --topbar-h: 64px;
+}
+body { font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+::selection { background: rgba(167,243,107,.3); }
+.app-shell { padding: 0 16px 128px; }
+.ambient { opacity: .08; }
+h1, h2, h3 { text-wrap: balance; }
+::-webkit-scrollbar { height: 8px; width: 8px; }
+::-webkit-scrollbar-thumb { background: #2b3947; border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- 2. Шапка (липкая) ---------- */
+.topbar {
+  position: sticky; top: 0; z-index: 12; height: var(--topbar-h); max-width: 1180px;
+  background: rgba(9,12,17,.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--line);
+}
+.brand-mark { width: 38px; height: 38px; border-radius: 12px; font-size: 21px; box-shadow: none; }
+.brand-name { font-size: 17px; }
+.brand-tagline { font-size: 12px; color: var(--muted); letter-spacing: 0; }
+.top-user { font: 600 13px Manrope, sans-serif; letter-spacing: 0; padding: 8px 14px; background: var(--panel); }
+
+/* ---------- 3. Главный экран ---------- */
+.hero { padding: 28px 2px 22px; min-height: 0; }
+.eyebrow { font: 700 13px Manrope, sans-serif; letter-spacing: .02em; }
+.hero h1 { font-size: clamp(34px, 7vw, 58px); letter-spacing: -2px; line-height: 1.02; margin: 12px 0; }
+.hero p { font-size: 16px; line-height: 1.6; color: var(--soft); }
+.hero-actions { margin-top: 22px; gap: 14px; flex-wrap: wrap; }
+.primary-button { min-height: 50px; padding-inline: 24px; border-radius: 14px; font-size: 15px; box-shadow: 0 8px 22px rgba(167,243,107,.18); }
+.primary-button:active, .secondary-button:active, .card-link:active { transform: scale(.98); }
+.trust-note { font-size: 13px; color: var(--muted); }
+.radar-art { opacity: .85; }
+
+.stats-grid { gap: 10px; margin-bottom: 36px; }
+.stat-card { border-radius: var(--r-m); padding: 16px 18px; min-height: 96px; background: var(--panel); }
+.accent-stat { background: linear-gradient(140deg, rgba(34,59,36,.55), rgba(14,23,19,.85)); }
+.stat-label, .stat-caption { font-size: 13px; line-height: 1.4; }
+.stat-card strong { font-size: 26px; margin: 4px 0; }
+.stat-card .stat-time { font-size: 20px; }
+
+/* ---------- 4. Заголовки разделов ---------- */
+.section-heading { gap: 14px; margin-bottom: 16px; align-items: flex-end; }
+.section-heading h2 { font-size: 26px; letter-spacing: -.8px; margin: 6px 0 4px; }
+.section-heading p { font-size: 14px; color: var(--muted); max-width: 46ch; }
+.heading-count { font-size: 13px; padding: 3px 10px; }
+.refresh-button { min-height: 44px; padding: 0 16px; border-radius: 12px; font-size: 14px; display: inline-flex; align-items: center; gap: 4px; }
+.scanner-live { font-size: 13px; padding: 9px 14px; background: var(--panel); }
+
+/* ---------- 5. Поиск и сортировка (липкая панель) ---------- */
+.toolbar {
+  position: sticky; top: var(--topbar-h); z-index: 9; gap: 10px;
+  margin: 0 -16px 12px; padding: 10px 16px;
+  background: linear-gradient(var(--bg) 82%, transparent);
+}
+.search-box { min-height: 52px; border-radius: var(--r-m); background: var(--panel); transition: border-color .15s, box-shadow .15s; }
+.search-box:focus-within { border-color: rgba(167,243,107,.55); box-shadow: 0 0 0 4px rgba(167,243,107,.08); }
+.search-box input { font-size: 16px; }
+.search-box input::placeholder { color: #6f7d8c; }
+.sort-select { min-height: 52px; border-radius: var(--r-m); background: var(--panel); padding: 0 14px; }
+.sort-select span { font-size: 13px; }
+.sort-select select { font-size: 14px; font-weight: 600; cursor: pointer; }
+
+/* ---------- 6. Чипы категорий, быстрые фильтры ---------- */
+.category-strip { gap: 8px; padding: 2px 0 12px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+.category-chip, .discount-chip { min-height: 42px; padding: 0 16px; font-size: 14px; border-radius: 99px; background: var(--panel); scroll-snap-align: start; display: inline-flex; align-items: center; transition: background .15s, border-color .15s, color .15s; }
+.category-chip:hover, .discount-chip:hover { border-color: rgba(167,243,107,.45); }
+.category-chip.selected, .discount-chip.selected { box-shadow: 0 4px 14px rgba(167,243,107,.2); }
+.summary-strip { gap: 8px; margin-bottom: 12px; }
+.summary-strip span { font-size: 13px; padding: 7px 14px; }
+.filters-fold { border-radius: var(--r-m); background: var(--panel); }
+.filters-fold > summary { min-height: 50px; font-size: 15px; }
+.filters-fold > summary:hover { color: var(--green); }
+.filter-panel { padding: 16px; gap: 16px 24px; }
+.filter-label { font-size: 12px; letter-spacing: .06em; }
+.price-range input { min-height: 46px; font-size: 16px; border-radius: var(--r-s); }
+.reset-filters { font-size: 14px; min-height: 44px; }
+.cat-pick { min-height: 50px; border-radius: var(--r-m); }
+.cat-clear { height: 50px; width: 50px; }
+
+/* ---------- 7. Карточка товара ---------- */
+.deal-grid { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px; }
+.deal-card {
+  display: flex; flex-direction: column; border-radius: var(--r-l); background: var(--panel);
+  box-shadow: 0 1px 0 rgba(255,255,255,.03) inset; transition: transform .2s, border-color .2s, box-shadow .2s;
+}
+.deal-card:hover { transform: translateY(-4px); box-shadow: var(--shadow); }
+.deal-image { height: auto; aspect-ratio: 4 / 3; background: radial-gradient(circle at 50% 40%, #223229, #0f151c 70%); }
+.deal-image img { transition: transform .35s; }
+.deal-card:hover .deal-image img { transform: scale(1.04); }
+.image-fallback { font-size: 56px; }
+.discount-pill { top: 12px; left: 12px; font-size: 15px; padding: 7px 11px; border-radius: 10px; box-shadow: 0 6px 16px rgba(0,0,0,.35); }
+.deal-content { display: flex; flex-direction: column; flex: 1; padding: 16px; gap: 2px; }
+.deal-meta { font-size: 12px; margin-bottom: 8px; }
+.deal-status { font-size: 12px; margin-bottom: 8px; }
+.deal-title {
+  font-size: 16px; font-weight: 700; line-height: 1.35; min-height: 0; cursor: pointer;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.deal-title:hover { color: var(--green); }
+.price-row { margin: 12px 0 10px; gap: 10px; }
+.price-row strong { font-size: 28px; letter-spacing: -1.2px; }
+.old-price { font-size: 14px; }
+.saving-line {
+  align-items: center; margin-top: auto; padding: 10px 12px; border: 0; border-radius: var(--r-s);
+  background: rgba(167,243,107,.08); font-size: 13px; color: var(--soft);
+}
+.saving-line strong { font-size: 15px; }
+.preliminary-saving { background: rgba(145,164,186,.1); }
+.candidate-explanation { font-size: 13px; line-height: 1.5; padding: 10px 0 0; min-height: 0; }
+.card-footer { margin-top: 12px; gap: 10px; }
+.location { font-size: 13px; }
+.distance { font-size: 13px; }
+.save-button { width: 46px; height: 46px; border-radius: 12px; font-size: 22px; transition: background .15s, color .15s, transform .15s; }
+.save-button:hover { background: #22303d; }
+.save-button.active { background: rgba(167,243,107,.14); }
+.card-link { min-height: 48px; margin-top: 12px; border-radius: 12px; font-size: 15px; background: var(--green); color: #0d160b; border-color: var(--green); }
+.card-link:hover { background: #b8ff83; }
+
+/* уровни качества: спокойнее и понятнее */
+.deal-tiers { gap: 36px; }
+.tier-heading h3 { font-size: 22px; }
+.tier-heading p, .tier-empty { font-size: 14px; }
+.review-tier { padding: 16px; border-radius: var(--r-l); background: rgba(13,19,27,.5); }
+.deal-status { padding: 4px 11px; }
+
+/* ---------- 8. Пустые состояния и загрузка ---------- */
+.state-panel { padding: 48px 20px; border-radius: var(--r-l); }
+.state-icon { width: 52px; height: 52px; border-radius: 16px; font-size: 26px; }
+.state-panel h3 { font-size: 19px; }
+.state-panel p { font-size: 14px; }
+.state-panel > span { font-size: 13px; }
+.skeleton-card { border-radius: var(--r-l); padding: 14px; }
+.skeleton-card div { height: 190px; border-radius: var(--r-m); }
+.skeleton-card span { height: 12px; }
+
+/* ---------- 9. Категории ---------- */
+.cg-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.cg-card { min-height: 140px; border-radius: var(--r-l); background: var(--panel); }
+.cg-card:active { transform: scale(.98); }
+.cg-ico { font-size: 36px; }
+.cg-card strong { font-size: 16px; line-height: 1.25; }
+.cg-card small { font-size: 13px; }
+.cg-row { min-height: 60px; border-radius: var(--r-m); transition: border-color .15s, background .15s; }
+.cg-row:hover { border-color: rgba(167,243,107,.4); }
+.cg-back { min-height: 46px; }
+.v2-all { min-height: 56px; border-radius: var(--r-m); font-weight: 700; }
+.category-tile strong { font-size: 14px; }
+.category-tile small { font-size: 12px; }
+
+/* ---------- 10. Аналитика ---------- */
+.analytics-primary { border-radius: var(--r-l); padding: 22px; }
+.analytics-primary > span { font-size: 14px; }
+.analytics-primary > small { font-size: 13px; }
+.analytics-card { border-radius: var(--r-m); padding: 16px; background: var(--panel); }
+.analytics-card > span { font-size: 13px; min-height: 0; }
+.analytics-card > strong { font-size: 24px; }
+.analytics-card > small { font-size: 12px; }
+.rejection-panel { border-radius: var(--r-l); background: var(--panel); }
+.rejection-label { font-size: 14px; }
+.rejection-label strong { font-size: 13px; }
+.rejection-track { height: 9px; }
+.analytics-note { font-size: 12px; }
+
+/* ---------- 11. Профиль и настройки ---------- */
+.v2-card { border-radius: var(--r-l); padding: 20px; gap: 20px; }
+.v2-field > span { font-size: 14px; }
+.v2-row { min-height: 58px; border-radius: var(--r-m); transition: border-color .15s; }
+.v2-row:hover { border-color: rgba(167,243,107,.4); }
+.v2-note { border-radius: var(--r-m); font-size: 14px; }
+.v2-result { border-radius: var(--r-m); }
+.v2-hint, .settings-hint, .settings-note { font-size: 13px; line-height: 1.55; color: var(--muted); }
+.settings-field { font-size: 14px; }
+.settings-field select { min-height: 46px; font-size: 15px; border-radius: var(--r-s); }
+.settings-field input[type="range"] { height: 28px; }
+.settings-category-grid { max-height: 220px; gap: 8px; }
+.preference-chip { min-height: 40px; font-size: 13px; border-radius: var(--r-s); padding: 8px 12px; transition: background .15s, border-color .15s; }
+.settings-actions > span { font-size: 13px; }
+
+/* ---------- 12. Всплывающие панели ---------- */
+.profile-toast { border-radius: var(--r-m); padding: 16px; bottom: 96px; }
+.profile-toast strong { font-size: 15px; }
+.profile-toast span { font-size: 13px; line-height: 1.5; }
+.profile-toast button { font-size: 14px; min-height: 40px; }
+.profile-toast.settings-panel { bottom: 92px; border-radius: var(--r-l); box-shadow: var(--shadow); }
+
+/* ---------- 13. Окно товара ---------- */
+.modal-backdrop { background: rgba(3,6,10,.78); }
+.detail-modal { width: min(560px, 100%); border-radius: 24px; background: var(--panel); }
+.modal-close { top: 14px; right: 14px; width: 44px; height: 44px; font-size: 24px; background: rgba(8,13,18,.78); backdrop-filter: blur(8px); }
+.detail-photo { height: 280px; background: radial-gradient(circle at 50% 40%, #1d2b26, #0b1015 70%); }
+.detail-body { padding: 24px; }
+.detail-body h2 { font-size: 24px; line-height: 1.25; letter-spacing: -.5px; }
+.detail-price { gap: 14px; margin-bottom: 4px; }
+.detail-price strong { font-size: 34px; }
+.detail-price span { font-size: 14px; }
+.detail-body p { font-size: 14px; line-height: 1.7; }
+.detail-facts { gap: 8px; font-size: 13px; margin: 14px 0; }
+.detail-facts > * { padding: 6px 12px; border-radius: 99px; background: var(--panel-2); border: 1px solid var(--line); }
+.warning-list { font-size: 13px; line-height: 1.5; border-radius: var(--r-m); padding: 14px; }
+.candidate-detail-note { font-size: 13px; border-radius: var(--r-m); }
+.price-history { border-radius: var(--r-m); padding: 16px; }
+.price-history > strong { font-size: 14px; }
+.price-history p { font-size: 12px; }
+.history-bars { height: 120px; }
+.history-point small { font-size: 10px; }
+.full-button { min-height: 50px; }
+
+/* ---------- 14. Поиск товара (research) и советник ---------- */
+.research-card { border-radius: var(--r-l); padding: 20px; }
+.research-head h3 { font-size: 22px; }
+.research-head p { font-size: 14px; }
+.research-form label, .research-condition legend { font-size: 13px; }
+.research-form input { height: 48px; font-size: 16px; border-radius: var(--r-s); }
+.research-submit { height: 48px; }
+.research-condition label { font-size: 13px; min-height: 40px; }
+.research-error { font-size: 14px; }
+.research-loading { font-size: 14px; }
+.research-summary-grid small, .research-summary-grid span { font-size: 12px; }
+.research-summary-grid strong { font-size: 22px; }
+.research-sources span { font-size: 13px; }
+.research-report h4 { font-size: 15px; }
+.research-offer { padding: 13px 14px; border-radius: var(--r-m); }
+.research-offer > span b { font-size: 14px; }
+.research-offer small { font-size: 12px; }
+.research-offer > strong { font-size: 15px; }
+.research-offer em { font-size: 13px; }
+.research-web-links a span { font-size: 13px; }
+.research-web-links a small { font-size: 12px; }
+.research-muted, .research-warning, .research-ai-note { font-size: 13px; }
+.research-ai-panel > p { font-size: 14px; }
+.research-ai-tags span, .research-ai-stats span { font-size: 12px; }
+.advisor-toggle { min-height: 60px; border-radius: var(--r-m); }
+.advisor-toggle strong { font-size: 15px; }
+.advisor-toggle small { font-size: 13px; }
+.product-advisor { border-radius: var(--r-l); }
+.advisor-heading > div { font-size: 14px; }
+.advisor-heading > small { font-size: 12px; }
+.advisor-context { font-size: 13px; }
+.advisor-suggestions button { font-size: 13px; padding: 10px 14px; min-height: 40px; }
+.advisor-message { font-size: 14px; line-height: 1.6; }
+.advisor-message > span { font-size: 11px; }
+.advisor-empty { font-size: 14px; }
+.advisor-form input { font-size: 16px; min-height: 46px; }
+.advisor-form button { width: 46px; height: 46px; }
+.advisor-error { font-size: 13px; }
+.advisor-disclaimer { font-size: 12px; }
+
+/* ---------- 15. Нижнее меню ---------- */
+.bottom-nav {
+  width: min(calc(100% - 20px), 560px); bottom: calc(10px + env(safe-area-inset-bottom));
+  padding: 6px; gap: 2px; border: 1px solid var(--line); border-radius: 22px;
+  background: rgba(14,19,26,.9); box-shadow: 0 14px 40px rgba(0,0,0,.5);
+}
+.bottom-nav button {
+  min-height: 56px; border-radius: 16px; font-size: 11px; font-weight: 600; color: #8f9dac;
+  transition: background .15s, color .15s;
+}
+.bottom-nav button span { font-size: 21px; }
+.bottom-nav button:hover { background: rgba(255,255,255,.04); }
+.bottom-nav button.nav-active { color: var(--green); background: rgba(167,243,107,.12); }
+.bottom-nav i { top: 4px; left: calc(50% + 6px); font-size: 11px; padding: 2px 6px; }
+
+/* ---------- 16. Подвал ---------- */
+.app-footer { margin-top: 56px; padding-block: 22px; }
+.footer-brand { font-size: 12px; }
+.app-footer p, .footer-location { font-size: 13px; }
+
+/* ---------- 17. Фокус и доступность ---------- */
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+button:disabled { cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ---------- 18. Планшет ---------- */
+@media (max-width: 960px) {
+  .stats-grid.scanner-overview { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .analytics-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .category-browser { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .radar-art { display: none; }
+}
+
+/* ---------- 19. Телефон ---------- */
+@media (max-width: 760px) {
+  :root { --topbar-h: 58px; }
+  .app-shell { padding: 0 12px 120px; }
+  .topbar { height: var(--topbar-h); }
+  .top-user { font-size: 12px; padding: 7px 11px; }
+  .hero { padding: 22px 2px 18px; }
+  .hero p { font-size: 15px; }
+  .primary-button { width: 100%; }
+  .stats-grid { gap: 8px; margin-bottom: 28px; }
+  .stat-card { padding: 13px; min-height: 88px; }
+  .stat-card strong { font-size: 21px; }
+  .stat-label, .stat-caption { font-size: 12px; }
+  .section-heading h2 { font-size: 23px; }
+  .section-heading p { font-size: 13px; max-width: none; }
+  .refresh-button { font-size: 0; padding: 0 14px; }
+  .toolbar { margin: 0 -12px 10px; padding: 8px 12px; flex-direction: column; gap: 8px; }
+  .deal-grid { grid-template-columns: 1fr; gap: 14px; }
+  .deal-card { flex-direction: row; flex-wrap: wrap; }
+  .deal-card > .image-button { width: 128px; flex: none; }
+  .deal-card > .image-button .deal-image { height: 100%; min-height: 150px; aspect-ratio: auto; }
+  .deal-card > .deal-content { flex: 1 1 0; min-width: 0; padding: 12px; }
+  .deal-card > .card-link { flex: 1 1 100%; margin: 0 12px 12px; }
+  .price-row strong { font-size: 23px; }
+  .deal-title { font-size: 15px; }
+  .discount-pill { font-size: 12px; padding: 4px 8px; top: 8px; left: 8px; }
+  .deal-meta, .deal-status { font-size: 11px; }
+  .saving-line { font-size: 12px; padding: 8px 10px; }
+  .candidate-explanation { font-size: 12px; }
+  .tier-heading h3 { font-size: 19px; }
+  .review-tier { padding: 12px; }
+  .cg-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+  .cg-card { min-height: 128px; padding: 14px; }
+  .analytics-summary { grid-template-columns: 1fr; }
+  .v2-card { padding: 16px; }
+
+  /* окно товара и настройки — шторка снизу */
+  .modal-backdrop { align-items: flex-end; padding: 0; }
+  .detail-modal { width: 100%; max-height: 92vh; border-radius: 24px 24px 0 0; animation: sheetUp .28s ease-out; }
+  .detail-photo { height: 230px; }
+  .detail-body { padding: 20px 18px calc(20px + env(safe-area-inset-bottom)); }
+  .profile-toast.settings-panel { left: 0; right: 0; bottom: 0; width: 100%; max-height: 82vh; border-radius: 24px 24px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+  .profile-toast { right: 12px; left: 12px; width: auto; bottom: 92px; }
+  .research-form { grid-template-columns: 1fr; }
+  .research-offer { grid-template-columns: minmax(0,1fr) auto; }
+}
+@keyframes sheetUp { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+@media (max-width: 380px) {
+  .deal-card { flex-direction: column; }
+  .deal-card > .image-button { width: 100%; }
+  .deal-card > .image-button .deal-image { aspect-ratio: 4 / 3; min-height: 0; }
+  .deal-card > .card-link { margin: 0 12px 12px; }
+  .bottom-nav button { font-size: 10px; }
+}
 </style>
 </head>
 <body>

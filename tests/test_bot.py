@@ -59,12 +59,16 @@ class ScannerTests(unittest.TestCase):
     def test_catalog_receives_deal_without_telegram(self):
         seed = [listing(str(i), 400, date=datetime.now(timezone.utc).isoformat()) for i in range(1, 7)]
         self.assertTrue(self.run_scan(seed))
-        self.assertEqual(bot.load_feed()["deals"], [])
+        first_feed = bot.load_feed()["deals"]
+        self.assertEqual(len(first_feed), 6)
+        self.assertTrue(all(item["status"] == "candidate" for item in first_feed))
         now = datetime.now(timezone.utc).isoformat()
         deal = listing("99", 250, date=now, title="PS5 met 2 controllers")
         self.assertTrue(self.run_scan(seed + [deal]))
         feed = bot.load_feed()
-        self.assertEqual([d["listing_id"] for d in feed["deals"]], ["99"])
+        self.assertEqual(feed["deals"][0]["listing_id"], "99")
+        self.assertEqual(feed["deals"][0]["status"], "strong")
+        self.assertEqual(sum(d["status"] == "candidate" for d in feed["deals"]), 6)
         self.assertEqual(feed["deals"][0]["price"], 250.0)
         self.assertEqual(feed["deals"][0]["market_price"], 400.0)
         self.assertAlmostEqual(feed["deals"][0]["discount"], 0.375, places=3)
@@ -75,11 +79,11 @@ class ScannerTests(unittest.TestCase):
         now = datetime.now(timezone.utc).isoformat()
         first = [listing("a", 400, now), listing("b", 400, now), listing("99", 250, now)]
         self.run_scan(first)
-        self.assertEqual(bot.load_feed()["deals"], [])
+        self.assertEqual(len(bot.load_feed()["deals"]), 3)
         self.run_scan(first + [listing("c", 400, now)])
         updated = bot.load_feed()["deals"]
-        self.assertEqual([d["listing_id"] for d in updated], ["99"])
-        self.assertEqual(updated[0]["status"], "strong")
+        target = next(item for item in updated if item["listing_id"] == "99")
+        self.assertEqual(target["status"], "strong")
 
     def test_listing_published_29_days_ago_is_eligible_with_30_day_window(self):
         posted = (datetime.now(timezone.utc) - timedelta(days=29)).isoformat()
@@ -87,8 +91,9 @@ class ScannerTests(unittest.TestCase):
         deal = listing("old-deal", 250, date=posted, title="PS5 met 2 controllers")
         self.assertTrue(self.run_scan(seed + [deal]))
         feed = bot.load_feed()
-        self.assertEqual([item["listing_id"] for item in feed["deals"]], ["old-deal"])
-        self.assertEqual(feed["deals"][0]["posted_at"], posted)
+        target = next(item for item in feed["deals"] if item["listing_id"] == "old-deal")
+        self.assertEqual(target["status"], "strong")
+        self.assertEqual(target["posted_at"], posted)
 
     def test_listing_published_31_days_ago_is_excluded(self):
         posted = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
@@ -141,15 +146,24 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(stats["unique"], 3)
         self.assertEqual(stats["duplicates"], 2)
 
-    def test_candidate_without_comparables_is_filtered_from_main_feed(self):
+    def test_candidate_without_comparables_is_visible_but_not_claimed_as_a_deal(self):
         now = datetime.now(timezone.utc).isoformat()
         self.assertTrue(self.run_scan([listing("solo", 180, now)]))
-        self.assertEqual(bot.load_feed()["deals"], [])
+        deals = bot.load_feed()["deals"]
+        self.assertEqual([item["listing_id"] for item in deals], ["solo"])
+        self.assertEqual(deals[0]["status"], "candidate")
+        self.assertIsNone(deals[0]["market_price"])
+        self.assertIsNone(deals[0]["estimated_profit"])
 
-    def test_query_aliases_match_ps5_console_variants_and_hide_candidates_from_main_feed(self):
-        q = {"query": "playstation 5", "include_any": ["ps5"], "exclude": []}
+    def test_query_aliases_are_model_specific_and_ps5_accessories_are_rejected(self):
+        with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as handle:
+            config = json.load(handle)
+        q = next(item for item in config["queries"] if item["key"] == "ps5")
         self.assertTrue(bot.title_matches_query(q, "PS5 Slim Console"))
-        self.assertTrue(bot.title_matches_query(q, "PlayStation 5 Disc Drive"))
+        self.assertTrue(bot.title_matches_query(q, "PlayStation 5 Disc Edition Console"))
+        self.assertFalse(bot.title_matches_query(q, "PlayStation 5 Portal remote player"))
+        self.assertFalse(bot.title_matches_query(q, "WD Black SSD 2TB for PS5"))
+        self.assertFalse(bot.title_matches_query(q, "Thrustmaster racing wheel for PS5"))
         feed = {"deals": [
             {"listing_id": "good-1", "category_key": "ps5", "title": "PS5 console", "description": "", "price": 300,
              "listing_url": "https://www.marktplaats.nl/v/good-1", "status": "good", "estimated_profit": 70, "profit_roi": 0.4,
@@ -157,7 +171,7 @@ class ScannerTests(unittest.TestCase):
             {"listing_id": "candidate-1", "category_key": "ps5", "title": "PS5 controller", "description": "", "price": 100,
              "listing_url": "https://www.marktplaats.nl/v/candidate-1", "status": "candidate", "estimated_profit": 5, "profit_roi": 0.05,
              "detected_at": datetime.now(timezone.utc).isoformat()},
-        ], "updatedAt": None}
+        ], "updatedAt": None, "valuationVersion": bot.FEED_SCHEMA_VERSION}
         with open(os.environ["DEAL_FEED"], "w", encoding="utf-8") as handle:
             json.dump(feed, handle)
         db = bot.open_db()
@@ -165,7 +179,33 @@ class ScannerTests(unittest.TestCase):
             self.assertTrue(self.run_scan([]))
         finally:
             db.close()
-        self.assertEqual([d["listing_id"] for d in bot.load_feed()["deals"]], ["good-1"])
+        refreshed = bot.load_feed()["deals"]
+        self.assertEqual([d["listing_id"] for d in refreshed], ["good-1", "candidate-1"])
+
+    def test_iphone_generation_aliases_do_not_cross_categories(self):
+        with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as handle:
+            config = json.load(handle)
+        iphone16 = next(q for q in config["queries"] if q["key"] == "iphone-16")
+        iphone14 = next(q for q in config["queries"] if q["key"] == "iphone-14")
+        self.assertFalse(bot.title_matches_query(iphone16, "iPhone 14 Pro 128GB"))
+        self.assertTrue(bot.title_matches_query(iphone14, "iPhone 14 Pro 128GB"))
+
+    def test_airpods_max_search_is_limited_to_second_generation(self):
+        with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as handle:
+            config = json.load(handle)
+        q = next(q for q in config["queries"] if q["key"] == "airpods-max")
+        self.assertTrue(bot.title_matches_query(q, "Apple AirPods Max 2"))
+        self.assertTrue(bot.title_matches_query(q, "AirPods Max 2nd generation"))
+        self.assertFalse(bot.title_matches_query(q, "Apple AirPods Max"))
+        self.assertFalse(bot.title_matches_query(q, "AirPods Max 1"))
+
+    def test_strict_product_groups_do_not_fall_back_to_category_medians(self):
+        with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as handle:
+            config = json.load(handle)
+        ps5 = next(q for q in config["queries"] if q["key"] == "ps5")
+        self.assertEqual(bot.group_of(ps5, "PlayStation 5 Portal remote player"), "unknown")
+        self.assertNotEqual(bot.group_of(ps5, "PlayStation 5 Slim Console"), "unknown")
+        self.assertTrue(ps5["strict_group"])
 
     def test_profit_floor_is_50_eur(self):
         cfg = {"profitability": {"market_resale_factor": 0.95, "buyer_negotiation_rate": 0.04, "selling_fee_rate": 0.08, "fixed_selling_cost_eur": 10, "min_profit_eur": 50, "min_roi": 0.2}}
@@ -234,7 +274,7 @@ class ScannerTests(unittest.TestCase):
         clean = listing("clean", 150, now)
         clean["description"] = "See our listing on https://www.marktplaats.nl/v/clean"
         self.assertTrue(self.run_scan([linked, clean]))
-        self.assertEqual(bot.load_feed()["deals"], [])
+        self.assertEqual([item["listing_id"] for item in bot.load_feed()["deals"]], ["clean"])
         self.assertTrue(bot.has_external_website_link("shop.example.nl"))
         self.assertFalse(bot.has_external_website_link("seller@gmail.com"))
 
@@ -339,7 +379,9 @@ class ScannerTests(unittest.TestCase):
             with mock.patch.object(bot, "fetch_query", return_value=seed + [target]), \
                  mock.patch.object(bot, "review_listings_with_ai", side_effect=decisions):
                 self.assertTrue(bot.run_once(CFG, db, dry=False))
-            self.assertEqual(bot.load_feed()["deals"], [])
+            remaining = bot.load_feed()["deals"]
+            self.assertNotIn("ai-accessory", [item["listing_id"] for item in remaining])
+            self.assertTrue(all(item["status"] == "candidate" for item in remaining))
         finally:
             db.close()
 

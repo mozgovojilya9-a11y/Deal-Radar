@@ -89,10 +89,12 @@ export async function GET(request: NextRequest) {
     const sort = sortParam === "newest" || sortParam === "price" || sortParam === "discount" ? sortParam : "profit";
 
     let deals = Array.isArray(feed.deals)
-      ? feed.deals.filter(isDeal).filter((deal) => deal.active !== false
-        && isRecent(deal)
-        && (deal.status === "strong" || deal.status === "good")
-        && (typeof deal.estimated_profit === "number" ? deal.estimated_profit >= 50 : false))
+      ? feed.deals.filter(isDeal).filter((deal) => {
+        if (deal.active === false || !isRecent(deal)) return false;
+        if (deal.status === "candidate") return true;
+        return (deal.status === "strong" || deal.status === "good")
+          && typeof deal.estimated_profit === "number" && deal.estimated_profit >= 50;
+      })
       : [];
     if (category && /^[a-z0-9-]{1,64}$/i.test(category)) deals = deals.filter((deal) => deal.category_key === category);
 

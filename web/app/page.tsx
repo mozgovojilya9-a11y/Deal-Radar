@@ -51,7 +51,7 @@ const CATEGORIES = [
   { key: "headphones-jbl", label: "Наушники JBL", icon: "◉" },
   { key: "headphones-beats", label: "Наушники Beats", icon: "◉" },
   { key: "airpods-pro-3", label: "AirPods Pro 3", icon: "◉" },
-  { key: "airpods-max", label: "AirPods Max", icon: "◉" },
+  { key: "airpods-max", label: "AirPods Max 2", icon: "◉" },
   { key: "airpods-5", label: "AirPods 5", icon: "◉" },
   { key: "rayban", label: "Ray-Ban", icon: "◇" },
   { key: "watch-diesel", label: "Часы Diesel", icon: "◷" },
@@ -553,7 +553,6 @@ export default function HomePage() {
     updateFilters({ ...DEFAULT_SETTINGS });
   }
 
-  const strongest = deals.length ? Math.max(...deals.map((deal) => Number(deal.discount) || 0)) : 0;
   const activeCategory = category.startsWith("group:") ? category.slice(6) : CATEGORIES.find((item) => item.key === category)?.label || "Все категории";
 
   return (
@@ -811,7 +810,7 @@ export default function HomePage() {
           <div>
             
             <h2>Свежие находки<span className="heading-count">{filtered.length}</span></h2>
-            <p>Только то, что прошло проверку выгодности</p>
+            <p>Подтверждённые сделки отдельно от объявлений, которым ещё не хватает данных для оценки</p>
           </div>
           <button className="refresh-button" onClick={() => void loadDeals(true)} disabled={loading || refreshing}><span className={loading || refreshing ? "spin" : ""}>↻</span> Обновить</button>
         </div>
