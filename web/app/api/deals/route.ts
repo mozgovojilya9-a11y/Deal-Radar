@@ -16,8 +16,8 @@ function isDeal(value: unknown): value is Deal {
   return typeof deal.listing_id === "string"
     && typeof deal.title === "string"
     && typeof deal.price === "number"
-    && typeof deal.market_price === "number"
-    && typeof deal.discount === "number"
+    && (deal.market_price === null || typeof deal.market_price === "number")
+    && (deal.discount === null || typeof deal.discount === "number")
     && typeof deal.category_key === "string"
     && typeof deal.listing_url === "string"
     && /^https:\/\//i.test(deal.listing_url)
@@ -92,9 +92,12 @@ export async function GET(request: NextRequest) {
     if (category && /^[a-z0-9-]{1,64}$/i.test(category)) deals = deals.filter((deal) => deal.category_key === category);
 
     deals.sort((a, b) => {
+      const rank = (deal: Deal) => deal.status === "candidate" ? 1 : deal.status === "good" ? 2 : 3;
+      const tier = rank(b) - rank(a);
+      if (tier) return tier;
       if (sort === "newest") return Date.parse(b.detected_at) - Date.parse(a.detected_at);
       if (sort === "price") return a.price - b.price;
-      return b.discount - a.discount;
+      return (b.discount ?? -1) - (a.discount ?? -1);
     });
     deals = deals.slice(0, MAX_DEALS);
 

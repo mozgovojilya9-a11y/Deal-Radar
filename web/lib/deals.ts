@@ -1,10 +1,16 @@
+export type DealStatus = "strong" | "good" | "candidate";
+
 export type Deal = {
   listing_id: string;
   title: string;
   description: string | null;
   price: number;
-  market_price: number;
-  discount: number;
+  market_price: number | null;
+  discount: number | null;
+  status?: DealStatus;
+  market_confidence?: "high" | "preliminary" | "none";
+  market_samples?: number;
+  evaluation_reason?: string | null;
   category_key: string;
   category_label: string;
   model_group: string | null;
@@ -20,13 +26,27 @@ export type Deal = {
 
 export type ScannerStats = {
   checked: number;
+  unique: number;
+  duplicates: number;
+  rejectedTitle: number;
+  rejectedInvalid: number;
+  rejectedPriceType: number;
+  rejectedPriceRange: number;
+  rejectedDistance: number;
   accepted: number;
   candidates: number;
+  strongDeals: number;
+  goodDeals: number;
+  reviewCandidates: number;
   newDeals: number;
+  alreadyPublished: number;
   rejectedAge: number;
+  rejectedDateUnknown: number;
   rejectedRisk: number;
-  rejectedSamples: number;
   rejectedDiscount: number;
+  candidateNoMarket: number;
+  candidatePreliminary: number;
+  primaryRejected: number;
   rejectedTotal: number;
   failedQueries: number;
   queryCount: number;
