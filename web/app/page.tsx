@@ -10,7 +10,7 @@ type TelegramProfile = { id: number; firstName: string; lastName: string; userna
 type MatchType = "exact" | "variant" | "related" | "accessory" | "unrelated";
 type ResearchListing = { title: string; price: number; url: string; source: string; condition: "used" | "new" | "unknown"; kind: "marktplaats" | "web"; estimatedProfit?: number | null; profitRoi?: number | null; status?: string; matchType?: MatchType; matchConfidence?: number; matchReason?: string };
 type ProductResearch = {
-  query: string; maxPrice: number; checkedAt: string; usedMedian: number | null; usedReferencePrice: number | null; newMedian: number | null;
+  query: string; maxPrice: number | null; checkedAt: string; usedMedian: number | null; usedReferencePrice: number | null; newMedian: number | null;
   expectedResalePrice: number | null; netResalePrice: number | null; sampleCount: number;
   sources: { marktplaats: { count: number; medianPrice: number | null }; otherUsed: { count: number; medianPrice: number | null }; newRetail: { count: number; medianPrice: number | null } };
   ai?: { enabled: boolean; available: boolean; model: string; productSummary: string; keyAttributes: string[]; marketSummary: string; exactMatches: number; variants: number; reviewedOffers: number; googleSearchQueries: string[]; groundedSources: Array<{ title: string; url: string }>; valuation?: { estimatedUsedPrice: number | null; estimatedNewPrice: number | null; confidence: number; sampleCount: number; rationale: string; googleSearchQueries: string[]; groundedSources: Array<{ title: string; url: string }> } | null };
