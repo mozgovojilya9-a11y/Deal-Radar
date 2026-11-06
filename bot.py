@@ -562,7 +562,7 @@ def primary_rejection(q, it, cfg):
         return "invalid"
     if it.get("ptype") not in (None, "FIXED"):
         return "price_type"
-    absolute_cap = float(cfg.get("max_product_price_eur", 800))
+    absolute_cap = float(cfg.get("max_product_price_eur", 5000))
     category_cap = min(float(q.get("max_price", absolute_cap)), absolute_cap)
     if not (float(q.get("min_price", 0)) <= it["price"] <= category_cap):
         return "price_range"
@@ -1116,7 +1116,7 @@ def run_once(cfg, db, dry=False):
             continue
         q = queries_by_key.get(str(deal.get("category_key") or ""))
         cached_price = deal.get("price")
-        if not isinstance(cached_price, (int, float)) or cached_price <= 0 or cached_price > float(cfg.get("max_product_price_eur", 800)):
+        if not isinstance(cached_price, (int, float)) or cached_price <= 0 or cached_price > float(cfg.get("max_product_price_eur", 5000)):
             continue
         cached_text = " ".join([deal.get("title") or "", deal.get("description") or ""])
         match_text = cached_text if (isinstance(q, dict) and q.get("match_description")) else (deal.get("title") or "")
@@ -1377,7 +1377,7 @@ def run_once(cfg, db, dry=False):
         -float(d.get("profit_roi") if d.get("profit_roi") is not None else -1),
         d.get("detected_at") or "",
     ))
-    fresh_deals = fresh_deals[:200]
+    fresh_deals = fresh_deals[:500]
     now_iso = datetime.now(timezone.utc).isoformat()
     changed = fresh_deals != feed_doc.get("deals", [])
     primary_rejected = sum(metrics[key] for key in (
