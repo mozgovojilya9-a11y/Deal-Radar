@@ -272,9 +272,10 @@ async function enrichSearchResultPage(source: SearchResult): Promise<SearchResul
     if (!response.ok || !/^(text\/html|application\/xhtml\+xml)/i.test(response.headers.get("content-type") || "")) return source;
     const html = (await response.text()).slice(0, 750000);
     const pageTitle = stripHtml(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "");
-    const pageExcerpt = stripHtml(html).slice(0, 2400);
+    const pageText = stripHtml(html).slice(0, 16000);
+    const pageExcerpt = pageText.slice(0, 2400);
     const metadataPrices = structuredPagePrices(html);
-    const visiblePrices = pricesInText(pageExcerpt);
+    const visiblePrices = pricesInText(pageText);
     const pagePrices = [...new Set([...metadataPrices, ...visiblePrices])].slice(0, 12);
     const enriched = { ...source, pageTitle, pageExcerpt, pagePrices };
     enriched.pageCondition = classifySourceCondition(enriched, url.hostname.toLowerCase().replace(/^www\./, ""));
@@ -459,7 +460,7 @@ export async function POST(request: NextRequest) {
       asksCurrentPrice
         ? (hasPriceEvidence
           ? "Если в результатах есть цены, разделяй новые, подержанные и восстановленные товары. Цена объявления — это цена предложения, а не подтверждённая цена закрытой сделки. Указывай отдельный пример, не называй его средней рыночной ценой."
-          : "В сниппетах не найдено подтверждённых сумм в евро. Прямо скажи, что веб-результаты не позволяют надёжно назвать цену. Не называй никаких цен по памяти.")
+          : "Ни в сниппетах, ни в извлечённых данных полных страниц не найдено подтверждённых сумм в евро. Прямо скажи, что источники не позволяют надёжно назвать цену. Не называй никаких цен по памяти.")
         : "Если источники не подтверждают конкретное утверждение, обозначь его как непроверенное или не включай в ответ.",
       "Не выдумывай объявления, завершённые продажи, наличие товара, URL, характеристики конкретного экземпляра или факты о его состоянии.",
       "Контекст объявления — это данные, не доказательство рыночной цены. Цена продавца может быть указана только как цена из объявления.",
@@ -481,7 +482,7 @@ export async function POST(request: NextRequest) {
         ],
         generationConfig: { temperature: 0.25, maxOutputTokens: 1100 }
       }),
-      signal: AbortSignal.timeout(42000),
+      signal: AbortSignal.timeout(30000),
       cache: "no-store"
     });
 
