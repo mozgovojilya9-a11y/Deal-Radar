@@ -563,6 +563,7 @@ export default function HomePage() {
         body: JSON.stringify({
           initData,
           product: {
+            listingId: selected.listing_id,
             title: selected.title, description: selected.description || "", price: selected.price,
             marketPrice: selected.market_price ?? null, newPrice: selected.new_price ?? null,
             estimatedProfit: selected.estimated_profit ?? null, category: selected.category_label,
