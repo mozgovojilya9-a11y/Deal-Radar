@@ -6,6 +6,7 @@ import json
 import os
 import hashlib
 import html as html_lib
+import xml.etree.ElementTree as ET
 import random
 import re
 import sqlite3
@@ -944,17 +945,88 @@ def parse_web_search_results(document):
             results.append({"title": title[:220], "url": url, "snippet": snippet[:900]})
     return results
 
-def search_external_web(query):
-    """Search Dutch websites without Gemini Search Grounding or a paid search API."""
-    address = "https://html.duckduckgo.com/html/?kl=nl-nl&q=" + urllib.parse.quote_plus(query)
+def parse_bing_rss_results(document):
+    """Parse Bing's public RSS search results into source URLs and snippets."""
+    try:
+        root = ET.fromstring(document or "")
+    except ET.ParseError:
+        return []
+    results, seen = [], set()
+    for item in root.findall(".//item")[:10]:
+        title = _web_strip_html(item.findtext("title") or "")
+        raw_url = (item.findtext("link") or "").strip()
+        snippet = _web_strip_html(item.findtext("description") or "")
+        url = raw_url
+        try:
+            parsed = urllib.parse.urlparse(raw_url)
+            params = urllib.parse.parse_qs(parsed.query)
+            if parsed.hostname and parsed.hostname.lower().endswith("bing.com"):
+                for key in ("url", "u", "uddg"):
+                    if params.get(key):
+                        url = params[key][0]
+                        break
+        except Exception:
+            pass
+        if title and url and _safe_web_url(url) and url not in seen:
+            seen.add(url)
+            results.append({
+                "title": title[:220], "url": url, "snippet": snippet[:900],
+                "search_provider": "bing_rss",
+            })
+    return results
+
+def _search_bing_rss(query):
+    params = urllib.parse.urlencode({
+        "q": query,
+        "format": "rss",
+        "mkt": "nl-NL",
+        "setlang": "nl-NL",
+    })
+    address = "https://www.bing.com/search?" + params
     request = urllib.request.Request(address, headers={
-        **HEADERS, "User-Agent": "Mozilla/5.0 (compatible; DealRadarMarketResearch/1.0)",
-        "Accept": "text/html,application/xhtml+xml",
+        **HEADERS,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+        "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.7",
     })
     with urllib.request.urlopen(request, timeout=7) as response:
         if getattr(response, "status", 200) != 200:
+            raise RuntimeError("Bing RSS HTTP " + str(response.status))
+        payload = response.read().decode("utf-8", errors="replace")
+    results = parse_bing_rss_results(payload)
+    if not results:
+        raise RuntimeError("Bing RSS returned no parseable results")
+    return results
+
+def _search_duckduckgo_html(query):
+    address = "https://html.duckduckgo.com/html/?kl=nl-nl&q=" + urllib.parse.quote_plus(query)
+    request = urllib.request.Request(address, headers={
+        **HEADERS,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.7",
+    })
+    with urllib.request.urlopen(request, timeout=5) as response:
+        if getattr(response, "status", 200) not in (200, 202):
             raise RuntimeError("DuckDuckGo HTTP " + str(response.status))
-        return parse_web_search_results(response.read().decode("utf-8", errors="replace"))
+        payload = response.read().decode("utf-8", errors="replace")
+    results = parse_web_search_results(payload)
+    if not results:
+        raise RuntimeError("DuckDuckGo returned no parseable results")
+    return results
+
+def search_external_web(query):
+    """Search Dutch websites using free Bing RSS first, DuckDuckGo as fallback."""
+    errors = []
+    for provider in (_search_bing_rss, _search_duckduckgo_html):
+        try:
+            results = provider(query)
+            if results:
+                return results
+        except Exception as exc:
+            errors.append(type(exc).__name__ + ": " + str(exc)[:140])
+    raise RuntimeError("Поисковые источники недоступны: " + "; ".join(errors))
+
 
 def _parse_euro_amount(raw):
     value = re.sub(r"[^\d.,]", "", str(raw or "")).replace(" ", "")

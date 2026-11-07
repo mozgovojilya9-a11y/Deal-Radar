@@ -601,5 +601,32 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(len(result["market_sources"]), 3)
         self.assertEqual({item["condition"] for item in result["market_sources"]}, {"used"})
 
+    def test_bing_rss_parser_keeps_real_source_urls_and_snippets(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel>
+          <item><title>PS5 Console tweedehands</title>
+            <link>https://www.marktplaats.nl/v/games-en-spelcomputers/consoles/m123</link>
+            <description><![CDATA[PS5 console, gebruikt, vraagprijs € 350,00.]]></description>
+          </item>
+          <item><title>Bol PS5 nieuw</title>
+            <link>https://www.bol.com/nl/nl/p/ps5/9300000000000000/</link>
+            <description>PlayStation 5 nieuw € 499,00</description>
+          </item>
+          <item><title>Unsafe</title><link>javascript:alert(1)</link><description>bad</description></item>
+        </channel></rss>"""
+        results = bot.parse_bing_rss_results(xml)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["url"], "https://www.marktplaats.nl/v/games-en-spelcomputers/consoles/m123")
+        self.assertIn("€ 350,00", results[0]["snippet"])
+        self.assertEqual(results[0]["search_provider"], "bing_rss")
+
+    def test_bing_rss_parser_unwraps_bing_tracking_url(self):
+        xml = """<rss><channel><item><title>Example listing</title>
+        <link>https://www.bing.com/ck/a?url=https%3A%2F%2Fwww.ebay.nl%2Fitm%2F123</link>
+        <description>Used listing € 250</description></item></channel></rss>"""
+        results = bot.parse_bing_rss_results(xml)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["url"], "https://www.ebay.nl/itm/123")
+
 if __name__ == "__main__":
     unittest.main()
