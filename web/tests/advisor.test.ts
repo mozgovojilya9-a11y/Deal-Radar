@@ -83,3 +83,18 @@ test("intent detection", () => {
   assert.equal(detectIntent("Стоит ли покупать?"), "buy");
   assert.equal(detectIntent("Что проверить при осмотре?"), "inspect");
 });
+
+test("a question about Amazon is answered with the Amazon price first", () => {
+  const offers = [offer(1, 389, "new", "amazon.nl"), offer(2, 419, "new", "coolblue.nl"), offer(3, 300, "used", "kleinanzeigen.de")];
+  const report = buildReport(context, research(offers), "price", "Сколько стоит на Amazon?");
+  assert.match(report.lead, /^Amazon: €\s389/);
+  assert.equal(report.shops[0].found, true);
+  assert.ok(report.sources.some((source) => source.domain === "amazon.nl" && source.price === 389));
+});
+
+test("when Amazon has no verified price the answer says so instead of showing Marktplaats", () => {
+  const report = buildReport(context, research([offer(1, 419, "new", "coolblue.nl")]), "price", "цена на амазон?");
+  assert.match(report.lead, /^Amazon: цена не найдена/);
+  assert.equal(report.shops[0].found, false);
+  assert.match(report.shops[0].note, /не найдена/);
+});

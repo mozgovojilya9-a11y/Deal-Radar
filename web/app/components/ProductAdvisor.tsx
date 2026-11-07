@@ -134,6 +134,7 @@ const SEGMENT_LABEL: Record<string, string> = { new: "новый", used: "б/у 
 function AdvisorAnswer({ report, asking }: { report: AdvisorReport; asking: number }) {
   const verdictClass = "verdict-" + report.verdict.decision;
   const rows: Array<{ label: string; value: string; note: string; ids: number[] }> = [];
+  for (const shop of report.shops || []) rows.push({ label: shop.name, value: shop.found ? euro(shop.price, true) : "не найдено", note: shop.note, ids: shop.sourceIds });
   if (report.newPrice) rows.push({ label: "Новая цена", value: euro(report.newPrice.headline, true), note: report.newPrice.note, ids: report.newPrice.sourceIds });
   if (report.usedPrice) rows.push({ label: "Цена б/у", value: euro(report.usedPrice.median, true) + (report.usedPrice.min != null ? " · от " + euro(report.usedPrice.min, true) : ""), note: report.usedPrice.note, ids: report.usedPrice.sourceIds });
   if (report.refurbished) rows.push({ label: "Восстановленный", value: "от " + euro(report.refurbished.headline, true), note: report.refurbished.note, ids: report.refurbished.sourceIds });

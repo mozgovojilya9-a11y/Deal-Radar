@@ -46,19 +46,25 @@ async function resolveRedirect(uri: string, deadline: number): Promise<string> {
   return uri;
 }
 
-export async function groundedMarketOffers(name: string, deadline: number, segments: { new: boolean; used: boolean; refurbished: boolean }): Promise<GroundedResult> {
+export async function groundedMarketOffers(name: string, deadline: number, segments: { new: boolean; used: boolean; refurbished: boolean }, focusShop?: { name: string; domains: string[] }): Promise<GroundedResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { offers: [], queries: [], sourceCount: 0, error: "GEMINI_API_KEY не настроен" };
   const wanted = [segments.new ? "nieuw in Nederlandse webwinkels (Coolblue, bol.com, MediaMarkt, Amazon.nl, merkwinkel)" : "",
     segments.used ? "tweedehands buiten Marktplaats (eBay, Kleinanzeigen, Tweakers V&A, andere)" : "",
     segments.refurbished ? "refurbished (Back Market, Refurbed, andere)" : ""].filter(Boolean).join("; ");
-  const prompt = [
+  const prompt = focusShop ? [
+    `Zoek de actuele prijs in euro van exact dit product bij ${focusShop.name} (${focusShop.domains.join(", ")}): "${name}".`,
+    "Gebruik alleen pagina's van die winkel. Geef alleen prijzen die je in de zoekresultaten ziet. Eén regel per aanbieding, exact in dit formaat:",
+    `${name} | ${focusShop.name} | <nieuw|gebruikt|refurbished> | €<prijs>`,
+    "Herhaal in elke regel de volledige productnaam. Als je geen prijs vindt, schrijf: niet gevonden.",
+  ] : [
     `Zoek actuele prijzen in euro voor exact dit product: "${name}".`,
     `Segmenten: ${wanted}. Gebruik geen Marktplaats of 2dehands.`,
     "Geef alleen prijzen die je in de zoekresultaten ziet. Eén regel per aanbieding, exact in dit formaat:",
     `${name} | <winkel> | <nieuw|gebruikt|refurbished> | €<prijs>`,
     "Herhaal in elke regel de volledige productnaam inclusief generatie, geheugen en variant. Geen andere tekst.",
-  ].join("\n");
+  ];
+  const promptText = prompt.join("\n");
   const model = process.env.GEMINI_SEARCH_MODEL || process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
   let metadata: GroundingMetadata | undefined;
   try {
@@ -66,7 +72,7 @@ export async function groundedMarketOffers(name: string, deadline: number, segme
       method: "POST",
       headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        contents: [{ role: "user", parts: [{ text: promptText }] }],
         tools: [{ google_search: {} }],
         generationConfig: { temperature: 0, maxOutputTokens: 900 },
       }),

@@ -3,6 +3,7 @@ import { geminiEnabled, geminiJson, geminiModel, GeminiError } from "./gemini";
 import { researchMarket, type MarketOffer, type MarketResearch, type Segment } from "./market-research";
 import { textPrices } from "./price-extract";
 import { safeWebUrl } from "./web-search";
+import { domainMatchesShop, requestedShops } from "./shops";
 
 export type DealContext = {
   listingId: string;
@@ -57,6 +58,8 @@ export type AdvisorReport = {
   refurbished: PriceBlock | null;
   estimate: { amount: number | null; median: number | null; samples: number; confidence: string; confidenceLabel: string; referenceLabel: string; updatedAt: string | null; sourceIds: number[] } | null;
   marketplace: { median: number | null; min: number | null; count: number; note: string } | null;
+  /** Shops the user named in the question, answered first. */
+  shops: Array<{ name: string; found: boolean; price: number | null; sourceIds: number[]; note: string }>;
   profit: { amount: number; roi: number; basis: number; basisLabel: string; reliable: boolean; costs: { negotiation: number; fees: number; fixed: number }; expectedResale: number } | null;
   risks: string[];
   answer: string;
@@ -134,8 +137,26 @@ function hostOf(url: string) {
 }
 
 /** Deterministic report: every number comes from the listing, the scanner or fetched pages. */
-export function buildReport(context: DealContext, research: MarketResearch, intent: Intent): AdvisorReport {
+export function buildReport(context: DealContext, research: MarketResearch, intent: Intent, question = ""): AdvisorReport {
   const { sources, newIds, usedIds, refurbishedIds, radarIds } = pickSources(research, context);
+  // Every offer from a shop the user named becomes a numbered source and is answered first.
+  const shops = requestedShops(question).map((shop) => {
+    const offers = research.offers.filter((offer) => domainMatchesShop(offer.domain, shop)).sort((a, b) => a.price - b.price);
+    const ids = offers.slice(0, 4).map((offer) => {
+      const existing = sources.find((source) => source.url === offer.url && source.price === offer.price);
+      if (existing) return existing.id;
+      const id = sources.length + 1;
+      sources.push({ id, title: offer.title, url: offer.url, domain: offer.domain, price: offer.price, segment: offer.segment, note: shop.name });
+      return id;
+    });
+    const failure = research.attempts.find((attempt) => attempt.provider === "Google Search: " + shop.name && !attempt.ok);
+    return {
+      name: shop.name, found: offers.length > 0, price: offers[0]?.price ?? null, sourceIds: ids,
+      note: offers.length
+        ? (offers.length > 1 ? offers.length + " предложений, от " + euro(offers[0].price) : "найдено на " + offers[0].domain) + (offers[0].segment !== "new" ? " · " + (offers[0].segment === "used" ? "б/у" : "восстановленный") : "")
+        : "цена точной модели на " + shop.name + " не найдена" + (failure?.error ? " (" + failure.error + ")" : ""),
+    };
+  });
   const seg = research.segments;
 
   const newPrice: PriceBlock | null = seg.new.count ? {
@@ -256,14 +277,17 @@ export function buildReport(context: DealContext, research: MarketResearch, inte
   }
   if (refurbished?.headline) parts.push("восстановленный от " + euro(refurbished.headline));
   if (!usedPrice && estimate?.amount) parts.push("оценка Deal Radar " + euro(estimate.amount));
-  const lead = intent === "price" || intent === "resale"
-    ? (parts.length ? parts.join(" · ").replace(/^./, (c) => c.toUpperCase()) : "Подтверждённых цен не найдено")
-    : label + ". " + reason;
+  const shopLead = shops.map((shop) => shop.found ? shop.name + ": " + euro(shop.price) : shop.name + ": цена не найдена").join(" · ");
+  const lead = shops.length
+    ? shopLead + (parts.length ? " · " + parts.join(" · ") : "")
+    : intent === "price" || intent === "resale"
+      ? (parts.length ? parts.join(" · ").replace(/^./, (c) => c.toUpperCase()) : "Подтверждённых цен не найдено")
+      : label + ". " + reason;
 
   const failedProviders = [...new Set(research.attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.provider))]
     .filter((name) => !research.providersUsed.includes(name));
   return {
-    intent, lead, verdict: { decision, label, reason }, newPrice, usedPrice, refurbished, estimate, profit, marketplace,
+    intent, lead, verdict: { decision, label, reason }, newPrice, usedPrice, refurbished, estimate, profit, marketplace, shops,
     risks: risks.slice(0, 4), answer: "", sources,
     search: {
       queries: research.queries, providers: research.providersUsed, failedProviders,
@@ -316,13 +340,15 @@ export async function runAdvisor(context: DealContext, messages: Array<{ role: "
   const started = Date.now();
   const question = [...messages].reverse().find((message) => message.role === "user")?.text || "";
   const intent = detectIntent(question);
+  const focusShops = requestedShops(question);
   const research = await researchMarket(context.title, {
     hint: context.modelGroup && !/^(?:unknown|all|other)$/.test(context.modelGroup) ? context.modelGroup.replace(/-/g, " ") : null,
     excludeUrls: context.listingUrl ? [context.listingUrl] : [],
     referencePrice: context.askingPrice,
     budgetMs: Math.min(30000, budgetMs - 16000),
+    focusShops,
   });
-  const report = buildReport(context, research, intent);
+  const report = buildReport(context, research, focusShops.length ? "price" : intent, question);
 
   if (!geminiEnabled()) {
     report.ai = { used: false, model: geminiModel(), note: "GEMINI_API_KEY не настроен — показан расчёт по найденным данным без AI-формулировки" };
@@ -332,6 +358,7 @@ export async function runAdvisor(context: DealContext, messages: Array<{ role: "
     question, intent,
     listing: { title: context.title, askingPrice: context.askingPrice, priceType: context.priceType, condition: context.itemCondition, city: context.city, description: context.description.slice(0, 1200), warningFlags: context.warningFlags },
     computed: {
+      requestedShops: report.shops,
       verdict: report.verdict, newPrice: report.newPrice, usedPrice: report.usedPrice, refurbished: report.refurbished,
       dealRadarEstimate: report.estimate, profit: report.profit, risksFound: report.risks,
       marktplaatsContextNotMarketValue: report.marketplace,
@@ -345,6 +372,7 @@ export async function runAdvisor(context: DealContext, messages: Array<{ role: "
     "Рыночная стоимость определяется только по независимым источникам (магазины, восстановленные, б/у площадки вне Marktplaats). Цены Marktplaats — лишь контекст: никогда не называй их рыночной стоимостью.",
     "Оценку сканера называй независимой оценкой Deal Radar, а не ценой магазина.",
     "answer: прямой ответ на вопрос пользователя, максимум 3 коротких предложения или 4 пункта списка через «• ». Без вступлений, без повторов, без общих рассуждений.",
+    "Если пользователь назвал магазин (computed.requestedShops) — начни ответ с цены в этом магазине или прямо скажи, что там цена не найдена; не подменяй её ценами Marktplaats.",
     "Если вопрос о цене — первым словом назови сумму из computed. Если вопрос об осмотре или проверке — дай конкретные проверки для этой модели (серийный номер, привязка аккаунта, батарея, комплектность и т. п.).",
     "Ссылайся на источники маркерами [номер] только из списка sources.",
     "decision: можешь сделать решение осторожнее, чем computed.verdict, только по существенной причине из данных объявления. reason — одна фраза до 120 символов.",

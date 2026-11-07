@@ -2,6 +2,7 @@ import { extractPage, type ExtractedOffer, type OfferCondition } from "./price-e
 import { buildIdentity, matchProduct, type MatchLevel, type ProductIdentity } from "./product-identity";
 import { safeWebUrl, searchWithFailover, type SearchAttempt, type SearchResult } from "./web-search";
 import { groundedMarketOffers } from "./grounded-search";
+import { domainMatchesShop } from "./shops";
 
 export type Segment = "new" | "used" | "refurbished";
 
@@ -242,6 +243,8 @@ export type ResearchOptions = {
   fresh?: boolean;
   /** Use Google Search through the Gemini API when GEMINI_API_KEY is set (default true). */
   grounding?: boolean;
+  /** Shops the user explicitly asked about (e.g. "price on Amazon"): searched in a targeted way. */
+  focusShops?: Array<{ name: string; domains: string[] }>;
 };
 
 /**
@@ -346,7 +349,7 @@ export async function researchMarket(title: string, options: ResearchOptions = {
   const includeNew = options.includeNew !== false;
   const includeUsed = options.includeUsed !== false;
   const includeRefurbished = options.includeRefurbished !== false;
-  const cacheKey = JSON.stringify([identity.searchName, includeNew, includeUsed, includeRefurbished, options.location?.postcode || "", options.location?.distanceKm || 0, options.maxPrice || 0]);
+  const cacheKey = JSON.stringify([identity.searchName, includeNew, includeUsed, includeRefurbished, options.location?.postcode || "", options.location?.distanceKm || 0, options.maxPrice || 0, (options.focusShops || []).map((shop) => shop.name)]);
   const cached = options.fresh ? undefined : cache.get(cacheKey);
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.value;
 
@@ -477,6 +480,23 @@ export async function researchMarket(title: string, options: ResearchOptions = {
           official: OFFICIAL.test(offer.domain), availability: "unknown" }, segment, offer.evidence);
       }
     }).catch(sourceErrors("Google Search (Gemini)")));
+  }
+
+  // Shops named by the user: targeted Google search for that shop plus "site:" engine queries.
+  for (const shop of options.focusShops || []) {
+    queries.push(...shop.domains.slice(0, 1).map((domain) => "site:" + domain + " " + name));
+    if (process.env.GEMINI_API_KEY && options.grounding !== false) {
+      const started = Date.now();
+      directTasks.push(groundedMarketOffers(name, deadline, { new: true, used: true, refurbished: true }, shop).then((grounded) => {
+        attempts.push({ provider: "Google Search: " + shop.name, query: grounded.queries.join(" | ") || name, ok: grounded.offers.length > 0,
+          count: grounded.offers.length, error: grounded.error || (grounded.offers.length ? undefined : "Google не вернул цену " + shop.name + " с подтверждённым источником"), ms: Date.now() - started });
+        for (const offer of grounded.offers.filter((item) => domainMatchesShop(item.domain, shop))) {
+          const segment = segmentFor(offer.domain, { condition: offer.condition, name: offer.evidence }, offer.evidence) || "new";
+          accept({ title: offer.title, price: offer.price, url: offer.url, domain: offer.domain, method: "grounding",
+            official: false, availability: "unknown" }, segment, offer.evidence);
+        }
+      }).catch(sourceErrors("Google Search: " + shop.name)));
+    }
   }
 
   await Promise.all([runSearches(), ...classifiedTasks, ...directTasks]);
