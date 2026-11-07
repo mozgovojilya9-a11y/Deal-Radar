@@ -65,6 +65,7 @@ export type AdvisorReport = {
     queries: string[];
     providers: string[];
     failedProviders: string[];
+    failureReasons: string[];
     pagesFetched: number;
     pagesWithPrices: number;
     marketplaceOffers: number;
@@ -266,6 +267,8 @@ export function buildReport(context: DealContext, research: MarketResearch, inte
     risks: risks.slice(0, 4), answer: "", sources,
     search: {
       queries: research.queries, providers: research.providersUsed, failedProviders,
+      failureReasons: [...new Map(research.attempts.filter((attempt) => !attempt.ok && attempt.error && !research.providersUsed.includes(attempt.provider))
+        .map((attempt) => [attempt.provider, attempt.provider + ": " + attempt.error])).values()].slice(0, 6),
       pagesFetched: research.pagesFetched, pagesWithPrices: research.pagesWithPrices,
       marketplaceOffers: research.marketplace?.offers.length ?? 0,
       rejected: research.rejected, durationMs: research.durationMs, checkedAt: research.checkedAt,

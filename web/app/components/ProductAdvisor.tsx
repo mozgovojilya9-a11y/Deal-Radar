@@ -184,6 +184,7 @@ function AdvisorAnswer({ report, asking }: { report: AdvisorReport; asking: numb
         {report.search.rejected.variants || report.search.rejected.accessories ? " · отброшено: другие версии " + report.search.rejected.variants + ", аксессуары " + report.search.rejected.accessories : ""}
         {report.ai.note ? " · " + report.ai.note : ""}
       </p>
+      {report.search.failureReasons?.length ? <details className="advisor-search-meta"><summary>Почему часть источников недоступна</summary>{report.search.failureReasons.map((reason) => <div key={reason}>{reason}</div>)}</details> : null}
     </div>
   );
 }

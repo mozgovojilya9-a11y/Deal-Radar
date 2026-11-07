@@ -51,6 +51,8 @@ await Promise.all(Array.from({ length: concurrency }, async () => {
         pagesWithPrices: research.pagesWithPrices,
         rejected: research.rejected,
         errors: research.errors.slice(0, 6),
+        providerFailures: [...new Set(research.attempts.filter((attempt) => !attempt.ok && attempt.error).map((attempt) => attempt.provider + ": " + attempt.error))].slice(0, 6),
+        groundedOffers: research.offers.filter((offer) => offer.method === "grounding").length,
         durationMs: Date.now() - started,
       });
     } catch (error) {

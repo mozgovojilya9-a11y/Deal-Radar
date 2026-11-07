@@ -1913,8 +1913,9 @@ def store_external(db, result, now):
     )
 
 
-def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals):
+def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals, search_issues=None):
     """Fresh-or-queued independent valuations for every model group seen in this run."""
+    search_issues = search_issues if search_issues is not None else []
     settings = cfg.get("external_market", {})
     ttl = int(settings.get("cache_hours", 24)) * 3600
     per_run = int(settings.get("per_run", 45))
@@ -1960,6 +1961,10 @@ def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals):
                     continue
                 store_external(db, result, now)
                 metrics["externalResearched"] += 1
+                metrics["externalGroundedOffers"] += int(result.get("groundedOffers") or 0)
+                for issue in result.get("providerFailures") or []:
+                    if len(search_issues) < 8 and issue not in search_issues:
+                        search_issues.append(str(issue)[:160])
                 fresh = latest_external(db, result["key"])
                 if fresh:
                     results[result["key"]] = {**fresh, "stale": False}
@@ -2054,8 +2059,9 @@ def run_once(cfg, db, dry=False):
         "promoted": 0, "demoted": 0, "verifiedInactive": 0, "livenessChecked": 0,
         "technicalErrors": 0, "minBidCandidates": 0, "rejectedSpread": 0, "geocoded": 0,
         "rejectedReserved": 0, "reservedRemoved": 0, "externalResearched": 0, "externalCached": 0,
-        "externalFailed": 0, "externalQueued": 0, "externalValued": 0,
+        "externalFailed": 0, "externalQueued": 0, "externalValued": 0, "externalGroundedOffers": 0,
     }
+    search_issues = []
     previous_deals = {str(deal.get("listing_id")): deal for deal in feed_doc.get("deals", [])
                       if isinstance(deal, dict) and deal.get("listing_id")}
     seen_in_search = set()
@@ -2308,7 +2314,7 @@ def run_once(cfg, db, dry=False):
 
     # Phase 2: independent market value for every model group (shops, refurbishers and used
     # platforms outside Marktplaats). Phase 3: evaluate every candidate against that value.
-    external_by_key = prepare_external_valuations(db, pending_evaluations, cfg, now, metrics, previous_deals)
+    external_by_key = prepare_external_valuations(db, pending_evaluations, cfg, now, metrics, previous_deals, search_issues)
     max_spread = float(cfg.get("max_price_spread", 0.8))
     for q, candidates, ai_decisions in pending_evaluations:
         qkey = q["key"]
@@ -2547,7 +2553,7 @@ def run_once(cfg, db, dry=False):
         "scannerVersion": SCANNER_DATA_VERSION,
         "updatedAt": now_iso if changed or not feed_doc.get("updatedAt") or not compatible_feed else feed_doc["updatedAt"],
         "scannedAt": now_iso,
-        "scannerStats": {**metrics, "primaryRejected": primary_rejected, "rejectedTotal": rejected_total,
+        "scannerStats": {**metrics, "externalSearchIssues": search_issues, "primaryRejected": primary_rejected, "rejectedTotal": rejected_total,
                          "queryCount": len(cfg["queries"]), "failedQueries": fails, "finishedAt": now_iso},
         "deals": fresh_deals,
     }

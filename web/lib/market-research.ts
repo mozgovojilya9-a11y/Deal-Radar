@@ -1,6 +1,7 @@
 import { extractPage, type ExtractedOffer, type OfferCondition } from "./price-extract";
 import { buildIdentity, matchProduct, type MatchLevel, type ProductIdentity } from "./product-identity";
 import { safeWebUrl, searchWithFailover, type SearchAttempt, type SearchResult } from "./web-search";
+import { groundedMarketOffers } from "./grounded-search";
 
 export type Segment = "new" | "used" | "refurbished";
 
@@ -13,7 +14,7 @@ export type MarketOffer = {
   segment: Segment;
   match: MatchLevel;
   matchReason: string;
-  method: ExtractedOffer["method"] | "api";
+  method: ExtractedOffer["method"] | "api" | "grounding";
   official: boolean;
   availability: ExtractedOffer["availability"];
   city?: string;
@@ -239,6 +240,8 @@ export type ResearchOptions = {
   includeMarketplace?: boolean;
   /** Skip the in-memory cache: a fresh valuation was requested. */
   fresh?: boolean;
+  /** Use Google Search through the Gemini API when GEMINI_API_KEY is set (default true). */
+  grounding?: boolean;
 };
 
 /**
@@ -457,6 +460,23 @@ export async function researchMarket(title: string, options: ResearchOptions = {
     directTasks.push(fetchRefurbed(name, deadline).then((rows) => {
       for (const row of rows) accept(row.offer, "refurbished", row.title);
     }).catch(sourceErrors("Refurbed")));
+  }
+
+  // Google Search via the Gemini API: the provider that works from server IPs (Vercel, GitHub Actions).
+  if (process.env.GEMINI_API_KEY && options.grounding !== false) {
+    const started = Date.now();
+    directTasks.push(groundedMarketOffers(name, deadline, { new: includeNew, used: includeUsed, refurbished: includeRefurbished }).then((grounded) => {
+      attempts.push({ provider: "Google Search (Gemini)", query: grounded.queries.join(" | ") || name, ok: grounded.offers.length > 0,
+        count: grounded.offers.length, error: grounded.error || (grounded.offers.length ? undefined : "нет подтверждённых цен в источниках"), ms: Date.now() - started });
+      if (grounded.queries.length) queries.push(...grounded.queries.map((query) => "Google: " + query));
+      for (const offer of grounded.offers) {
+        const segment = segmentFor(offer.domain, { condition: offer.condition, name: offer.evidence }, offer.evidence);
+        if (!segment) continue;
+        if ((segment === "new" && !includeNew) || (segment === "used" && !includeUsed) || (segment === "refurbished" && !includeRefurbished)) continue;
+        accept({ title: offer.title, price: offer.price, url: offer.url, domain: offer.domain, method: "grounding",
+          official: OFFICIAL.test(offer.domain), availability: "unknown" }, segment, offer.evidence);
+      }
+    }).catch(sourceErrors("Google Search (Gemini)")));
   }
 
   await Promise.all([runSearches(), ...classifiedTasks, ...directTasks]);
