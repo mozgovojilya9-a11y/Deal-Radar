@@ -559,8 +559,36 @@ export async function POST(request: NextRequest) {
     answer = addSourceCitations(answer, sources);
     answer = removeUnsupportedPriceClaims(answer, productContext.askingPrice, productContext.estimatedMarketPrice, sources);
     if (asksCurrentPrice && !hasPriceEvidence) {
-      answer = answer.replace(/(?:В найденных источниках|По результатам поиска)[\s\S]*/i, "").trim();
-      answer += (answer ? "\n\n" : "") + "Проверка цен: в найденных сниппетах нет суммы в евро, которую можно подтвердить. Поэтому актуальную рыночную цену я не называю.";
+      if (productContext.estimatedMarketPrice !== null) {
+        const estimate = productContext.estimatedMarketPrice.toLocaleString("nl-NL", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2
+        });
+        const confidence = productContext.marketConfidence === "high"
+          ? "высокая уверенность"
+          : productContext.marketConfidence === "preliminary"
+            ? "предварительная уверенность"
+            : "уверенность не подтверждена";
+        const sampleCount = productContext.marketSamples > 0
+          ? " по " + productContext.marketSamples + " сопоставимым объявлениям"
+          : "";
+        const estimateSentence = "Внутренняя оценка Deal Radar: €" + estimate + sampleCount + " (" + confidence + "). Это оценка по предложениям, а не подтверждённая цена закрытой сделки.";
+        const alreadyNamed = pricesInText(answer).some((amount) => Math.abs(amount - productContext.estimatedMarketPrice!) < 0.02)
+          && /(deal radar|внутренн[а-яё]* оценк[а-яё]*)/i.test(answer);
+        if (!alreadyNamed) answer += (answer ? "\n\n" : "") + estimateSentence;
+        if (productContext.priceReferenceType === "marktplaats" && productContext.marketSamples > 0) {
+          answer += "\nИсточник внутренней оценки: сохранённые сравнения Marktplaats в каталоге Deal Radar. Отдельные URL этих сравнений для этого объявления не сохранены.";
+        }
+      } else if (productContext.newRetailPrice !== null) {
+        const estimate = productContext.newRetailPrice.toLocaleString("nl-NL", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2
+        });
+        answer += (answer ? "\n\n" : "") + "Внутренняя оценка новой розничной цены Deal Radar: €" + estimate + ". Это ориентир системы, а не независимо подтверждённая текущая цена магазина.";
+      } else {
+        answer = answer.replace(/(?:В найденных источниках|По результатам поиска)[\s\S]*/i, "").trim();
+        answer += (answer ? "\n\n" : "") + "Проверка цен: веб-поиск не вернул сумму в евро, которую удалось подтвердить по доступным страницам. Не буду выдавать неподтверждённую цену за факт.";
+      }
     }
 
     return NextResponse.json({
