@@ -305,14 +305,20 @@ export async function POST(request: NextRequest) {
 
   try {
     const searchResults = await Promise.all(uniqueQueries.map((query) =>
-      searchWeb(query).then((results) => ({ ok: true as const, query, results }))
-        .catch((error) => {
-          console.warn("Deal Radar advisor web search failed:", query, error);
-          return { ok: false as const, query, results: [] as SearchResult[] };
-        })
+      searchWeb(query).then((search) => ({
+        ok: true as const,
+        query,
+        results: search.results,
+        providers: search.providers
+      })).catch((error) => {
+        console.warn("Deal Radar advisor web search failed:", query, error);
+        return { ok: false as const, query, results: [] as SearchResult[], providers: [] as string[] };
+      })
     ));
     const mergedResults = searchResults.flatMap((result) => result.results);
     const uniqueResults = [...new Map(mergedResults.map((result) => [result.url, result])).values()].slice(0, 10);
+    const providersUsed = [...new Set(searchResults.flatMap((result) => result.providers))];
+    const searchProvider = providersUsed.length ? providersUsed.join(" + ") : "Bing + DuckDuckGo";
     const sources: AdvisorSource[] = uniqueResults.map((result, index) => {
       const parsed = new URL(result.url);
       return {
@@ -324,13 +330,13 @@ export async function POST(request: NextRequest) {
     });
     const hasPriceEvidence = sources.some((source) => source.prices.length > 0);
 
-    if (asksCurrentPrice && sources.length === 0) {
+    if (sources.length === 0) {
       return NextResponse.json({
-        answer: "Не удалось получить проверяемые страницы с актуальными ценами через веб-поиск. Поэтому я не буду называть рыночную цену или диапазон по памяти модели. Попробуй повторить запрос позже.",
+        answer: "Сейчас веб-поиск не вернул проверяемых страниц ни через Bing, ни через DuckDuckGo. Поэтому я не буду выдавать этот ответ за проверенный по интернет-источникам или делать выводы о рыночной цене по памяти. Попробуй повторить запрос позже.",
         model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
         sources: [],
         searchQueries: uniqueQueries,
-        searchProvider: "DuckDuckGo",
+        searchProvider,
         searchPerformed: true
       }, { headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     }
@@ -406,7 +412,7 @@ export async function POST(request: NextRequest) {
       model,
       sources: sources.map(({ id, title: sourceTitle, url, domain, snippet }) => ({ id, title: sourceTitle, url, domain, snippet })),
       searchQueries: uniqueQueries,
-      searchProvider: "DuckDuckGo",
+      searchProvider,
       searchPerformed: true
     }, { headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
   } catch (error) {
