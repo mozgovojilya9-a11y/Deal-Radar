@@ -945,26 +945,38 @@ def parse_web_search_results(document):
             results.append({"title": title[:220], "url": url, "snippet": snippet[:900]})
     return results
 
+def _rss_field(fragment, tag):
+    match = re.search(
+        r"<" + re.escape(tag) + r"\b[^>]*>([\s\S]*?)</" + re.escape(tag) + r"\s*>",
+        fragment or "", re.I,
+    )
+    if not match:
+        return ""
+    value = match.group(1).strip()
+    value = re.sub(r"^<!\[CDATA\[", "", value, flags=re.I)
+    value = re.sub(r"\]\]>$", "", value)
+    value = value.replace("<![CDATA[", "").replace("]]>", "")
+    return html_lib.unescape(value).strip()
+
 def parse_bing_rss_results(document):
-    """Parse Bing's public RSS search results into source URLs and snippets."""
-    try:
-        root = ET.fromstring(document or "")
-    except ET.ParseError:
-        return []
+    """Tolerantly parse RSS <item> blocks, including CDATA and entity-escaped fields."""
     results, seen = [], set()
-    for item in root.findall(".//item")[:10]:
-        title = _web_strip_html(item.findtext("title") or "")
-        raw_url = (item.findtext("link") or "").strip()
-        snippet = _web_strip_html(item.findtext("description") or "")
+    for match in re.finditer(r"<item\b[^>]*>([\s\S]*?)</item\s*>", document or "", re.I):
+        fragment = match.group(1)
+        title = _web_strip_html(_rss_field(fragment, "title"))
+        raw_url = _rss_field(fragment, "link")
+        snippet = _web_strip_html(_rss_field(fragment, "description"))
         url = raw_url
         try:
             parsed = urllib.parse.urlparse(raw_url)
             params = urllib.parse.parse_qs(parsed.query)
             if parsed.hostname and parsed.hostname.lower().endswith("bing.com"):
-                for key in ("url", "u", "uddg"):
+                for key in ("url", "uddg"):
                     if params.get(key):
                         url = params[key][0]
                         break
+                if params.get("u") and not url:
+                    url = params["u"][0]
         except Exception:
             pass
         if title and url and _safe_web_url(url) and url not in seen:
@@ -973,30 +985,67 @@ def parse_bing_rss_results(document):
                 "title": title[:220], "url": url, "snippet": snippet[:900],
                 "search_provider": "bing_rss",
             })
+        if len(results) >= 10:
+            break
+    return results
+
+def parse_bing_html_results(document):
+    """Fallback parser for Bing's HTML SERP when the RSS endpoint returns an interstitial."""
+    results, seen = [], set()
+    blocks = re.finditer(
+        r"<li\b[^>]*class=[\"'][^\"']*\bb_algo\b[^\"']*[\"'][^>]*>([\s\S]*?)</li\s*>",
+        document or "", re.I,
+    )
+    for match in blocks:
+        block = match.group(1)
+        heading = re.search(r"<h2\b[^>]*>([\s\S]*?)</h2\s*>", block, re.I)
+        if not heading:
+            continue
+        anchor = re.search(r"<a\b[^>]*>", heading.group(1), re.I)
+        if not anchor:
+            continue
+        href = _web_attr(anchor.group(0), "href")
+        title = _web_strip_html(heading.group(1))
+        caption = re.search(r"<div\b[^>]*class=[\"'][^\"']*\bb_caption\b[^\"']*[\"'][^>]*>([\s\S]*?)</div\s*>", block, re.I)
+        snippet = _web_strip_html(caption.group(1)) if caption else ""
+        if title and _safe_web_url(href) and href not in seen:
+            seen.add(href)
+            results.append({
+                "title": title[:220], "url": href, "snippet": snippet[:900],
+                "search_provider": "bing_html",
+            })
+        if len(results) >= 10:
+            break
     return results
 
 def _search_bing_rss(query):
-    params = urllib.parse.urlencode({
+    """Use Bing's public no-key RSS endpoint, then parse its HTML SERP if needed."""
+    address = "https://www.bing.com/search?" + urllib.parse.urlencode({
         "q": query,
         "format": "rss",
-        "mkt": "nl-NL",
-        "setlang": "nl-NL",
     })
-    address = "https://www.bing.com/search?" + params
     request = urllib.request.Request(address, headers={
-        **HEADERS,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-        "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
-        "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.7",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
     })
-    with urllib.request.urlopen(request, timeout=7) as response:
+    with urllib.request.urlopen(request, timeout=8) as response:
         if getattr(response, "status", 200) != 200:
-            raise RuntimeError("Bing RSS HTTP " + str(response.status))
-        payload = response.read().decode("utf-8", errors="replace")
+            raise RuntimeError("Bing HTTP " + str(response.status))
+        final_url = response.geturl() if hasattr(response, "geturl") else address
+        content_type = response.headers.get("Content-Type", "") if hasattr(response, "headers") else ""
+        payload = response.read(1200000).decode("utf-8", errors="replace")
     results = parse_bing_rss_results(payload)
-    if not results:
-        raise RuntimeError("Bing RSS returned no parseable results")
-    return results
+    if results:
+        return results
+    html_results = parse_bing_html_results(payload)
+    if html_results:
+        return html_results
+    preview = re.sub(r"\s+", " ", payload[:260]).strip()
+    raise RuntimeError(
+        "Bing returned no results (content-type=" + str(content_type)[:80]
+        + ", final-host=" + str(urllib.parse.urlparse(final_url).hostname or "")[:80]
+        + ", body=" + preview[:140] + ")"
+    )
 
 def _search_duckduckgo_html(query):
     address = "https://html.duckduckgo.com/html/?kl=nl-nl&q=" + urllib.parse.quote_plus(query)
@@ -1191,13 +1240,15 @@ def get_web_market_reference(db, q, candidate_groups=None, cfg=None):
     anchors = list(dict.fromkeys(value for value in anchors if value))
     if not anchors:
         return {"sources": [], "used_price_eur": None, "new_price_eur": None, "confidence": 0.0, "sample_count": 0, "rationale": ""}
-    target = " OR ".join('"' + value.replace('"', "")[:100] + '"' for value in anchors[:4])
+    primary_anchor = anchors[0].replace('"', "")[:120]
     if group_terms:
-        target += " OR " + " OR ".join('"' + value.replace('"', "")[:80] + '"' for value in group_terms[:6])
-    used_query = "(" + target + ") (tweedehands OR gebruikt OR occasion OR used) Nederland EUR"
-    new_query = "(" + target + ") (nieuw OR nieuwprijs OR kopen OR new) Nederland EUR"
+        group_hint = group_terms[0].replace('"', "")[:70]
+        if group_hint.lower() not in primary_anchor.lower():
+            primary_anchor = (primary_anchor + " " + group_hint).strip()
+    used_query = '"' + primary_anchor + '" tweedehands OR gebruikt OR occasion OR used'
+    new_query = '"' + primary_anchor + '" nieuw OR nieuwprijs OR new OR kopen'
     fingerprint_data = {
-        "provider": "bing-rss-primary-ddg-html-fallback-v2", "query": q.get("query"), "label": q.get("label"),
+        "provider": "bing-rss-simple-query-tolerant-parser-v3", "query": q.get("query"), "label": q.get("label"),
         "include_any": q.get("include_any", []), "search_variants": q.get("search_variants", []),
         "require_regex": q.get("require_regex"), "group_regex": q.get("group_regex"),
         "exclude": q.get("exclude", []), "exclude_regex": q.get("exclude_regex", []),

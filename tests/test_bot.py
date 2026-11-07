@@ -671,5 +671,30 @@ class ScannerTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_bing_rss_parser_handles_cdata_and_escaped_content(self):
+        xml = """<rss><channel>
+          <item><title><![CDATA[Sony A7 IV Body]]></title>
+            <link><![CDATA[https://www.kieskeurig.nl/systeemcamera/product/sony-a7-iv]]></link>
+            <description><![CDATA[Camera nieuw € 2.099,00 &amp; direct leverbaar]]></description>
+          </item>
+        </channel></rss>"""
+        rows = bot.parse_bing_rss_results(xml)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["title"], "Sony A7 IV Body")
+        self.assertIn("€ 2.099,00", rows[0]["snippet"])
+        self.assertEqual(rows[0]["url"], "https://www.kieskeurig.nl/systeemcamera/product/sony-a7-iv")
+
+    def test_bing_html_parser_extracts_serp_links_and_snippets(self):
+        html = """<ol id="b_results">
+          <li class="b_algo"><h2><a href="https://www.coolblue.nl/product/sony-a7-iv">Sony A7 IV kopen</a></h2>
+          <div class="b_caption"><p>Nieuwprijs € 2.099</p></div></li>
+          <li class="b_algo"><h2><a href="javascript:alert(1)">Unsafe result</a></h2></li>
+        </ol>"""
+        rows = bot.parse_bing_html_results(html)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["url"], "https://www.coolblue.nl/product/sony-a7-iv")
+        self.assertIn("€ 2.099", rows[0]["snippet"])
+        self.assertEqual(rows[0]["search_provider"], "bing_html")
+
 if __name__ == "__main__":
     unittest.main()
