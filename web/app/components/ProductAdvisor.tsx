@@ -177,8 +177,13 @@ function AdvisorAnswer({ report, asking }: { report: AdvisorReport; asking: numb
           ))}</ol>
         </details>
       ) : null}
+      {report.search.sites?.length ? (
+        <p className="advisor-search-meta">
+          Проверенные сайты: {report.search.sites.map((site) => site.name + (site.ok ? " ✓ " + site.parsed : " ✗" + (site.error ? " (" + site.error + ")" : ""))).join(" · ")}
+        </p>
+      ) : null}
       <p className="advisor-search-meta">
-        Поиск: {report.search.providers.length ? report.search.providers.join(", ") : "поисковики недоступны"}
+        Поисковые системы: {report.search.providers.length ? report.search.providers.join(", ") : "недоступны с сервера"}
         {report.search.failedProviders.length ? " (недоступны: " + report.search.failedProviders.join(", ") + ")" : ""}
         {" · страниц открыто " + report.search.pagesFetched + ", с ценами " + report.search.pagesWithPrices}
         {" · Marktplaats (только контекст): " + report.search.marketplaceOffers}

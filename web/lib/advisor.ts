@@ -69,6 +69,8 @@ export type AdvisorReport = {
     providers: string[];
     failedProviders: string[];
     failureReasons: string[];
+    /** Every directly checked site: whether it answered and how many offers it returned. */
+    sites: Array<{ name: string; ok: boolean; parsed: number; error?: string }>;
     pagesFetched: number;
     pagesWithPrices: number;
     marketplaceOffers: number;
@@ -281,7 +283,8 @@ export function buildReport(context: DealContext, research: MarketResearch, inte
   const lead = shops.length
     ? shopLead + (parts.length ? " · " + parts.join(" · ") : "")
     : intent === "price" || intent === "resale"
-      ? (parts.length ? parts.join(" · ").replace(/^./, (c) => c.toUpperCase()) : "Подтверждённых цен не найдено")
+      ? (parts.length ? parts.join(" · ").replace(/^./, (c) => c.toUpperCase())
+        : "Цены точной модели не найдены: проверено " + Object.keys(research.sourceHealth || {}).length + " сайтов" + (research.rejected.variants + research.rejected.accessories ? ", отброшено " + research.rejected.variants + " других версий и " + research.rejected.accessories + " аксессуаров" : ""))
       : label + ". " + reason;
 
   const failedProviders = [...new Set(research.attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.provider))]
@@ -291,6 +294,7 @@ export function buildReport(context: DealContext, research: MarketResearch, inte
     risks: risks.slice(0, 4), answer: "", sources,
     search: {
       queries: research.queries, providers: research.providersUsed, failedProviders,
+      sites: Object.entries(research.sourceHealth || {}).map(([name, health]) => ({ name, ok: health.ok, parsed: health.parsed, error: health.error })),
       failureReasons: [...new Map(research.attempts.filter((attempt) => !attempt.ok && attempt.error && !research.providersUsed.includes(attempt.provider))
         .map((attempt) => [attempt.provider, attempt.provider + ": " + attempt.error])).values()].slice(0, 6),
       pagesFetched: research.pagesFetched, pagesWithPrices: research.pagesWithPrices,
