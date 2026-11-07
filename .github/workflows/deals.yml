@@ -28,6 +28,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # Independent market valuation runs web/scripts/market-cli.ts (Node strips TypeScript types natively).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - uses: actions/cache@v4
         with:
           path: state.db

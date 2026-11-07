@@ -9,7 +9,9 @@ import html as html_lib
 import xml.etree.ElementTree as ET
 import random
 import re
+import shutil
 import sqlite3
+import subprocess
 import statistics
 import sys
 import time
@@ -88,6 +90,20 @@ def open_db():
         CREATE INDEX IF NOT EXISTS ix_eval_next ON evaluations(next_check);
         CREATE TABLE IF NOT EXISTS geocache(
             place TEXT PRIMARY KEY, lat REAL, lon REAL, checked_at INTEGER NOT NULL);
+        -- Independent (non-Marktplaats) market valuations; append-only history.
+        CREATE TABLE IF NOT EXISTS external_valuations(
+            key TEXT NOT NULL, checked_at INTEGER NOT NULL, query TEXT,
+            market_value REAL, conservative_value REAL, used_value REAL, new_value REAL,
+            refurbished_value REAL, confidence TEXT, used_count INTEGER, source_count INTEGER,
+            domain_count INTEGER, spread REAL, reason TEXT, offers_json TEXT, providers TEXT,
+            PRIMARY KEY(key, checked_at));
+        CREATE TABLE IF NOT EXISTS external_offers(
+            key TEXT NOT NULL, fetched_at INTEGER NOT NULL, url TEXT NOT NULL, title TEXT,
+            price REAL, segment TEXT, domain TEXT, method TEXT);
+        CREATE INDEX IF NOT EXISTS ix_external_offers_key ON external_offers(key, fetched_at);
+        CREATE TABLE IF NOT EXISTS status_history(
+            id TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, at INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS ix_status_history_id ON status_history(id, at);
     """)
     migrate_db(db)
     return db
@@ -107,7 +123,20 @@ def migrate_db(db):
     for column, kind in LISTING_COLUMNS.items():
         if column not in existing:
             db.execute(f"ALTER TABLE listings ADD COLUMN {column} {kind}")
+    if "reserved" not in existing:
+        db.execute("ALTER TABLE listings ADD COLUMN reserved INTEGER")
+    eval_columns = {row[1] for row in db.execute("PRAGMA table_info(evaluations)")}
+    if "reserved" not in eval_columns:
+        db.execute("ALTER TABLE evaluations ADD COLUMN reserved INTEGER NOT NULL DEFAULT 0")
     db.commit()
+
+
+def record_status_change(db, listing_id, status, reason, now):
+    """Append to the status history only when the status actually changes."""
+    last = db.execute("SELECT status FROM status_history WHERE id=? ORDER BY at DESC, rowid DESC LIMIT 1", (listing_id,)).fetchone()
+    if not last or last[0] != status:
+        db.execute("INSERT INTO status_history(id, status, reason, at) VALUES(?,?,?,?)",
+                   (listing_id, status, str(reason or "")[:300], now))
 
 
 def upsert_listing(db, listing_id, qkey, group, item, now):
@@ -120,16 +149,17 @@ def upsert_listing(db, listing_id, qkey, group, item, now):
     updated = db.execute(
         "UPDATE listings SET qkey=?, grp=?, title=?, price=?, last_seen=?, url=COALESCE(?, url), "
         "city=COALESCE(?, city), item_condition=COALESCE(?, item_condition), price_type=COALESCE(?, price_type), "
-        "lat=COALESCE(?, lat), lon=COALESCE(?, lon), posted=COALESCE(?, posted) WHERE id=?",
-        values + (listing_id,),
+        "lat=COALESCE(?, lat), lon=COALESCE(?, lon), posted=COALESCE(?, posted), reserved=? WHERE id=?",
+        values + (1 if item.get("reserved") else 0, listing_id),
     ).rowcount
     if not updated:
         db.execute(
-            "INSERT INTO listings(id,qkey,grp,title,price,first_seen,last_seen,url,city,item_condition,price_type,lat,lon,posted) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO listings(id,qkey,grp,title,price,first_seen,last_seen,url,city,item_condition,price_type,lat,lon,posted,reserved) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (listing_id, qkey, group, item["title"], item["price"], now, now,
              item.get("url") or None, item.get("city") or None, item.get("item_condition") or None,
-             item.get("ptype") or None, item.get("lat"), item.get("lon"), item.get("date") or None),
+             item.get("ptype") or None, item.get("lat"), item.get("lon"), item.get("date") or None,
+             1 if item.get("reserved") else 0),
         )
 
 def market_stats(db, qkey, grp, exclude_id, since):
@@ -152,7 +182,7 @@ def market_stats(db, qkey, grp, exclude_id, since):
 def market_price_samples(db, qkey, grp, exclude_id, since):
     """Fixed asking prices of comparable listings; "bieden vanaf" minimum bids are not prices."""
     sql = ("SELECT price FROM listings WHERE qkey=? AND last_seen>=? AND id!=? "
-           "AND (price_type IS NULL OR price_type='FIXED')")
+           "AND (price_type IS NULL OR price_type='FIXED') AND COALESCE(reserved, 0)=0")
     args = [qkey, since, exclude_id]
     if grp is not None:
         sql += " AND grp=?"
@@ -390,6 +420,8 @@ def parse_listing(l):
         "lon": _coordinate(location.get("longitude"), -180, 180),
         "item_condition": _listing_attribute(l, "condition"),
         "delivery": _listing_attribute(l, "delivery"),
+        # Marktplaats API status flag ("Gereserveerd"); never inferred from title/description text.
+        "reserved": l.get("reserved") is True or str(l.get("reserved")).lower() == "true",
     }
 
 
@@ -686,6 +718,8 @@ def primary_rejection(q, it, cfg):
     # rescue a free, auction, out-of-range, distant, or externally linked listing.
     if not it.get("id") or it.get("price") is None or it["price"] <= 0:
         return "invalid"
+    if it.get("reserved"):
+        return "reserved"
     # "Bieden vanaf" (MIN_BID) has a real minimum price: evaluate it, but never as a comparable.
     if it.get("ptype") not in (None, "FIXED", "MIN_BID"):
         return "price_type"
@@ -1663,50 +1697,86 @@ def calculate_resale_economics(q, asking_price, reference_price, sample_count, r
     }
 
 
-def check_listing_alive(url, timeout=12):
-    """Returns True (live), False (404/410: removed) or None (could not check)."""
+RESERVED_PAGE_MARKERS = (
+    re.compile(r'"isReserved"\s*:\s*true'),
+    re.compile(r'ListingHeader-module-price[^>]*>\s*(?:Gereserveerd|Reserved)\s*<', re.I),
+    re.compile(r'"ap"\s*:\s*"Gereserveerd"'),
+)
+
+
+def listing_page_status(html_text):
+    """Status from the listing page's structured data and status label, never from the description."""
+    if any(marker.search(html_text) for marker in RESERVED_PAGE_MARKERS):
+        return "reserved"
+    return "live"
+
+
+def check_listing_status(url, timeout=15):
+    """Returns "live", "reserved", "removed" (404/410/redirect away) or None (could not check)."""
     if not str(url or "").startswith("https://www.marktplaats.nl/"):
         return None
     try:
         request = urllib.request.Request(url, headers={**HEADERS, "Accept": "text/html"})
         with urllib.request.urlopen(request, timeout=timeout) as response:
             final_url = response.geturl()
-            response.read(2048)
-            # A removed listing can also redirect to a search/category page instead of the ad.
-            return "/v/" in final_url or "/a/" in final_url
+            if "/v/" not in final_url and "/a/" not in final_url:
+                return "removed"
+            return listing_page_status(response.read(2_000_000).decode("utf-8", "ignore"))
     except urllib.error.HTTPError as error:
         if error.code in (404, 410):
-            return False
+            return "removed"
         return None
     except Exception:
         return None
 
 
-def verify_listing_liveness(db, feed_deals, metrics, now, cfg):
-    limit = int(cfg.get("liveness_checks_per_run", 40))
+def check_listing_alive(url, timeout=12):
+    """Backward-compatible wrapper: True (live), False (removed), None (unknown)."""
+    status = check_listing_status(url, timeout)
+    return None if status is None else status != "removed"
+
+
+def verify_listing_liveness(db, feed_deals, metrics, now, cfg, seen_in_search=None):
+    """Re-check listings that this run's search did not return: sold/removed or reserved since the last scan.
+
+    Strong and good deals are always checked (they are what the user acts on); the rest are checked
+    by staleness within the per-run limit.
+    """
+    seen_in_search = seen_in_search or set()
+    limit = int(cfg.get("liveness_checks_per_run", 120))
     stale_after = int(cfg.get("liveness_after_hours", 36)) * 3600
-    queue = []
+    priority, queue = [], []
     for listing_id, deal in feed_deals.items():
+        if listing_id in seen_in_search:
+            continue  # fresh API data in this run, including the reserved flag
         row = db.execute("SELECT last_seen_search, last_verified FROM evaluations WHERE id=?", (listing_id,)).fetchone()
         last_seen = int(row[0]) if row and row[0] else 0
         last_verified = int(row[1]) if row and row[1] else 0
-        if now - last_seen < stale_after or now - last_verified < 12 * 3600:
-            continue
-        queue.append((last_verified, listing_id, deal))
+        if deal.get("status") in ("strong", "good") and now - last_verified >= 1800:
+            priority.append((last_verified, listing_id, deal))
+        elif now - last_seen >= stale_after and now - last_verified >= 12 * 3600:
+            queue.append((last_verified, listing_id, deal))
     queue.sort(key=lambda item: item[0])
-    for _verified, listing_id, deal in queue[:limit]:
-        alive = check_listing_alive(deal.get("listing_url"))
+    for _verified, listing_id, deal in (priority + queue)[:max(limit, len(priority))]:
+        status = check_listing_status(deal.get("listing_url"))
         metrics["livenessChecked"] += 1
-        if alive is None:
+        if status is None:
             metrics["technicalErrors"] += 1
             db.execute("INSERT INTO evaluations(id, last_error) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET last_error=excluded.last_error",
                        (listing_id, "liveness check failed"))
             continue
-        db.execute("INSERT INTO evaluations(id, last_verified, inactive) VALUES(?,?,?) "
-                   "ON CONFLICT(id) DO UPDATE SET last_verified=excluded.last_verified, inactive=excluded.inactive",
-                   (listing_id, now, 0 if alive else 1))
-        if not alive:
+        db.execute("INSERT INTO evaluations(id, last_verified, inactive, reserved) VALUES(?,?,?,?) "
+                   "ON CONFLICT(id) DO UPDATE SET last_verified=excluded.last_verified, inactive=excluded.inactive, reserved=excluded.reserved",
+                   (listing_id, now, 1 if status == "removed" else 0, 1 if status == "reserved" else 0))
+        if status == "removed":
             metrics["verifiedInactive"] += 1
+            record_status_change(db, listing_id, "removed", "HTTP 404/410 — снято с продажи", now)
+            feed_deals.pop(listing_id, None)
+        elif status == "reserved":
+            metrics["reservedRemoved"] += 1
+            db.execute("UPDATE evaluations SET status='reserved', reason='Marktplaats: Gereserveerd (страница объявления)' WHERE id=?", (listing_id,))
+            db.execute("UPDATE listings SET reserved=1 WHERE id=?", (listing_id,))
+            record_status_change(db, listing_id, "reserved", "страница объявления: isReserved=true / Gereserveerd", now)
             feed_deals.pop(listing_id, None)
         time.sleep(random.uniform(0.3, 0.8))
     db.commit()
@@ -1751,6 +1821,154 @@ def backfill_coordinates(db, feed_deals, metrics, now, cfg):
     db.commit()
 
 
+WEB_DIR = os.path.join(HERE, "web")
+MARKET_CLI = os.path.join(WEB_DIR, "scripts", "market-cli.ts")
+TS_REGISTER = os.path.join(WEB_DIR, "tests", "register.mjs")
+
+
+def external_key(q, group, item):
+    """One independent valuation per exact model group (or per listing title when no group exists)."""
+    if group and group not in ("unknown", "all", "other"):
+        return f"{q['key']}|{group}"
+    words = re.sub(r"[^a-z0-9 ]+", " ", str(item.get("title") or "").lower()).split()
+    return f"{q['key']}|t:" + "-".join(words[:8])
+
+
+def latest_external(db, key):
+    row = db.execute(
+        "SELECT checked_at, query, market_value, conservative_value, used_value, new_value, refurbished_value, "
+        "confidence, used_count, source_count, domain_count, spread, reason, offers_json, providers "
+        "FROM external_valuations WHERE key=? ORDER BY checked_at DESC LIMIT 1", (key,)).fetchone()
+    if not row:
+        return None
+    try:
+        offers = json.loads(row[13] or "[]")
+    except json.JSONDecodeError:
+        offers = []
+    return {
+        "checked_at": int(row[0]), "query": row[1],
+        "valuation": {"market_value": row[2], "conservative_value": row[3], "used_value": row[4], "new_value": row[5],
+                      "refurbished_value": row[6], "confidence": row[7] or "none", "used_count": int(row[8] or 0),
+                      "source_count": int(row[9] or 0), "domain_count": int(row[10] or 0), "spread": row[11], "reason": row[12] or ""},
+        "offers": offers, "providers": row[14] or "",
+    }
+
+
+def run_external_research(requests, cfg):
+    """Runs the TypeScript market research (web/scripts/market-cli.ts) for many models at once.
+
+    Real web requests to shops, refurbishers and independent used platforms. Marktplaats is never
+    used as evidence there. Returns a list of result dicts; an empty list when Node is unavailable.
+    """
+    if not requests:
+        return []
+    node = shutil.which("node")
+    if not node or not os.path.exists(MARKET_CLI):
+        log("внешняя оценка рынка недоступна: не найден Node.js или web/scripts/market-cli.ts")
+        return None
+    settings = cfg.get("external_market", {})
+    concurrency = int(settings.get("concurrency", 3))
+    budget_ms = int(settings.get("budget_ms", 35000))
+    timeout = min(int(settings.get("timeout_seconds", 1200)), 120 + (len(requests) * budget_ms) // (1000 * concurrency) + 60)
+    env = {**os.environ, "MARKET_CLI_CONCURRENCY": str(concurrency), "MARKET_CLI_BUDGET_MS": str(budget_ms)}
+    try:
+        completed = subprocess.run(
+            [node, "--no-warnings", "--import", TS_REGISTER, MARKET_CLI],
+            input=json.dumps(requests, ensure_ascii=False), capture_output=True, text=True,
+            cwd=WEB_DIR, timeout=timeout, env=env,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        log(f"внешняя оценка рынка прервана: {type(exc).__name__}")
+        return None
+    if completed.returncode != 0:
+        log("внешняя оценка рынка завершилась с ошибкой: " + completed.stderr.strip()[-400:])
+        return None
+    try:
+        return json.loads(completed.stdout or "[]")
+    except json.JSONDecodeError:
+        log("внешняя оценка рынка вернула некорректный JSON")
+        return None
+
+
+def store_external(db, result, now):
+    """Append a valuation and its offers to the history (nothing is overwritten)."""
+    valuation = result.get("valuation") or {}
+    offers = [offer for offer in (result.get("offers") or [])
+              if isinstance(offer, dict) and str(offer.get("url") or "").startswith("https://")
+              and not re.search(r"(?:^|\.)(?:marktplaats\.nl|2dehands\.be)$", str(offer.get("domain") or ""))]
+    used_count = sum(1 for offer in offers if offer.get("segment") == "used")
+    db.execute(
+        "INSERT OR REPLACE INTO external_valuations(key, checked_at, query, market_value, conservative_value, used_value, "
+        "new_value, refurbished_value, confidence, used_count, source_count, domain_count, spread, reason, offers_json, providers) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (result["key"], now, result.get("query"), valuation.get("marketValue"), valuation.get("conservativeValue"),
+         valuation.get("usedValue"), valuation.get("newValue"), valuation.get("refurbishedValue"),
+         valuation.get("confidence") or "none", used_count, len(offers), len({offer.get("domain") for offer in offers}),
+         valuation.get("spread"), valuation.get("reason"), json.dumps(offers, ensure_ascii=False), ",".join(result.get("providers") or [])),
+    )
+    db.executemany(
+        "INSERT INTO external_offers(key, fetched_at, url, title, price, segment, domain, method) VALUES(?,?,?,?,?,?,?,?)",
+        [(result["key"], now, offer["url"], str(offer.get("title") or "")[:220], offer.get("price"), offer.get("segment"),
+          offer.get("domain"), offer.get("method")) for offer in offers],
+    )
+
+
+def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals):
+    """Fresh-or-queued independent valuations for every model group seen in this run."""
+    settings = cfg.get("external_market", {})
+    ttl = int(settings.get("cache_hours", 24)) * 3600
+    per_run = int(settings.get("per_run", 45))
+    groups = {}
+    for q, candidates, _ai in pending:
+        for listing_id, (item, group, _flags) in candidates.items():
+            key = external_key(q, group, item)
+            entry = groups.setdefault(key, {"q": q, "group": group, "members": [], "hot": False})
+            entry["members"].append(item)
+            if str((previous_deals.get(listing_id) or {}).get("status")) in ("strong", "good"):
+                entry["hot"] = True
+    results, due = {}, []
+    for key, entry in groups.items():
+        latest = latest_external(db, key)
+        if latest and now - latest["checked_at"] < ttl:
+            results[key] = {**latest, "stale": False}
+            metrics["externalCached"] += 1
+            continue
+        if latest:
+            results[key] = {**latest, "stale": True}
+        due.append((0 if entry["hot"] else 1, -len(entry["members"]), latest["checked_at"] if latest else 0, key, entry))
+    due.sort(key=lambda row: row[:3])
+    requests = []
+    for _hot, _count, _checked, key, entry in due[:per_run]:
+        titles = sorted((str(item.get("title") or "") for item in entry["members"]), key=lambda title: (len(title) < 12, len(title)))
+        group = entry["group"]
+        requests.append({
+            "key": key, "title": titles[0],
+            "hint": group.replace("-", " ") if group and group not in ("unknown", "all", "other") else None,
+            "referencePrice": min(float(item["price"]) for item in entry["members"]),
+        })
+    metrics["externalQueued"] += max(0, len(due) - len(requests))
+    if requests:
+        log(f"внешняя оценка рынка: {len(requests)} моделей (в очереди ещё {max(0, len(due) - len(requests))})")
+        outcome = run_external_research(requests, cfg)
+        if outcome is None:
+            metrics["externalFailed"] += len(requests)
+            metrics["technicalErrors"] += 1
+        else:
+            for result in outcome:
+                if not isinstance(result, dict) or not result.get("ok") or not result.get("key"):
+                    metrics["externalFailed"] += 1
+                    continue
+                store_external(db, result, now)
+                metrics["externalResearched"] += 1
+                fresh = latest_external(db, result["key"])
+                if fresh:
+                    results[result["key"]] = {**fresh, "stale": False}
+                    if fresh["valuation"]["market_value"]:
+                        metrics["externalValued"] += 1
+            db.commit()
+    return results
+
+
 def record_evaluation(db, listing_id, qkey, status, reason, now, seen, has_market=True):
     """Persist the lifecycle state and schedule the next re-check (backoff when data is missing)."""
     row = db.execute("SELECT checks FROM evaluations WHERE id=?", (listing_id,)).fetchone()
@@ -1772,6 +1990,7 @@ def record_evaluation(db, listing_id, qkey, status, reason, now, seen, has_marke
         "last_seen_search=COALESCE(excluded.last_seen_search, evaluations.last_seen_search), lease_until=NULL",
         (listing_id, qkey, status, str(reason or "")[:300], checks, now, now, next_check, now if seen else None, checks),
     )
+    record_status_change(db, listing_id, status, reason, now)
     return checks, next_check
 
 
@@ -1834,6 +2053,8 @@ def run_once(cfg, db, dry=False):
         "rejectedAccessory": 0, "newListings": 0, "evaluated": 0, "awaitingRecheck": 0,
         "promoted": 0, "demoted": 0, "verifiedInactive": 0, "livenessChecked": 0,
         "technicalErrors": 0, "minBidCandidates": 0, "rejectedSpread": 0, "geocoded": 0,
+        "rejectedReserved": 0, "reservedRemoved": 0, "externalResearched": 0, "externalCached": 0,
+        "externalFailed": 0, "externalQueued": 0, "externalValued": 0,
     }
     previous_deals = {str(deal.get("listing_id")): deal for deal in feed_doc.get("deals", [])
                       if isinstance(deal, dict) and deal.get("listing_id")}
@@ -1887,6 +2108,7 @@ def run_once(cfg, db, dry=False):
                (str((offset + max(1, len(ordered_queries) // 3)) % max(1, len(ordered_queries))),))
     db.commit()
     consecutive_failures = 0
+    pending_evaluations = []
     for q in ordered_queries:
         qkey = q["key"]
         existing = db.execute("SELECT COUNT(*) FROM listings WHERE qkey=?", (qkey,)).fetchone()[0]
@@ -1970,11 +2192,23 @@ def run_once(cfg, db, dry=False):
                     "price_type": "rejectedPriceType", "price_range": "rejectedPriceRange",
                     "distance": "rejectedDistance", "ai_mismatch": "aiRejected",
                     "accessory": "rejectedAccessory", "quantity": "rejectedInvalid",
+                    "reserved": "rejectedReserved",
                 }[rejection]
                 metrics[metric] += 1
+                if rejection == "reserved" and listing_id:
+                    # Keep the history: mark the listing reserved instead of deleting anything.
+                    if listing_id in previous_deals:
+                        metrics["reservedRemoved"] += 1
+                    db.execute("INSERT INTO evaluations(id, qkey, status, reason, reserved) VALUES(?,?,?,?,1) "
+                               "ON CONFLICT(id) DO UPDATE SET status='reserved', reason=excluded.reason, reserved=1",
+                               (listing_id, qkey, "reserved", "Marktplaats: объявление зарезервировано (Gereserveerd)"))
+                    db.execute("UPDATE listings SET reserved=1 WHERE id=?", (listing_id,))
+                    record_status_change(db, listing_id, "reserved", "API: reserved=true", now)
                 if listing_id:
                     feed_deals.pop(listing_id, None)
                 continue
+            if listing_id:
+                db.execute("UPDATE evaluations SET reserved=0 WHERE id=? AND reserved=1", (listing_id,))
             metrics["accepted"] += 1
             age = age_hours(item["date"])
             if age is None:
@@ -2012,16 +2246,18 @@ def run_once(cfg, db, dry=False):
                 continue
             if cached_deal.get("active") is False:
                 continue
-            state_row = db.execute("SELECT next_check, inactive, lease_until FROM evaluations WHERE id=?", (cached_id,)).fetchone()
+            state_row = db.execute("SELECT next_check, inactive OR reserved, lease_until FROM evaluations WHERE id=?", (cached_id,)).fetchone()
             if state_row and state_row[1]:
                 feed_deals.pop(cached_id, None)
                 continue
             if state_row and state_row[2] and int(state_row[2]) > now:
                 continue  # another scanner process is evaluating this listing right now
-            if state_row and state_row[0] and int(state_row[0]) > now:
+            # Status computed from Marktplaats prices (pre-v6) is never kept: re-value now.
+            legacy = cached_deal.get("price_reference_type") in ("marktplaats", "web_used")
+            if not legacy and state_row and state_row[0] and int(state_row[0]) > now:
                 metrics["awaitingRecheck"] += 1
                 continue
-            rank_value = {"strong": 0, "good": 1}.get(str(cached_deal.get("status")), 2)
+            rank_value = -1 if legacy and cached_deal.get("status") in ("strong", "good") else {"strong": 0, "good": 1}.get(str(cached_deal.get("status")), 2)
             due_queue.append((rank_value, int(state_row[0]) if state_row and state_row[0] else 0, cached_id, cached_deal))
         due_queue.sort(key=lambda row: (row[0], row[1]))
         max_recheck = int(cfg.get("max_rechecks_per_query", 80))
@@ -2067,165 +2303,116 @@ def run_once(cfg, db, dry=False):
                        "ON CONFLICT(id) DO UPDATE SET lease_until=excluded.lease_until", (listing_id, qkey, now + 900))
         db.commit()
 
-        # Search outside websites and cache actual new/used price observations.
-        candidate_groups = sorted({group for _item, group, _flags in candidates.values() if group and group != "unknown"})
-        if candidate_groups:
-            web_market_data = get_web_market_reference(db, q, candidate_groups, cfg)
-            if web_market_data.get("sources"):
-                metrics["webSearchGroups"] += 1
-                metrics["webPriceOffers"] += len(web_market_data["sources"])
-        else:
-            web_market_data = {"sources": []}
+        pending_evaluations.append((q, candidates, ai_decisions))
+        time.sleep(random.uniform(2, 4))
 
+    # Phase 2: independent market value for every model group (shops, refurbishers and used
+    # platforms outside Marktplaats). Phase 3: evaluate every candidate against that value.
+    external_by_key = prepare_external_valuations(db, pending_evaluations, cfg, now, metrics, previous_deals)
+    max_spread = float(cfg.get("max_price_spread", 0.8))
+    for q, candidates, ai_decisions in pending_evaluations:
+        qkey = q["key"]
         for listing_id, (item, group, flags) in candidates.items():
             metrics["candidates"] += 1
             ai_decision = ai_decisions.get(listing_id)
             ai_confident = bool(ai_decision and ai_decision.get("confidence", 0) >= 0.90)
-            local_prices = [] if group == "unknown" else market_price_samples(db, qkey, group, listing_id, window)
-            sample_count = len(local_prices)
-            median_price = _market_median(local_prices)
-            lower_quartile_price = _market_lower_quartile(local_prices)
-            strict_comparison = bool(q.get("strict_group") or q.get("group_regex")
-                                     or q.get("group_type") in ("model_required", "television"))
-            comparable_group = None if group == "unknown" else group
-            if group != "all" and not strict_comparison and sample_count < min_n:
-                category_prices = market_price_samples(db, qkey, None, listing_id, window)
-                if len(category_prices) >= min_n:
-                    comparable_group = None
-                    local_prices = category_prices
-                    sample_count = len(local_prices)
-                    median_price = _market_median(local_prices)
-                    lower_quartile_price = _market_lower_quartile(local_prices)
+            # Marktplaats prices are context only (shown to the user), never the market value.
+            context_group = None if group in ("all", "other") else group
+            marketplace_prices = [] if group == "unknown" else market_price_samples(db, qkey, context_group, listing_id, window)
+            external = external_by_key.get(external_key(q, group, item))
+            valuation = (external or {}).get("valuation") or {}
+            stale = bool(external and external.get("stale"))
+            confidence = valuation.get("confidence") or "none"
+            market_value = valuation.get("market_value")
+            new_value = valuation.get("new_value")
+            used_count = int(valuation.get("used_count") or 0)
+            spread = valuation.get("spread")
+            offers = (external or {}).get("offers") or []
+            new_domains = {offer.get("domain") for offer in offers if offer.get("segment") == "new"}
+            checked_iso = datetime.fromtimestamp(external["checked_at"], timezone.utc).isoformat() if external else None
 
-            web_reference = web_market_reference_for_group(web_market_data, group, q)
-            external_used_prices = list(web_reference.get("used_prices") or [])
-            external_new_prices = list(web_reference.get("new_prices") or [])
-            if group != "unknown" and external_used_prices:
-                combined_prices = local_prices + external_used_prices
-                sample_count = len(combined_prices)
-                median_price = _market_median(combined_prices)
-                lower_quartile_price = _market_lower_quartile(combined_prices)
-                reference_type = "web_used"
-            else:
-                reference_type = "marktplaats" if median_price is not None else "insufficient_data"
-
-            spread = price_spread(local_prices + (external_used_prices if reference_type == "web_used" else []))
             status, discount, reason = "candidate", None, None
-            reference = None
-            new_price = None
-            valuation_price = lower_quartile_price if sample_count >= min_n and lower_quartile_price is not None else median_price
-            market_source_rows = list(web_reference.get("sources") or [])
-            if reference_type in ("marktplaats", "web_used") and group != "unknown":
-                # Persist the real listings behind the estimate so the app and the AI can show them.
-                comparables = market_comparables(db, qkey, comparable_group, listing_id, window, center=valuation_price)
-                market_source_rows = comparables + [row for row in market_source_rows
-                                                    if row.get("url") not in {item["url"] for item in comparables}]
-            new_evidence_count = 0
-
-            if (sample_count < candidate_min_n or median_price is None) and group != "unknown":
+            reference, reference_type, valuation_price, sample_count = None, "insufficient_data", None, used_count
+            new_price = new_value
+            if external and not stale and market_value:
+                reference_type = "external_used"
+                valuation_price = valuation.get("conservative_value") or market_value
+            elif external and not stale and new_value and len(new_domains) >= 2:
+                reference_type = "new_retail"
+                valuation_price = new_value
+                reference = {"new_price_eur": new_value, "grounded": True, "evidence_count": len(new_domains),
+                             "resale_factor": q.get("new_resale_factor", cfg.get("profitability", {}).get("new_resale_factor", 0.62))}
+            elif group != "unknown":
                 static_reference = find_retail_reference(q, group, retail_references, cfg)
-                external_new_sources = list(web_reference.get("new_sources") or [])
-                external_new_domains = {str(source.get("domain") or "") for source in external_new_sources if source.get("domain")}
-                required_new_sources = max(2, int(cfg.get("web_market_search", {}).get("min_new_sources", 2)))
-                if len(external_new_domains) >= required_new_sources:
-                    new_price = _market_median(external_new_prices)
-                    new_evidence_count = len(external_new_domains)
-                    valuation_price = new_price
+                if static_reference:
                     reference_type = "new_retail"
-                    reference = {
-                        "new_price_eur": new_price,
-                        "source_url": external_new_sources[0].get("url", ""),
-                        "checked_at": datetime.now(timezone.utc).isoformat(),
-                        "resale_factor": q.get("new_resale_factor", cfg.get("profitability", {}).get("new_resale_factor", 0.62)),
-                        "grounded": True,
-                        "evidence_count": new_evidence_count,
-                        "rationale": "Новая розничная цена сверена по независимым внешним магазинам.",
-                    }
-                    market_source_rows = external_new_sources
-                elif static_reference:
                     new_price = float(static_reference["new_price_eur"])
-                    new_evidence_count = 1
                     valuation_price = new_price
-                    reference_type = "new_retail"
-                    reference = {
-                        **static_reference, "grounded": True, "evidence_count": 1,
-                        "rationale": "Есть один сохранённый розничный источник; нужна независимая проверка.",
-                    }
-                    market_source_rows = [{
-                        "title": str(static_reference.get("product") or "Retail reference"),
-                        "url": str(static_reference.get("source_url") or ""),
-                        "domain": str(urllib.parse.urlparse(str(static_reference.get("source_url") or "")).hostname or ""),
-                        "price_eur": new_price,
-                        "condition": "new",
-                    }]
+                    reference = {**static_reference, "grounded": True, "evidence_count": 1}
 
+            economics = None
+            market_display_price = None
             if valuation_price is not None:
                 economics = calculate_resale_economics(q, item["price"], valuation_price, sample_count, reference_type, reference, cfg)
-                market_display_price = economics["expected_resale_price"] if reference_type == "new_retail" else valuation_price
+                market_display_price = market_value if reference_type == "external_used" else economics["expected_resale_price"]
                 discount = 1 - item["price"] / market_display_price if market_display_price else None
-            else:
-                economics, market_display_price = None, None
 
             model_year = television_model_year(item["text"]) if q.get("group_type") == "television" else None
-            if reference_type == "new_retail":
-                enough_new_evidence = new_evidence_count >= max(2, int(cfg.get("web_market_search", {}).get("min_new_sources", 2)))
-                if enough_new_evidence and economics and economics["profitable"] and economics["estimated_profit"] >= 50:
-                    status = "strong" if economics["profit_roi"] >= 0.50 and economics["estimated_profit"] >= max(50, economics["minimum_profit_required"] * 1.5) else "good"
-                    metrics["strongDeals" if status == "strong" else "goodDeals"] += 1
-                    reason = "Оценка по нескольким независимым розничным источникам с запасом на торг и расходы"
-                else:
-                    metrics["reviewCandidates"] += 1
-                    reason = "Нужно независимое подтверждение цены нового товара или дополнительные сопоставимые б/у предложения"
-            elif sample_count >= min_n and median_price is not None:
-                discount = 1 - item["price"] / median_price
-                deal_threshold = float(q.get("threshold", 0.25))
-                good_threshold = float(q.get("good_threshold", max(0.12, deal_threshold - 0.08)))
-                if economics and economics["profitable"] and economics["estimated_profit"] >= 50 and discount >= deal_threshold and economics["profit_roi"] >= max(0.30, float(q.get("strong_min_roi", 0.30))):
+            deal_threshold = float(q.get("threshold", 0.25))
+            good_threshold = float(q.get("good_threshold", max(0.12, deal_threshold - 0.08)))
+            profitable = bool(economics and economics["profitable"] and economics["estimated_profit"] >= 50)
+            if reference_type == "external_used":
+                if profitable and confidence == "high" and discount is not None and discount >= deal_threshold \
+                        and economics["profit_roi"] >= max(0.30, float(q.get("strong_min_roi", 0.30))):
                     status = "strong"
                     metrics["strongDeals"] += 1
-                elif economics and economics["profitable"] and economics["estimated_profit"] >= 50 and discount >= good_threshold:
+                elif profitable and discount is not None and discount >= good_threshold:
                     status = "good"
                     metrics["goodDeals"] += 1
-                else:
-                    if not economics or economics["estimated_profit"] < 50 or economics["estimated_profit"] < economics["minimum_profit_required"] or economics["profit_roi"] < economics["minimum_roi_required"]:
-                        metrics["rejectedProfit"] += 1
-                        drop_reason = "Нет прибыли после торга и комиссий"
-                    else:
-                        metrics["rejectedDiscount"] += 1
-                        drop_reason = "Скидка ниже порога"
+                elif confidence in ("high", "medium"):
+                    metrics["rejectedProfit" if not profitable else "rejectedDiscount"] += 1
                     previous_status = str((previous_deals.get(listing_id) or {}).get("status") or "")
                     if previous_status in ("strong", "good"):
                         metrics["demoted"] += 1
-                    record_evaluation(db, listing_id, qkey, "rejected", drop_reason, now, listing_id in seen_in_search)
+                    record_evaluation(db, listing_id, qkey, "rejected",
+                                      "Нет прибыли относительно независимой рыночной цены", now, listing_id in seen_in_search)
                     feed_deals.pop(listing_id, None)
                     continue
+                else:
+                    metrics["reviewCandidates"] += 1
+                    metrics["candidatePreliminary"] += 1
+                    reason = "Внешних б/у предложений мало: " + (valuation.get("reason") or "оценка предварительная")
+            elif reference_type == "new_retail":
+                evidence = int((reference or {}).get("evidence_count") or 0)
+                if evidence >= 2 and profitable:
+                    status = "good"
+                    metrics["goodDeals"] += 1
+                    reason = (f"Б/у рынок вне Marktplaats не подтверждён; ориентир — цена нового €{new_price:.0f} "
+                              f"в {evidence} магазинах × {reference.get('resale_factor', 0.62)}")
+                else:
+                    metrics["reviewCandidates"] += 1
+                    reason = "Есть только цена нового товара — нужны независимые цены б/у"
             else:
                 metrics["reviewCandidates"] += 1
-                if median_price is not None and sample_count >= candidate_min_n:
-                    metrics["candidatePreliminary"] += 1
-                    reason = f"Предварительная оценка по {sample_count} похожим объявлениям; нужна большая выборка"
-                elif reference_type == "insufficient_data":
-                    metrics["candidateNoMarket"] += 1
-                    if ai_confident and ai_decision["same_product"] and not ai_decision["comparable"]:
-                        reason = "AI определил тот же товар, но другая комплектация или модификация; цены не смешиваются с этой моделью"
-                    else:
-                        reason = "Недостаточно данных: нет средней цены Marktplaats и актуальной цены нового товара для точного сравнения; прибыль не выдумывается"
-                elif economics and economics["profitable"]:
-                    reason = "Цена нового товара даёт ориентир, но спрос и стоимость б/у нужно подтвердить"
+                metrics["candidateNoMarket"] += 1
+                if stale:
+                    reason = f"Внешняя оценка от {checked_iso[:10]} устарела — модель в очереди на повторный поиск"
+                elif external:
+                    reason = "Недостаточно независимых цен: " + (valuation.get("reason") or "внешний поиск не дал результатов")
+                elif ai_confident and ai_decision["same_product"] and not ai_decision["comparable"]:
+                    reason = "AI определил другую комплектацию или модификацию — цены не смешиваются"
                 else:
-                    reason = "Недостаточно надёжных сравнений; прибыль от перепродажи пока не подтверждена"
+                    reason = "Внешняя оценка рынка в очереди: цены Marktplaats не используются как рыночная стоимость"
 
-            # A wide price spread means the "market price" is not one market: do not call it a deal.
-            max_spread = float(cfg.get("max_price_spread", 0.8))
-            if status in ("strong", "good") and spread is not None and spread > max_spread and reference_type != "new_retail":
+            # A wide spread means the external offers are not one market.
+            if status in ("strong", "good") and spread is not None and spread > max_spread and reference_type == "external_used":
                 metrics["strongDeals" if status == "strong" else "goodDeals"] -= 1
                 metrics["reviewCandidates"] += 1
                 metrics["rejectedSpread"] += 1
                 status = "candidate"
-                reason = f"Большой разброс цен сравнений ({spread:.0%} от медианы) — оценка ненадёжна, нужна проверка модели"
+                reason = f"Большой разброс независимых цен ({spread:.0%} от медианы) — оценка ненадёжна"
             if item.get("ptype") == "MIN_BID":
                 if status == "candidate":
-                    # A minimum bid without confirmed profit is noise, not a lead.
                     metrics["reviewCandidates"] -= 1
                     metrics["rejectedPriceType"] += 1
                     record_evaluation(db, listing_id, qkey, "rejected", "«Bieden vanaf» без подтверждённой выгоды", now,
@@ -2239,9 +2426,8 @@ def run_once(cfg, db, dry=False):
                     metrics["goodDeals"] += 1
                     status = "good"
             if status in ("strong", "good") and not reason and economics:
-                basis_text = "нижнему квартилю" if sample_count >= min_n else "медиане"
-                reason = (f"Цена на {discount:.0%} ниже оценки по {basis_text} {sample_count} сравнений; "
-                          f"прибыль ≈ €{economics['estimated_profit']:.0f} после торга, комиссии и расходов")
+                reason = (f"Цена на {discount:.0%} ниже независимой рыночной цены €{market_value:.0f} "
+                          f"({valuation.get('reason')}); прибыль ≈ €{economics['estimated_profit']:.0f} после торга и комиссий")
             if not reason:
                 reason = "Оценка обновлена"
             previous_status = str((previous_deals.get(listing_id) or {}).get("status") or "")
@@ -2257,11 +2443,17 @@ def run_once(cfg, db, dry=False):
                 metrics["newDeals"] += 1
                 db.execute("INSERT OR IGNORE INTO sent VALUES(?,?)", (listing_id, now))
                 db.commit()
+            ordered_offers = sorted(offers, key=lambda offer: ({"used": 0, "new": 1, "refurbished": 2}.get(offer.get("segment"), 3), offer.get("price") or 0))
+            market_sources = [{
+                "title": str(offer.get("title") or "")[:180], "url": offer["url"], "price": offer.get("price"),
+                "price_eur": offer.get("price"), "domain": offer.get("domain"), "condition": offer.get("segment"),
+                "source": "external", "seen_at": checked_iso,
+            } for offer in ordered_offers if str(offer.get("url") or "").startswith("https://")][:15]
             feed_deals[listing_id] = make_feed_deal(
                 q, item, market_display_price, discount, flags, group, status, sample_count, reason,
                 economics=economics, reference_type=reference_type, new_price=new_price, model_year=model_year,
-                market_median_price=median_price if reference_type in ("marktplaats", "web_used") else None,
-                market_sources=market_source_rows[:12]
+                market_median_price=valuation.get("used_value") if reference_type == "external_used" else None,
+                market_sources=market_sources,
             )
             checks, next_check = record_evaluation(db, listing_id, qkey, status, reason, now, listing_id in seen_in_search,
                                                    has_market=valuation_price is not None)
@@ -2275,7 +2467,21 @@ def run_once(cfg, db, dry=False):
                 "longitude": item.get("lon") if item.get("lon") is not None else previous.get("longitude"),
                 "item_condition": item.get("item_condition") or previous.get("item_condition"),
                 "price_type": item.get("ptype") or previous.get("price_type") or "FIXED",
+                "reserved": False,
                 "market_spread": spread,
+                # Independent valuation, stored separately from the seller's price and Marktplaats context.
+                "market_value": round(float(market_value), 2) if market_value else None,
+                "used_price": valuation.get("used_value"),
+                "refurbished_price": valuation.get("refurbished_value"),
+                "external_sources": int(valuation.get("source_count") or 0),
+                "external_domains": int(valuation.get("domain_count") or 0),
+                "market_checked_at": checked_iso,
+                "market_stale": stale,
+                "valuation_reason": valuation.get("reason") or None,
+                "market_confidence": ("high" if confidence == "high" else "preliminary" if confidence == "medium" else "none")
+                    if reference_type == "external_used" else ("retail_proxy" if reference_type == "new_retail" else "none"),
+                "marktplaats_median": round(_market_median(marketplace_prices), 2) if marketplace_prices else None,
+                "marktplaats_samples": len(marketplace_prices),
                 "match_level": ("variant" if (ai_confident and ai_decision["same_product"] and not ai_decision["comparable"])
                                 else "exact" if group not in ("unknown",) else "similar"),
                 "checks": checks,
@@ -2291,13 +2497,12 @@ def run_once(cfg, db, dry=False):
                     "reason": ai_decision["reason"],
                 }
             if status in ("strong", "good"):
-                log(f"[{qkey}] {status}: чистая прибыль €{economics['estimated_profit']:.0f}, "
-                    f"ROI {economics['profit_roi']:.0%}, цена €{item['price']:.0f} "
-                    f"(ориентир €{valuation_price:.0f}, {sample_count} сравнений, {reference_type}) {item['title'][:70]}")
-        time.sleep(random.uniform(2, 4))
+                log(f"[{qkey}] {status}: прибыль €{economics['estimated_profit']:.0f}, ROI {economics['profit_roi']:.0%}, "
+                    f"цена €{item['price']:.0f}, рынок €{(market_display_price or 0):.0f} ({reference_type}, {used_count} внешн. б/у) {item['title'][:70]}")
+    db.commit()
 
     # Listings missing from search for a while are opened directly: HTTP 404/410 means sold or removed.
-    verify_listing_liveness(db, feed_deals, metrics, now, cfg)
+    verify_listing_liveness(db, feed_deals, metrics, now, cfg, seen_in_search)
     # Older records have only a city name: geocode it once (PDOK, cached) so radius filters work.
     backfill_coordinates(db, feed_deals, metrics, now, cfg)
     metrics["technicalErrors"] += fails

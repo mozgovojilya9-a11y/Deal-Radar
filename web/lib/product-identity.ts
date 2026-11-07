@@ -61,7 +61,8 @@ const ACCESSORY_WORDS = [
   "pouch", "doos", "box only", "lege doos", "empty box", "remote", "afstandsbediening", "koffer", "decal",
   "faceplate", "cooling", "ventilator", "ssd", "geheugenkaart", "sd kaart", "oplaadcase", "laadcase",
   "charging case", "losse", "los", "linker", "rechter", "left earbud", "right earbud", "oordopje", "links",
-  "rechts", "enkele", "single",
+  "rechts", "enkele", "single", "conversion kit", "housing", "onderwaterbehuizing", "underwater", "cage",
+  "battery grip", "batterijgrip", "batteriegriff", "grip", "rig", "gimbal",
 ];
 const ACCESSORY_RE = new RegExp(
   "(?:^|[^a-z0-9])(?:" + ACCESSORY_WORDS.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+")).join("|") + ")(?=$|[^a-z0-9])",
@@ -90,6 +91,9 @@ export function normalizeText(value: string): string {
     .replace(/ø/g, "o")
     .replace(/ray[\s-]*ban/g, "rayban")
     .replace(/play\s*station/g, "playstation")
+    // Dutch/German edition wording: "Digitale Editie", "mit/ohne Laufwerk".
+    .replace(/\bdigitale\b/g, "digital").replace(/\b(?:editie|edizione)\b/g, "edition")
+    .replace(/\bohne\s+laufwerk\b/g, "digital").replace(/\b(?:mit|met)\s+(?:disc\s*)?laufwerk\b/g, "disc")
     .replace(/\bps\s*(\d)\b/g, "playstation $1")
     .replace(/\b(\d)(?:st|nd|rd|th|e|de|ste)\s*(?:gen(?:eration|eratie)?\.?)/g, "gen $1")
     .replace(/\b(?:gen(?:eration|eratie)?\.?)\s*(\d)\b/g, "gen $1")
@@ -151,6 +155,7 @@ export function buildIdentity(title: string, hint?: string | null): ProductIdent
     .replace(/\b\d{1,3}\s?%\s*(?:batterij\w*|accu\w*|battery\w*|bc)?|\b(?:batterij\w*|accu\w*|battery\w*)\s*:?\s*\d{1,3}\s?%/gi, " ")
     .replace(/\b(midnight|starlight|space\s*gr[ae]y|spacegrijs|spacegrey|sterrenlicht|middernacht|titanium\s+\w+|natural|zilver|silver|goud|gold|roze|rose|paars|purple|blauw|blue|groen|green|grijs|grey|gray|zwart|black|wit|white)\b/gi, " ")
     .replace(/\([^)]*\b(?:nieuw|new|zgan|garantie|bon)\b[^)]*\)/gi, " ")
+    .replace(/^\s*(?:complete|compleet|complet|complete set|set)\s+/i, "")
     .replace(/\b(nieuw(staat)?|new|used|gebruikt|tweedehands|zgan|z\.g\.a\.n\.?|zo goed als nieuw|in doos|met doos|sealed|geseald|ongeopend|garantie|bon|factuur|te koop|koopje|incl\.?.*$|inclusief.*$|met .*$|\+.*$)\b/gi, " ")
     .replace(/[-–]\s*(?:mat|matte|glossy|zwart|black|wit|white)[^,]*$/i, " ")
     .replace(/\s+/g, " ")
@@ -287,6 +292,13 @@ export function matchProduct(candidate: string, identity: ProductIdentity): Matc
 
   if (looksLikeAccessory(text, identity)) return { level: "accessory", score: 0.1, reason: "аксессуар или отдельная деталь" };
 
+  // A television without an article code cannot be priced against other sets: "55 inch Philips"
+  // covers models from very different years and panels.
+  const isTelevision = /\b(tv|televisie|television|fernseher|qled|oled|ambilight)\b/.test(normalizeText(identity.raw)) && Boolean(identity.screenSize);
+  if (isTelevision && !identity.modelCodes.length) {
+    return { level: "similar", score: 0.4, reason: "у телевизора не указан артикул — точная модель не определена" };
+  }
+
   // Brand: tolerate implied brands (PlayStation -> Sony), reject an explicit different brand.
   const candidateBrand = detectBrand(normalized);
   const impliedBrands = new Set([...tokens].map((token) => IMPLIED_BRAND[token]).filter(Boolean));
@@ -351,8 +363,9 @@ export function matchProduct(candidate: string, identity: ProductIdentity): Matc
 
   // Retail bundles ("+ game", "bundel") change the price: never an exact comparable.
   if (!identity.wantsAccessory && !BUNDLE_RE.test(normalizeText(identity.raw))
-      && (/(?:^|\s)\+\s*\S/.test(text) || /\b(bundel|bundle|combideal|voordeelset)\b/i.test(normalized)
-        || /\b(?:met|incl\.?|inclusief|with|including)\b[^,.]{0,40}\b(games?|spel(?:len)?|controllers?|fifa|fc\s?\d{2}|call of duty|covers?|oplaadstation|lens(?:es)?|objectie[fv]|kit)\b/i.test(normalized))) {
+      && (/(?:^|\s)\+\s*\S/.test(text) || /\b(bundel|bundle|combideal|voordeelset|set mit)\b/i.test(normalized)
+        || /\b(?:met|incl\.?|inkl\.?|inclusief|inklusive|mit|with|including)\b[^,.]{0,40}\b(games?|spiele?|spel(?:len)?|controllers?|fifa|fc\s?\d{2}|call of duty|covers?|oplaadstation|ladestation|lens(?:es)?|objektiv|objectie[fv]|kit)\b/i.test(normalized)
+        || /\b(call of duty|black ops|fc\s?2\d|fifa\s?\d{2}|spider[\s-]?man|gran turismo|astro bot|god of war|ghost of|hogwarts|fortnite|minecraft|mario kart|zelda|pokemon|battlefield|wolverine|ea sports|oplaadstation|ladestation)\b/i.test(normalized))) {
     if (!familyConflict && coreRatio >= 0.5) return { level: "variant", score: 0.5, reason: "другая комплектация (набор/бандл)" };
   }
   if (familyConflict) return { level: "mismatch", score: 0.2, reason: "другая модель: " + [...new Set(conflicts)].slice(0, 2).join(", ") };

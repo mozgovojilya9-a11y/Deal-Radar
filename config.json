@@ -1832,7 +1832,14 @@
   },
   "max_price_spread": 0.8,
   "max_rechecks_per_query": 80,
-  "liveness_checks_per_run": 40,
+  "liveness_checks_per_run": 120,
   "liveness_after_hours": 36,
-  "geocode_per_run": 400
+  "geocode_per_run": 400,
+  "external_market": {
+    "per_run": 40,
+    "concurrency": 3,
+    "budget_ms": 35000,
+    "cache_hours": 24,
+    "timeout_seconds": 1200
+  }
 }

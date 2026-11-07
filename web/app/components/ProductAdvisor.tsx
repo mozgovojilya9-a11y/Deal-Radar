@@ -56,9 +56,9 @@ export function ProductAdvisor({ deal }: { deal: Deal }) {
           initData, sessionId: session,
           product: {
             listingId: deal.listing_id, title: deal.title, description: deal.description || "", price: deal.price,
-            priceType: deal.price_type || "FIXED", marketPrice: deal.market_price, marketMedian: deal.market_median_price ?? null,
+            priceType: deal.price_type || "FIXED", marketPrice: deal.market_value ?? deal.market_price, marketMedian: deal.used_price ?? deal.market_median_price ?? null,
             newPrice: deal.new_price ?? null, marketSamples: deal.market_samples ?? 0, marketConfidence: deal.market_confidence ?? "none",
-            priceReferenceType: deal.price_reference_type ?? "insufficient_data", marketUpdatedAt: deal.evaluated_at || null,
+            priceReferenceType: deal.price_reference_type ?? "insufficient_data", marketUpdatedAt: deal.market_checked_at || deal.evaluated_at || null,
             marketSources: (deal.market_sources || []).slice(0, 12).map((source) => ({
               title: source.title, url: source.url, price: source.price ?? source.price_eur ?? null,
               condition: source.item_condition || source.condition || "used", domain: source.domain || "",
@@ -129,7 +129,7 @@ function withCitations(text: string, sources: SourceRef[]) {
   });
 }
 
-const SEGMENT_LABEL: Record<string, string> = { new: "новый", used: "б/у", refurbished: "восстановленный", deal_radar: "сравнение Deal Radar" };
+const SEGMENT_LABEL: Record<string, string> = { new: "новый", used: "б/у (независимый)", refurbished: "восстановленный", deal_radar: "источник оценки сканера" };
 
 function AdvisorAnswer({ report, asking }: { report: AdvisorReport; asking: number }) {
   const verdictClass = "verdict-" + report.verdict.decision;
@@ -138,11 +138,13 @@ function AdvisorAnswer({ report, asking }: { report: AdvisorReport; asking: numb
   if (report.usedPrice) rows.push({ label: "Цена б/у", value: euro(report.usedPrice.median, true) + (report.usedPrice.min != null ? " · от " + euro(report.usedPrice.min, true) : ""), note: report.usedPrice.note, ids: report.usedPrice.sourceIds });
   if (report.refurbished) rows.push({ label: "Восстановленный", value: "от " + euro(report.refurbished.headline, true), note: report.refurbished.note, ids: report.refurbished.sourceIds });
   if (report.estimate) rows.push({
-    label: "Оценка Deal Radar", value: euro(report.estimate.amount, true),
-    note: report.estimate.samples + " сравнений · уверенность " + report.estimate.confidenceLabel + " · " + report.estimate.referenceLabel
+    label: "Оценка сканера", value: euro(report.estimate.amount, true),
+    note: report.estimate.samples + " независимых предложений · уверенность " + report.estimate.confidenceLabel + " · " + report.estimate.referenceLabel
+      + (report.estimate.updatedAt ? " · проверено " + report.estimate.updatedAt.slice(0, 10) : "")
       + (report.estimate.median ? " · медиана " + euro(report.estimate.median, true) : ""),
     ids: report.estimate.sourceIds,
   });
+  if (report.marketplace) rows.push({ label: "Marktplaats (контекст)", value: "≈ " + euro(report.marketplace.median, true), note: report.marketplace.count + " объявлений · " + report.marketplace.note, ids: [] });
   return (
     <div className="advisor-message model advisor-report">
       <p className="advisor-lead">{report.lead}</p>
@@ -178,7 +180,7 @@ function AdvisorAnswer({ report, asking }: { report: AdvisorReport; asking: numb
         Поиск: {report.search.providers.length ? report.search.providers.join(", ") : "поисковики недоступны"}
         {report.search.failedProviders.length ? " (недоступны: " + report.search.failedProviders.join(", ") + ")" : ""}
         {" · страниц открыто " + report.search.pagesFetched + ", с ценами " + report.search.pagesWithPrices}
-        {" · объявлений площадок " + report.search.marketplaceOffers}
+        {" · Marktplaats (только контекст): " + report.search.marketplaceOffers}
         {report.search.rejected.variants || report.search.rejected.accessories ? " · отброшено: другие версии " + report.search.rejected.variants + ", аксессуары " + report.search.rejected.accessories : ""}
         {report.ai.note ? " · " + report.ai.note : ""}
       </p>

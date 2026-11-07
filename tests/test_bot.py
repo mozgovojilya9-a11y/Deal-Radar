@@ -17,6 +17,7 @@ os.environ["DEAL_DB"] = os.path.join(TMP, "state.db")
 os.environ["DEAL_FEED"] = os.path.join(TMP, "data", "deals.json")
 
 import bot  # noqa: E402
+from external_fake import FakeExternalMarket  # noqa: E402
 
 CFG = {
     "postcode": "7671", "distance_km": 50, "pages": 1, "seed_pages": 1, "min_samples": 3,
@@ -45,8 +46,13 @@ class ScannerTests(unittest.TestCase):
         self.sleep.start()
         self.net = mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("network call"))
         self.net.start()
+        # Independent market research is offline in tests: a controllable fake of market-cli.ts.
+        self.external = FakeExternalMarket()
+        self.external_patch = mock.patch.object(bot, "run_external_research", self.external)
+        self.external_patch.start()
 
     def tearDown(self):
+        self.external_patch.stop()
         self.sleep.stop()
         self.net.stop()
 
@@ -60,6 +66,7 @@ class ScannerTests(unittest.TestCase):
             db.close()
 
     def test_catalog_receives_deal_without_telegram(self):
+        self.external.set(used=[400] * 6)
         seed = [listing(str(i), 400, date=datetime.now(timezone.utc).isoformat()) for i in range(1, 7)]
         self.assertTrue(self.run_scan(seed))
         self.assertEqual(bot.load_feed()["deals"], [])
@@ -76,17 +83,24 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(feed["deals"][0]["listing_url"], "https://www.marktplaats.nl/v/99")
         self.assertTrue(feed["scannedAt"])
 
-    def test_known_listing_is_re_evaluated_when_history_grows(self):
+    def test_known_listing_is_re_evaluated_when_external_market_arrives(self):
         now = datetime.now(timezone.utc).isoformat()
         first = [listing("a", 400, now), listing("b", 400, now), listing("99", 250, now)]
-        self.run_scan(first)
+        self.run_scan(first)  # no independent prices yet: everything stays a candidate
         self.assertEqual(len(bot.load_feed()["deals"]), 3)
+        self.assertEqual({d["status"] for d in bot.load_feed()["deals"]}, {"candidate"})
+        self.external.set(used=[400] * 6)
+        db = bot.open_db()
+        db.execute("DELETE FROM external_valuations")  # cached empty result: force a fresh search
+        db.commit()
+        db.close()
         self.run_scan(first + [listing("c", 400, now)])
         updated = bot.load_feed()["deals"]
         target = next(item for item in updated if item["listing_id"] == "99")
         self.assertEqual(target["status"], "strong")
 
     def test_listing_published_29_days_ago_is_eligible_with_30_day_window(self):
+        self.external.set(used=[400] * 6)
         posted = (datetime.now(timezone.utc) - timedelta(days=29)).isoformat()
         seed = [listing(f"old-{i}", 400, date=posted) for i in range(1, 7)]
         deal = listing("old-deal", 250, date=posted, title="PS5 met 2 controllers")
@@ -463,6 +477,7 @@ class ScannerTests(unittest.TestCase):
         now = datetime.now(timezone.utc).isoformat()
         seed = [listing(f"ai-seed-{i}", 400, now) for i in range(1, 7)]
         target = listing("ai-accessory", 80, now, title="PS5 controller")
+        self.external.set(used=[400] * 6)  # independent market: seeds at 400 are not deals
         def decisions(db, query, items):
             return {
                 "ai-accessory": {
@@ -578,29 +593,32 @@ class ScannerTests(unittest.TestCase):
         self.assertTrue(self.run_scan([]))
         self.assertEqual(len(bot.load_feed()["deals"]), 525)
 
-    def test_external_used_market_sources_can_confirm_and_are_saved(self):
+    def test_market_value_comes_from_independent_sources_not_marktplaats(self):
         now = datetime.now(timezone.utc).isoformat()
+        # Marktplaats is full of listings at 600, but independent shops/platforms say 350-400.
+        marktplaats = [listing(f"mp-{i}", 600, now, title="PS5 console") for i in range(8)]
         target = listing("external-deal", 150, now, title="PS5 console")
-        sources = [
-            {"title": "PS5 used listing A", "url": "https://www.ebay.nl/item/a", "domain": "ebay.nl",
-             "price_eur": 350, "condition": "used", "group": "all"},
-            {"title": "PS5 used listing B", "url": "https://www.2dehands.be/item/b", "domain": "2dehands.be",
-             "price_eur": 380, "condition": "used", "group": "all"},
-            {"title": "PS5 used listing C", "url": "https://www.tweakers.net/aanbod/c", "domain": "tweakers.net",
-             "price_eur": 400, "condition": "used", "group": "all"},
-        ]
-        db = bot.open_db()
-        try:
-            with mock.patch.object(bot, "fetch_query", return_value=[target]), \
-                 mock.patch.object(bot, "get_web_market_reference", return_value={"sources": sources, "rationale": "three external used offers"}):
-                self.assertTrue(bot.run_once(CFG, db))
-        finally:
-            db.close()
+        self.external.set(used=[350, 360, 370, 380, 390, 400])
+        self.assertTrue(self.run_scan(marktplaats + [target]))
         result = next(item for item in bot.load_feed()["deals"] if item["listing_id"] == "external-deal")
         self.assertEqual(result["status"], "strong")
-        self.assertEqual(result["price_reference_type"], "web_used")
-        self.assertEqual(len(result["market_sources"]), 3)
-        self.assertEqual({item["condition"] for item in result["market_sources"]}, {"used"})
+        self.assertEqual(result["price_reference_type"], "external_used")
+        self.assertEqual(result["market_value"], 375.0)
+        self.assertEqual(result["market_price"], 375.0)
+        self.assertEqual(result["marktplaats_median"], 600.0)  # context only
+        self.assertTrue(result["market_sources"])
+        self.assertFalse(any("marktplaats.nl" in source["url"] or "2dehands" in source["url"] for source in result["market_sources"]))
+        self.assertTrue(result["market_checked_at"])
+
+    def test_without_independent_prices_marktplaats_is_not_used_as_fallback(self):
+        now = datetime.now(timezone.utc).isoformat()
+        marktplaats = [listing(f"mp-{i}", 600, now, title="PS5 console") for i in range(10)]
+        self.assertTrue(self.run_scan(marktplaats + [listing("cheap", 150, now, title="PS5 console")]))
+        result = next(item for item in bot.load_feed()["deals"] if item["listing_id"] == "cheap")
+        self.assertEqual(result["status"], "candidate")
+        self.assertIsNone(result["market_value"])
+        self.assertIsNone(result["estimated_profit"])
+        self.assertEqual(result["price_reference_type"], "insufficient_data")
 
     def test_bing_rss_parser_keeps_real_source_urls_and_snippets(self):
         xml = """<?xml version="1.0" encoding="UTF-8"?>

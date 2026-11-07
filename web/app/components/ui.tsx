@@ -61,7 +61,7 @@ export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   );
 }
 
-export const STATUS_LABEL = { strong: "Очень выгодно", good: "Хорошая цена", candidate: "На проверке" } as const;
+export const STATUS_LABEL = { strong: "Очень выгодно", good: "Хорошая цена", candidate: "На проверке", reserved: "Зарезервировано" } as const;
 export const CONFIDENCE_LABEL: Record<string, string> = {
   high: "высокая", preliminary: "предварительная", retail_proxy: "по цене нового", none: "нет данных",
 };

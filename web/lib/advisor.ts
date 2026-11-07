@@ -56,6 +56,7 @@ export type AdvisorReport = {
   usedPrice: PriceBlock | null;
   refurbished: PriceBlock | null;
   estimate: { amount: number | null; median: number | null; samples: number; confidence: string; confidenceLabel: string; referenceLabel: string; updatedAt: string | null; sourceIds: number[] } | null;
+  marketplace: { median: number | null; min: number | null; count: number; note: string } | null;
   profit: { amount: number; roi: number; basis: number; basisLabel: string; reliable: boolean; costs: { negotiation: number; fees: number; fixed: number }; expectedResale: number } | null;
   risks: string[];
   answer: string;
@@ -118,9 +119,10 @@ function pickSources(research: MarketResearch, context: DealContext) {
   const radarIds: number[] = [];
   for (const source of context.marketSources) {
     if (!safeWebUrl(source.url) || sources.some((item) => item.url === source.url) || radarIds.length >= 5) continue;
+    if (/(?:^|\.)(?:marktplaats\.nl|2dehands\.be)$/i.test(hostOf(source.url))) continue; // not independent evidence
     if (context.listingUrl && source.url.split("?")[0] === context.listingUrl.split("?")[0]) continue;
     const id = sources.length + 1;
-    sources.push({ id, title: source.title || "Сравнение Deal Radar", url: source.url, domain: source.domain || hostOf(source.url), price: source.price, segment: "deal_radar", note: "сравнение сканера Deal Radar" });
+    sources.push({ id, title: source.title || "Источник оценки сканера", url: source.url, domain: source.domain || hostOf(source.url), price: source.price, segment: "deal_radar", note: "источник независимой оценки сканера" + (context.marketUpdatedAt ? " от " + context.marketUpdatedAt.slice(0, 10) : "") });
     radarIds.push(id);
   }
   return { sources, newIds, usedIds, refurbishedIds, radarIds };
@@ -154,9 +156,13 @@ export function buildReport(context: DealContext, research: MarketResearch, inte
     median: seg.used.median,
     count: seg.used.count,
     sourceIds: usedIds,
-    note: (seg.used.count >= 3 ? "медиана " + seg.used.count + " актуальных объявлений" : seg.used.count === 1 ? "только 1 объявление" : "только 2 объявления")
-      + " (" + seg.used.domains.join(", ") + "); это цены предложений, не сделок",
+    note: (seg.used.count >= 3 ? "медиана " + seg.used.count + " независимых б/у предложений" : seg.used.count === 1 ? "только 1 независимое предложение" : "только 2 независимых предложения")
+      + " (" + seg.used.domains.join(", ") + "); Marktplaats в оценку не входит",
   } : null;
+
+  // Current Marktplaats/2dehands asking prices: shown as context, never used as the market value.
+  const mp = research.marketplace?.stats;
+  const marketplace = mp && mp.count ? { median: mp.median, min: mp.min, count: mp.count, note: "текущие объявления Marktplaats/2dehands — только для сравнения, в оценку не входят" } : null;
 
   const refurbished: PriceBlock | null = seg.refurbished.count ? {
     headline: seg.refurbished.min,
@@ -167,16 +173,16 @@ export function buildReport(context: DealContext, research: MarketResearch, inte
     note: "восстановленные с гарантией: " + seg.refurbished.domains.join(", "),
   } : null;
 
-  const hasRadar = context.marketPrice != null && context.marketPrice > 0;
-  const estimate = hasRadar || context.marketSamples > 0 ? {
+  // Only independent scanner valuations count; legacy Marktplaats-based estimates are ignored.
+  const independentScanner = context.priceReferenceType === "external_used" || context.priceReferenceType === "new_retail";
+  const hasRadar = independentScanner && context.marketPrice != null && context.marketPrice > 0;
+  const estimate = hasRadar ? {
     amount: context.marketPrice,
     median: context.marketMedian,
     samples: context.marketSamples,
     confidence: context.marketConfidence,
     confidenceLabel: CONFIDENCE_LABEL[context.marketConfidence] || "нет данных",
-    referenceLabel: context.priceReferenceType === "new_retail" ? "от цены нового товара"
-      : context.priceReferenceType === "web_used" ? "Marktplaats + внешние площадки"
-        : context.priceReferenceType === "marktplaats" ? "похожие объявления Marktplaats" : "недостаточно данных",
+    referenceLabel: context.priceReferenceType === "new_retail" ? "от цены нового товара в магазинах" : "независимые б/у предложения вне Marktplaats",
     updatedAt: context.marketUpdatedAt,
     sourceIds: radarIds,
   } : null;
@@ -186,14 +192,14 @@ export function buildReport(context: DealContext, research: MarketResearch, inte
   let basisLabel = "";
   let reliable = false;
   let basisIsNew = false;
-  if (hasRadar && context.marketConfidence === "high" && context.marketSamples >= 8 && context.priceReferenceType !== "new_retail") {
-    basis = context.marketPrice; basisLabel = "оценка Deal Radar (" + context.marketSamples + " сравнений, высокая уверенность)"; reliable = true;
-  } else if (seg.used.count >= 5 && seg.used.p25) {
-    basis = seg.used.p25; basisLabel = "нижний квартиль " + seg.used.count + " текущих б/у предложений"; reliable = true;
+  if (seg.used.count >= 5 && seg.used.p25 && seg.used.domains.length >= 1) {
+    basis = seg.used.p25; basisLabel = "нижний квартиль " + seg.used.count + " независимых б/у предложений"; reliable = true;
+  } else if (hasRadar && context.marketConfidence === "high" && context.priceReferenceType === "external_used") {
+    basis = context.marketPrice; basisLabel = "независимая оценка сканера (" + context.marketSamples + " предложений, высокая уверенность)"; reliable = true;
   } else if (seg.used.count >= 3 && seg.used.median) {
     basis = seg.used.median; basisLabel = "медиана " + seg.used.count + " б/у предложений (мало данных)";
   } else if (hasRadar) {
-    basis = context.marketPrice; basisLabel = "предварительная оценка Deal Radar (" + context.marketSamples + " сравнений)";
+    basis = context.marketPrice; basisLabel = "предварительная независимая оценка сканера (" + context.marketSamples + " предложений)";
     basisIsNew = context.priceReferenceType === "new_retail";
   } else if (seg.new.count >= 2 && seg.new.median) {
     basis = seg.new.median; basisLabel = "цена нового товара × " + PROFITABILITY.new_resale_factor + " (нет данных б/у)"; basisIsNew = true;
@@ -256,12 +262,12 @@ export function buildReport(context: DealContext, research: MarketResearch, inte
   const failedProviders = [...new Set(research.attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.provider))]
     .filter((name) => !research.providersUsed.includes(name));
   return {
-    intent, lead, verdict: { decision, label, reason }, newPrice, usedPrice, refurbished, estimate, profit,
+    intent, lead, verdict: { decision, label, reason }, newPrice, usedPrice, refurbished, estimate, profit, marketplace,
     risks: risks.slice(0, 4), answer: "", sources,
     search: {
       queries: research.queries, providers: research.providersUsed, failedProviders,
       pagesFetched: research.pagesFetched, pagesWithPrices: research.pagesWithPrices,
-      marketplaceOffers: research.offers.filter((offer) => offer.method === "api").length,
+      marketplaceOffers: research.marketplace?.offers.length ?? 0,
       rejected: research.rejected, durationMs: research.durationMs, checkedAt: research.checkedAt,
       errors: research.errors.slice(0, 5),
     },
@@ -275,6 +281,7 @@ function allowedAmounts(report: AdvisorReport, context: DealContext): number[] {
     context.askingPrice, context.marketPrice, context.marketMedian, context.newPrice,
     report.newPrice?.headline, report.newPrice?.min, report.newPrice?.median,
     report.usedPrice?.min, report.usedPrice?.median, report.refurbished?.min, report.refurbished?.median,
+    report.marketplace?.median, report.marketplace?.min,
     report.profit?.amount, report.profit?.basis, report.profit?.expectedResale,
     PROFITABILITY.min_profit_eur,
     ...report.sources.map((source) => source.price),
@@ -324,6 +331,7 @@ export async function runAdvisor(context: DealContext, messages: Array<{ role: "
     computed: {
       verdict: report.verdict, newPrice: report.newPrice, usedPrice: report.usedPrice, refurbished: report.refurbished,
       dealRadarEstimate: report.estimate, profit: report.profit, risksFound: report.risks,
+      marktplaatsContextNotMarketValue: report.marketplace,
     },
     sources: report.sources.map((source) => ({ id: source.id, title: source.title, domain: source.domain, price: source.price, segment: source.segment })),
     rejectedOtherVersions: research.variantExamples.slice(0, 3).map((item) => item.title + " — " + item.reason),
@@ -331,7 +339,8 @@ export async function runAdvisor(context: DealContext, messages: Array<{ role: "
   const system = [
     "Ты — AI-консультант Deal Radar по перепродаже товаров в Нидерландах. Отвечай по-русски, коротко и конкретно.",
     "Все цены, прибыль и источники уже посчитаны кодом в `computed` и `sources`. Используй только эти суммы; не придумывай цены, ссылки, характеристики и факты.",
-    "Внутреннюю оценку Deal Radar называй оценкой Deal Radar, а не ценой магазина. Цены Marktplaats — цены предложений, не сделок.",
+    "Рыночная стоимость определяется только по независимым источникам (магазины, восстановленные, б/у площадки вне Marktplaats). Цены Marktplaats — лишь контекст: никогда не называй их рыночной стоимостью.",
+    "Оценку сканера называй независимой оценкой Deal Radar, а не ценой магазина.",
     "answer: прямой ответ на вопрос пользователя, максимум 3 коротких предложения или 4 пункта списка через «• ». Без вступлений, без повторов, без общих рассуждений.",
     "Если вопрос о цене — первым словом назови сумму из computed. Если вопрос об осмотре или проверке — дай конкретные проверки для этой модели (серийный номер, привязка аккаунта, батарея, комплектность и т. п.).",
     "Ссылайся на источники маркерами [номер] только из списка sources.",

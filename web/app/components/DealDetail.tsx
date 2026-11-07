@@ -7,9 +7,10 @@ import { ProductAdvisor } from "./ProductAdvisor";
 import { CONFIDENCE_LABEL, STATUS_LABEL, ageLabel, dateLabel, euro, pct } from "./ui";
 
 const REFERENCE_LABEL: Record<string, string> = {
-  marktplaats: "похожие объявления Marktplaats",
-  web_used: "Marktplaats + другие площадки",
-  new_retail: "цена нового товара в магазинах",
+  external_used: "независимые б/у предложения",
+  new_retail: "цена нового в магазинах",
+  marktplaats: "устаревшая оценка (Marktplaats)",
+  web_used: "устаревшая оценка (Marktplaats)",
   insufficient_data: "недостаточно данных",
 };
 
@@ -25,7 +26,9 @@ export function DealDetail({ deal, saved, onSave, onClose }: { deal: Deal; saved
 
   const status = deal.status || "candidate";
   const distance = distanceOf(deal);
-  const sources = (deal.market_sources || []).filter((source) => /^https:\/\//.test(source.url));
+  // Only independent sources are evidence; legacy Marktplaats comparables are not shown as such.
+  const sources = (deal.market_sources || []).filter((source) => /^https:\/\//.test(source.url) && !/marktplaats\.nl|2dehands\.be/.test(source.url));
+  const marketValue = deal.market_value ?? (deal.price_reference_type === "external_used" || deal.price_reference_type === "new_retail" ? deal.market_price : null);
   const why = status === "candidate"
     ? deal.evaluation_reason || "Модель распознана, но сопоставимых цен пока мало — сканер перепроверит позже."
     : deal.evaluation_reason || "Цена ниже осторожной рыночной оценки, прибыль покрывает торг и комиссию.";
@@ -45,7 +48,7 @@ export function DealDetail({ deal, saved, onSave, onClose }: { deal: Deal; saved
           <h2>{deal.title}</h2>
           <div className="detail-price">
             <strong>{euro(deal.price, true)}</strong>
-            <span>{deal.market_price != null ? "Рынок ≈ " + euro(deal.market_price, true) : "Рыночная цена не подтверждена"}</span>
+            <span>{marketValue != null ? "Рыночная стоимость ≈ " + euro(marketValue, true) : "Рыночная стоимость не подтверждена"}</span>
           </div>
 
           <div className="why-box">
@@ -54,14 +57,18 @@ export function DealDetail({ deal, saved, onSave, onClose }: { deal: Deal; saved
           </div>
 
           <dl className="evidence-grid">
-            <div><dt>Прибыль</dt><dd>{deal.estimated_profit != null ? euro(deal.estimated_profit, true) : "—"}</dd></div>
-            <div><dt>ROI</dt><dd>{pct(deal.profit_roi)}</dd></div>
-            <div><dt>Сравнений</dt><dd>{deal.market_samples ?? 0}</dd></div>
+            <div><dt>Цена продавца</dt><dd>{euro(deal.price, true)}</dd></div>
+            <div><dt>Рыночная стоимость</dt><dd>{euro(marketValue, true)}</dd></div>
+            <div><dt>Прибыль / ROI</dt><dd>{deal.estimated_profit != null ? euro(deal.estimated_profit, true) + " · " + pct(deal.profit_roi) : "—"}</dd></div>
+            <div><dt>Новый (магазины)</dt><dd>{euro(deal.new_price, true)}</dd></div>
+            <div><dt>Б/у (вне Marktplaats)</dt><dd>{euro(deal.used_price, true)}</dd></div>
+            <div><dt>Восстановленный</dt><dd>{euro(deal.refurbished_price, true)}</dd></div>
+            <div><dt>Независимых источников</dt><dd>{deal.external_sources ?? 0}{deal.external_domains ? " · сайтов " + deal.external_domains : ""}</dd></div>
             <div><dt>Надёжность</dt><dd>{CONFIDENCE_LABEL[deal.market_confidence || "none"] || "—"}</dd></div>
+            <div><dt>Проверено</dt><dd>{deal.market_checked_at ? dateLabel(deal.market_checked_at) + (deal.market_stale ? " (устарело)" : "") : "—"}</dd></div>
             <div><dt>Основа оценки</dt><dd>{REFERENCE_LABEL[deal.price_reference_type || "insufficient_data"] || "—"}</dd></div>
-            <div><dt>Медиана рынка</dt><dd>{euro(deal.market_median_price, true)}</dd></div>
             {deal.market_spread != null ? <div><dt>Разброс цен</dt><dd>{pct(deal.market_spread)}</dd></div> : null}
-            {deal.new_price != null ? <div><dt>Новый товар</dt><dd>{euro(deal.new_price, true)}</dd></div> : null}
+            {deal.marktplaats_samples ? <div><dt>Marktplaats (контекст)</dt><dd>{euro(deal.marktplaats_median, true)} · {deal.marktplaats_samples} объявл.</dd></div> : null}
             <div><dt>Состояние</dt><dd>{deal.item_condition || "не указано"}</dd></div>
             <div><dt>Оценка обновлена</dt><dd>{deal.evaluated_at ? ageLabel(deal.evaluated_at) : "—"}</dd></div>
             <div><dt>Найдено</dt><dd>{dateLabel(deal.first_detected_at || deal.detected_at)}</dd></div>
@@ -70,7 +77,7 @@ export function DealDetail({ deal, saved, onSave, onClose }: { deal: Deal; saved
 
           {sources.length ? (
             <details className="source-list" open={sources.length <= 4}>
-              <summary>Сравнения и источники · {sources.length}</summary>
+              <summary>Независимые источники цены · {sources.length}</summary>
               <ul>{sources.map((source) => (
                 <li key={source.url}><a href={source.url} target="_blank" rel="noopener noreferrer">
                   <span>{source.title || source.domain || "Источник"}</span>
@@ -79,7 +86,7 @@ export function DealDetail({ deal, saved, onSave, onClose }: { deal: Deal; saved
                 </a></li>
               ))}</ul>
             </details>
-          ) : <p className="detail-muted">Ссылки на сравнения появятся после следующего сканирования: старые оценки сохранены без URL, а выдумывать их мы не будем.</p>}
+          ) : <p className="detail-muted">Независимых источников цены пока нет{deal.valuation_reason ? ": " + deal.valuation_reason : ""}. Цены Marktplaats не используются как рыночная стоимость.</p>}
 
           <p className="detail-desc">{deal.description || "Описание отсутствует в объявлении."}</p>
           <div className="detail-facts"><span>⌖ {deal.city || "Нидерланды"}{distance != null ? " · " + Math.round(distance) + " км" : ""}</span>{deal.price_type === "MIN_BID" ? <span>Цена «bieden vanaf»</span> : null}</div>

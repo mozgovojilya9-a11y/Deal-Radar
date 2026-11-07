@@ -103,7 +103,11 @@ function typeIncludes(node: Record<string, unknown>, type: string): boolean {
 
 function absoluteUrl(value: unknown, base: string): string {
   try {
-    const url = new URL(String(value || ""), base);
+    const raw = String(value || "").trim();
+    // "#123" / "/" are ids or the site root, not a product page: keep the page that was opened.
+    if (!raw || raw.startsWith("#") || raw === "/") return base;
+    const url = new URL(raw, base);
+    if (url.pathname.length <= 1 && !url.search) return base;
     return url.protocol === "https:" ? url.href : base;
   } catch {
     return base;

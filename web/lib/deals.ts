@@ -1,4 +1,4 @@
-export type DealStatus = "strong" | "good" | "candidate";
+export type DealStatus = "strong" | "good" | "candidate" | "reserved";
 
 export type Deal = {
   listing_id: string;
@@ -11,7 +11,20 @@ export type Deal = {
   expected_resale_price?: number | null;
   estimated_profit?: number | null;
   profit_roi?: number | null;
-  price_reference_type?: "marktplaats" | "web_used" | "new_retail" | "insufficient_data";
+  price_reference_type?: "external_used" | "marktplaats" | "web_used" | "new_retail" | "insufficient_data";
+  /** Independent market value (shops, refurbishers, used platforms outside Marktplaats). */
+  market_value?: number | null;
+  used_price?: number | null;
+  refurbished_price?: number | null;
+  external_sources?: number;
+  external_domains?: number;
+  market_checked_at?: string | null;
+  market_stale?: boolean;
+  valuation_reason?: string | null;
+  /** Marktplaats context only; never the market value. */
+  marktplaats_median?: number | null;
+  marktplaats_samples?: number;
+  reserved?: boolean;
   new_price?: number | null;
   model_year?: number | null;
   status?: DealStatus;
@@ -101,7 +114,7 @@ export type CatalogCounts = {
   matched: number;
   unknownLocation: number;
   outsideRadius: number;
-  byStatus: Record<DealStatus, number>;
+  byStatus: Record<"strong" | "good" | "candidate", number>;
 };
 
 export type DealFeed = {

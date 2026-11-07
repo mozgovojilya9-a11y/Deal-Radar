@@ -82,6 +82,35 @@ npm run build
 npm run dev
 ```
 
+## v6: independent market value and reserved listings
+
+**Marktplaats is the source of candidates, never of market value.** The scanner uses Marktplaats for the
+seller's price, description, photos and link. The market value comes from independent sources found by
+`web/scripts/market-cli.ts` (run by `bot.py` through Node 24):
+
+| Segment | Sources that work with plain requests |
+|---|---|
+| New | Coolblue, MediaMarkt, bol.com, beslist.nl (aggregates many shops), official shops and other pages found through Brave/Bing/DuckDuckGo/Yahoo |
+| Used | Kleinanzeigen.de and other used platforms found through web search |
+| Refurbished | Refurbed.nl, MediaMarkt refurbished offers, other refurbishers found through web search |
+
+eBay (incl. sold listings), Back Market, Amazon.nl and Tweakers Pricewatch block automated requests or require a
+consent wall; they are **not** scraped by circumventing protection. They are used only when a search engine returns a
+page that opens normally.
+
+**Market value** = median of ≥3 exact-model used offers outside Marktplaats/2dehands (outliers, accessories, bundles
+and other generations removed). Confidence: *high* (≥6 offers from ≥2 sites, spread ≤60%), *medium* (≥3), *low*
+(1–2, no value), *none*. New and refurbished medians are stored separately. Without enough independent prices the
+listing stays a candidate: Marktplaats is never used as a fallback. Valuations are re-checked after 24 h; an older
+valuation is marked stale and not used for a status. Every valuation and every offer URL is appended to
+`external_valuations` / `external_offers` (history, nothing overwritten).
+
+**Reserved listings** ("Gereserveerd") are detected from the Marktplaats API flag `reserved` and, for listings not
+returned by the current search, from the listing page (`"isReserved":true`, the price label `Gereserveerd`, the
+analytics field `"ap":"Gereserveerd"`). Words in the title or description are ignored. Reserved listings are
+removed from the catalogue and every count, their state is kept in `evaluations` and `status_history`, and they come
+back automatically if the reservation is cancelled.
+
 ## What changed in v5 (scanner, AI advisor, settings)
 
 ### AI advisor (`web/lib/advisor.ts`, `web/lib/market-research.ts`)

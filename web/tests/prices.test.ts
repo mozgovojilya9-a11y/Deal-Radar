@@ -30,3 +30,8 @@ test("falls back to meta tags, then to the price after the heading", () => {
   const text = extractPage(`<header>€ 5</header><h1>PS5 Slim</h1><p>Van €549,99 nu €474,-</p>`, "https://a.nl/p");
   assert.equal(text.offers[0].price, 474);
 });
+
+test("JSON-LD ids like '#9300000161137119' never become fake product URLs", () => {
+  const html = `<h1>X</h1><script type="application/ld+json">{"@type":"Product","@id":"#9300000161137119","name":"iPhone 15 Pro","offers":{"price":"582","priceCurrency":"EUR"}}</script>`;
+  assert.equal(extractPage(html, "https://www.bol.com/nl/nl/p/iphone/9300000161137119/").offers[0].url, "https://www.bol.com/nl/nl/p/iphone/9300000161137119/");
+});

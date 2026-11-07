@@ -13,9 +13,9 @@ export function DealCard({ deal, saved, onSave, onOpen }: { deal: Deal; saved: b
   const candidate = status === "candidate";
   const discount = deal.discount == null ? null : Math.max(0, Math.round(Number(deal.discount) * 100));
   const distance = distanceOf(deal);
-  const evidence = deal.market_samples
-    ? deal.market_samples + " сравн. · " + (CONFIDENCE_LABEL[deal.market_confidence || "none"] || "—")
-    : "сравнений пока нет";
+  const evidence = deal.external_sources
+    ? deal.external_sources + " незав. источн. · " + (CONFIDENCE_LABEL[deal.market_confidence || "none"] || "—")
+    : "независимая оценка в очереди";
   return (
     <article className={"deal-card" + (candidate ? " candidate-card" : status === "good" ? " good-card" : "")}>
       <button className="image-button" onClick={onOpen} aria-label={"Открыть " + deal.title}>
@@ -36,7 +36,8 @@ export function DealCard({ deal, saved, onSave, onOpen }: { deal: Deal; saved: b
         <button className="deal-title" onClick={onOpen}>{deal.title}</button>
         <div className="price-row">
           <strong>{euro(deal.price)}</strong>
-          <span className="old-price">{deal.market_price != null ? "рынок ≈ " + euro(deal.market_price) : "рынок уточняется"}</span>
+          <span className="old-price">{(deal.market_value ?? (deal.price_reference_type === "external_used" || deal.price_reference_type === "new_retail" ? deal.market_price : null)) != null
+            ? "рынок ≈ " + euro(deal.market_value ?? deal.market_price) : "рынок уточняется"}</span>
         </div>
         {deal.estimated_profit != null ? (
           <div className={"saving-line" + (candidate ? " preliminary-saving" : "")}>

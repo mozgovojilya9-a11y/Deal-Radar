@@ -114,7 +114,8 @@ export async function GET(request: NextRequest) {
     const params = request.nextUrl.searchParams;
 
     const all = valuationReady && Array.isArray(feed.deals)
-      ? feed.deals.filter(isDeal).filter((deal) => deal.active !== false && isRecent(deal)
+      // Reserved ("Gereserveerd"), removed or inactive listings are never offered as available deals.
+      ? feed.deals.filter(isDeal).filter((deal) => deal.active !== false && deal.reserved !== true && isRecent(deal)
         && (deal.status === "candidate" || deal.status === "strong" || deal.status === "good"))
       : [];
 
@@ -181,7 +182,10 @@ export async function GET(request: NextRequest) {
     });
 
     const byStatus = { strong: 0, good: 0, candidate: 0 };
-    for (const deal of deals) byStatus[(deal.status || "candidate") as keyof typeof byStatus] += 1;
+    for (const deal of deals) {
+      const key = (deal.status || "candidate") as keyof typeof byStatus;
+      if (key in byStatus) byStatus[key] += 1;
+    }
     const counts: CatalogCounts = { feed: all.length, matched: deals.length, unknownLocation, outsideRadius, byStatus };
 
     return NextResponse.json({

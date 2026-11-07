@@ -33,6 +33,22 @@ export type SegmentStats = {
   official: MarketOffer | null;
 };
 
+export type MarketValuation = {
+  /** Realistic market value of a used unit, from independent non-Marktplaats offers only. */
+  marketValue: number | null;
+  /** Conservative resale reference (lower quartile when the sample is large). */
+  conservativeValue: number | null;
+  usedValue: number | null;
+  newValue: number | null;
+  refurbishedValue: number | null;
+  confidence: "high" | "medium" | "low" | "none";
+  sourceCount: number;
+  domainCount: number;
+  spread: number | null;
+  checkedAt: string;
+  reason: string;
+};
+
 export type MarketResearch = {
   identity: ProductIdentity;
   checkedAt: string;
@@ -48,6 +64,9 @@ export type MarketResearch = {
   pagesWithPrices: number;
   pageLog: Array<{ url: string; status: "ok" | "no_price" | "failed"; offers: number; kept: number; method?: string }>;
   errors: string[];
+  /** Marktplaats/2dehands asking prices: context only, never part of the valuation. */
+  marketplace: { offers: MarketOffer[]; stats: SegmentStats };
+  valuation: MarketValuation;
 };
 
 const BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -57,6 +76,9 @@ const USED_DOMAINS = /(?:^|\.)(?:marktplaats\.nl|2dehands\.be|ebay\.[a-z.]+|vint
 const REFURB_DOMAINS = /(?:^|\.)(?:backmarket\.[a-z.]+|refurbed\.[a-z.]+|swappie\.com|forzarefurbished\.nl|rebuy\.[a-z.]+|leapp\.nl|renewd\.com|mobilezwaar\.nl|refurbishedstore\.nl|ireparatie\.nl|thephonelab\.nl)$/;
 const NEW_RETAIL = /(?:^|\.)(?:coolblue\.(?:nl|be)|bol\.com|mediamarkt\.(?:nl|be)|amazon\.(?:nl|de|com\.be)|alternate\.(?:nl|be)|bcc\.nl|expert\.nl|ep\.nl|wehkamp\.nl|kamera-express\.nl|cameranu\.nl|fotokonijnenberg\.nl|belsimpel\.nl|megekko\.nl|azerty\.nl|informatique\.nl|paradigit\.nl|intertoys\.nl|gamemania\.nl|nedgame\.nl|koopmanoptics\.com|pearle\.nl|hansanders\.nl|specsavers\.nl|baumsport\.nl|supersales\.nl|kieskeurig\.nl|beslist\.nl|bax-shop\.nl|thomann\.(?:de|nl)|mobiel\.nl|gsmpunt\.nl|dreamland\.be|vandenborre\.be|krefel\.be|fnac\.(?:be|nl)|hifi\.nl|hificorner\.nl|zalando\.nl|debijenkorf\.nl|otto\.nl|sunglasshut\.com|optiek\.nl)$/;
 const SKIP_PAGES = /(?:^|\.)(?:marktplaats\.nl|2dehands\.be)$/;
+/** Same platform as the candidate listings: never independent evidence of market value. */
+export const MARKETPLACE_DOMAINS = /(?:^|\.)(?:marktplaats\.nl|2dehands\.be|2ememain\.be)$/;
+const WANTED_AD = /\b(ankauf|suche|gesucht|tausch|zoek|gezocht|ruilen|inkoop|wir kaufen|kaufe)\b/i;
 
 /** Broken, fake or parts-only offers are never market comparables. */
 const BROKEN_WORDS = /\b(defect\w*|kapot\w*|onderdelen|for parts|parts only|niet werkend|werkt niet|gebarsten|replica|kopie|nep|fake|imitatie|lookalike|icloud[\s-]*(?:lock|slot)|water ?schade|reparatie nodig|namaak|aaa[\s-]*kwaliteit|1\s*:\s*1|copy|high copy|clone)\b/i;
@@ -213,7 +235,108 @@ export type ResearchOptions = {
   hint?: string | null;
   /** Asking price of the listing being judged; used only for plausibility checks. */
   referencePrice?: number | null;
+  /** Also collect current Marktplaats/2dehands listings as context (default true). */
+  includeMarketplace?: boolean;
+  /** Skip the in-memory cache: a fresh valuation was requested. */
+  fresh?: boolean;
 };
+
+/**
+ * Market value from independent sources only (shops, refurbishers, Kleinanzeigen, other used
+ * platforms). Marktplaats/2dehands are excluded by construction: they are not in `offers`.
+ */
+export function computeValuation(offers: MarketOffer[], segments: Record<Segment, SegmentStats>, checkedAt: string): MarketValuation {
+  const used = offers.filter((offer) => offer.segment === "used" && !MARKETPLACE_DOMAINS.test(offer.domain));
+  const prices = used.map((offer) => offer.price).sort((a, b) => a - b);
+  const domains = new Set(used.map((offer) => offer.domain));
+  const q1 = percentile(prices, 0.25);
+  const q3 = percentile(prices, 0.75);
+  const median = percentile(prices, 0.5);
+  const spread = prices.length >= 4 && median ? Math.round(((q3! - q1!) / median) * 1000) / 1000 : null;
+  const newValue = segments.new.official?.price ?? segments.new.median;
+  const refurbishedValue = segments.refurbished.median;
+  const independentSources = offers.length;
+  const independentDomains = new Set(offers.map((offer) => offer.domain)).size;
+  let confidence: MarketValuation["confidence"] = "none";
+  let reason = "";
+  if (prices.length >= 6 && domains.size >= 2 && (spread === null || spread <= 0.6)) {
+    confidence = "high";
+    reason = `медиана ${prices.length} независимых б/у предложений с ${domains.size} площадок`;
+  } else if (prices.length >= 3) {
+    confidence = "medium";
+    reason = `медиана ${prices.length} б/у предложений (${[...domains].join(", ")})` + (spread !== null && spread > 0.6 ? "; большой разброс цен" : "");
+  } else if (prices.length > 0) {
+    confidence = "low";
+    reason = `только ${prices.length} независимых б/у предложения — недостаточно для рыночной оценки`;
+  } else {
+    reason = independentSources
+      ? "найдены только цены новых/восстановленных товаров — б/у рынок вне Marktplaats не подтверждён"
+      : "внешний поиск не дал достоверных цен для этой модели";
+  }
+  const marketValue = prices.length >= 3 ? median : null;
+  return {
+    marketValue,
+    conservativeValue: prices.length >= 8 ? q1 : marketValue,
+    usedValue: median,
+    newValue: newValue ?? null,
+    refurbishedValue: refurbishedValue ?? null,
+    confidence,
+    sourceCount: independentSources,
+    domainCount: independentDomains,
+    spread,
+    checkedAt,
+    reason,
+  };
+}
+
+const KLEINANZEIGEN_ARTICLE = /<article\b[^>]*data-adid="(\d+)"[^>]*data-href="([^"]+)"[^>]*>([\s\S]*?)<\/article>/gi;
+
+/** Kleinanzeigen.de: independent used market (Germany). Parses the public search result cards. */
+async function fetchKleinanzeigen(name: string, deadline: number) {
+  const slug = name.toLowerCase().replace(/[^a-z0-9äöüß]+/gi, "+").replace(/^\+|\+$/g, "");
+  const page = await fetchPage("https://www.kleinanzeigen.de/s-" + slug + "/k0", deadline);
+  if (!page) throw new Error("страница недоступна");
+  const rows: Array<{ title: string; description: string; offer: Omit<MarketOffer, "id" | "match" | "matchReason" | "segment"> }> = [];
+  for (const match of page.html.matchAll(KLEINANZEIGEN_ARTICLE)) {
+    const [, , href, body] = match;
+    let title = "";
+    let description = "";
+    const ld = body.match(/<script[^>]*ld\+json[^>]*>([\s\S]*?)<\/script>/i);
+    if (ld) { try { const data = JSON.parse(ld[1]) as { title?: string; description?: string }; title = data.title || ""; description = data.description || ""; } catch { /* ignore */ } }
+    const text = stripTags(body.replace(/<script[\s\S]*?<\/script>/gi, " "));
+    // The price follows the teaser text: "500 € VB", "1.149 €". "Zu verschenken" has no price.
+    const priceMatch = [...text.matchAll(/(\d{1,3}(?:\.\d{3})*|\d+)(?:,(\d{2}))?\s*€/g)].pop();
+    if (!title || !priceMatch) continue;
+    const price = Number(priceMatch[1].replace(/\./g, "") + (priceMatch[2] ? "." + priceMatch[2] : ""));
+    if (!Number.isFinite(price) || price < 5) continue;
+    rows.push({ title, description, offer: { title: title.slice(0, 220), price, url: "https://www.kleinanzeigen.de" + href, domain: "kleinanzeigen.de", method: "jsonld", official: false, availability: "in_stock", priceType: /\bVB\b/.test(text) ? "VB" : "FIXED" } });
+  }
+  return rows;
+}
+
+/** Refurbed.nl: refurbished offers from the public search page ("vanaf" price per product). */
+async function fetchRefurbed(name: string, deadline: number) {
+  const page = await fetchPage("https://www.refurbed.nl/search/?query=" + encodeURIComponent(name), deadline);
+  if (!page) throw new Error("страница недоступна");
+  const rows: Array<{ title: string; offer: Omit<MarketOffer, "id" | "match" | "matchReason" | "segment"> }> = [];
+  for (const match of page.html.matchAll(/<a\b[^>]*href="(\/p\/[^"]+)"[^>]*data-test="productcard-link"[^>]*>/gi)) {
+    const start = match.index ?? 0;
+    const priceIndex = page.html.indexOf('data-test="product-price"', start);
+    if (priceIndex < 0 || priceIndex - start > 12000) continue;
+    const chunk = stripTags(page.html.slice(start, priceIndex + 120).replace(/<svg[\s\S]*?<\/svg>/gi, " "));
+    const priceMatch = chunk.match(/€\s?(\d{1,3}(?:\.\d{3})*|\d+)(?:,(\d{2}))?\s*$/) || chunk.match(/€\s?(\d{1,3}(?:\.\d{3})*|\d+)(?:,(\d{2}))?/);
+    if (!priceMatch) continue;
+    const price = Number(priceMatch[1].replace(/\./g, "") + (priceMatch[2] ? "." + priceMatch[2] : ""));
+    const title = chunk.slice(0, chunk.indexOf("€")).replace(/\b(beperkte voorraad|bestseller|nieuw binnen|uitverkocht)\b/gi, " ").replace(/\s\d,\d\s*$/, "").replace(/\s+/g, " ").trim();
+    if (!title || !Number.isFinite(price)) continue;
+    rows.push({ title, offer: { title: title.slice(0, 220), price, url: "https://www.refurbed.nl" + match[1], domain: "refurbed.nl", method: "text", official: false, availability: "in_stock" } });
+  }
+  return rows;
+}
+
+function stripTags(html: string): string {
+  return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;|&#160;/g, " ").replace(/&amp;/g, "&").replace(/&euro;/g, "€").replace(/\s+/g, " ").trim();
+}
 
 export async function researchMarket(title: string, options: ResearchOptions = {}): Promise<MarketResearch> {
   const identity = buildIdentity(title, options.hint);
@@ -221,7 +344,7 @@ export async function researchMarket(title: string, options: ResearchOptions = {
   const includeUsed = options.includeUsed !== false;
   const includeRefurbished = options.includeRefurbished !== false;
   const cacheKey = JSON.stringify([identity.searchName, includeNew, includeUsed, includeRefurbished, options.location?.postcode || "", options.location?.distanceKm || 0, options.maxPrice || 0]);
-  const cached = cache.get(cacheKey);
+  const cached = options.fresh ? undefined : cache.get(cacheKey);
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.value;
 
   const started = Date.now();
@@ -238,8 +361,10 @@ export async function researchMarket(title: string, options: ResearchOptions = {
   const mustContain = [...(distinctive.length ? distinctive : identity.coreTokens).slice(0, 3), ...identity.criticalTokens.filter((token) => /^[a-z]+\d{1,2}$/.test(token)).map((token) => token.replace(/^[a-z]+/, "")).slice(0, 0)];
   const name = identity.searchName;
 
-  const accept = (base: Omit<MarketOffer, "id" | "match" | "matchReason" | "segment">, segment: Segment, matchText: string, extraText = "") => {
+  const marketplaceOffers: MarketOffer[] = [];
+  const accept = (base: Omit<MarketOffer, "id" | "match" | "matchReason" | "segment">, segment: Segment, matchText: string, extraText = "", target: MarketOffer[] = offers) => {
     if (exclude.has(base.url.replace(/[?#].*$/, ""))) return;
+    if (WANTED_AD.test(matchText)) { rejected.mismatches += 1; return; }
     if (BROKEN_WORDS.test((matchText + " " + extraText).replace(NEGATED_BROKEN, " "))) { rejected.mismatches += 1; return; }
     const match = matchProduct(matchText, identity);
     if (match.level === "accessory") { rejected.accessories += 1; return; }
@@ -249,13 +374,15 @@ export async function researchMarket(title: string, options: ResearchOptions = {
       return;
     }
     if (match.level !== "exact") { rejected.mismatches += 1; return; }
-    if (offers.some((offer) => offer.url === base.url && offer.price === base.price)) return;
-    offers.push({ ...base, id: 0, segment, match: match.level, matchReason: match.reason });
+    // One page with several colour variants at the same price is one offer, not several.
+    const pageKey = base.url.replace(/[?#].*$/, "");
+    if (target.some((offer) => offer.url.replace(/[?#].*$/, "") === pageKey && Math.abs(offer.price - base.price) < 0.01)) return;
+    target.push({ ...base, id: 0, segment, match: match.level, matchReason: match.reason });
   };
 
-  // 1) Used market via the official Marktplaats / 2dehands search API (not a search engine).
+  // 1) Marktplaats / 2dehands: current listings for context and buying; NOT market evidence.
   const classifiedTasks: Promise<void>[] = [];
-  if (includeUsed) {
+  if (includeUsed && options.includeMarketplace !== false) {
     const terms = [name, ...identity.aliases.filter((alias) => !/^[A-Z0-9]{4,}$/.test(alias))].slice(0, 2);
     for (const term of terms) {
       classifiedTasks.push(searchClassifieds("www.marktplaats.nl", term, options.location, deadline)
@@ -266,7 +393,7 @@ export async function researchMarket(title: string, options: ResearchOptions = {
             if (!offer || (offer.priceType && offer.priceType !== "FIXED")) continue;
             if (options.maxPrice && offer.price > options.maxPrice * 3) continue;
             // Private sellers' "nieuw" items are still the second-hand market, not retail.
-            accept(offer, "used", offer.title + " " + String(row.description || "").slice(0, 160), String(row.description || "").slice(0, 600));
+            accept(offer, "used", offer.title + " " + String(row.description || "").slice(0, 160), String(row.description || "").slice(0, 600), marketplaceOffers);
           }
         })
         .catch((error) => { errors.push("Marktplaats: " + (error instanceof Error ? error.message : String(error))); }));
@@ -276,7 +403,7 @@ export async function researchMarket(title: string, options: ResearchOptions = {
         for (const row of rows.slice(0, 60)) {
           const offer = classifiedOffer(row, "www.2dehands.be");
           if (!offer || (offer.priceType && offer.priceType !== "FIXED")) continue;
-          accept(offer, "used", offer.title);
+          accept(offer, "used", offer.title, "", marketplaceOffers);
         }
       })
       .catch((error) => { errors.push("2dehands: " + (error instanceof Error ? error.message : String(error))); }));
@@ -306,14 +433,33 @@ export async function researchMarket(title: string, options: ResearchOptions = {
     await Promise.all(workers);
   };
 
-  // 3) Direct retailer search page with structured product data (independent of search engines).
+  // 3) Direct sources with structured data, independent of search engines.
   const directPages: string[] = [];
   if (includeNew) {
     directPages.push("https://www.coolblue.nl/zoeken?query=" + encodeURIComponent(name));
     directPages.push("https://www.mediamarkt.nl/nl/search.html?query=" + encodeURIComponent(name));
+    // beslist.nl aggregates many Dutch shops (JSON-LD ItemList of Products with prices).
+    directPages.push("https://www.beslist.nl/products/r/" + encodeURIComponent(name.toLowerCase()).replace(/%20/g, "+") + "/");
+  }
+  const directTasks: Promise<void>[] = [];
+  const sourceErrors = (label: string) => (error: unknown) => { errors.push(label + ": " + (error instanceof Error ? error.message : String(error)).slice(0, 80)); };
+  if (includeUsed) {
+    directTasks.push(fetchKleinanzeigen(name, deadline).then(async (rows) => {
+      // Long seller titles often return nothing: retry with the article code or a shorter name.
+      if (rows.length < 3) {
+        const fallback = identity.modelCodes[0]?.toUpperCase() || name.split(/\s+/).slice(0, 4).join(" ");
+        if (fallback && fallback !== name) rows = [...rows, ...(await fetchKleinanzeigen(fallback, deadline).catch(() => []))];
+      }
+      for (const row of rows) accept(row.offer, "used", row.title, row.description);
+    }).catch(sourceErrors("Kleinanzeigen")));
+  }
+  if (includeRefurbished) {
+    directTasks.push(fetchRefurbed(name, deadline).then((rows) => {
+      for (const row of rows) accept(row.offer, "refurbished", row.title);
+    }).catch(sourceErrors("Refurbed")));
   }
 
-  await Promise.all([runSearches(), ...classifiedTasks]);
+  await Promise.all([runSearches(), ...classifiedTasks, ...directTasks]);
 
   // Rank candidate pages: known shops first, then title relevance.
   const rank = (row: SearchResult) => {
@@ -410,17 +556,21 @@ export async function researchMarket(title: string, options: ResearchOptions = {
   const refurbishedOffers = refurbishedAll.filter(plausible);
   rejected.outliers += usedAll.length - usedOffers.length + refurbishedAll.length - refurbishedOffers.length;
   const finalOffers = [...newOffers, ...usedOffers, ...refurbishedOffers].map((offer, index) => ({ ...offer, id: index + 1 }));
+  const { kept: marketplaceKept } = dropOutliers(marketplaceOffers);
+  const marketplaceFinal = marketplaceKept.sort((a, b) => a.price - b.price).map((offer, index) => ({ ...offer, id: finalOffers.length + index + 1 }));
+  const checkedAt = new Date().toISOString();
 
+  const segments = {
+    new: stats(finalOffers.filter((offer) => offer.segment === "new")),
+    used: stats(finalOffers.filter((offer) => offer.segment === "used")),
+    refurbished: stats(finalOffers.filter((offer) => offer.segment === "refurbished")),
+  };
   const result: MarketResearch = {
     identity,
-    checkedAt: new Date().toISOString(),
+    checkedAt,
     durationMs: Date.now() - started,
     offers: finalOffers,
-    segments: {
-      new: stats(finalOffers.filter((offer) => offer.segment === "new")),
-      used: stats(finalOffers.filter((offer) => offer.segment === "used")),
-      refurbished: stats(finalOffers.filter((offer) => offer.segment === "refurbished")),
-    },
+    segments,
     rejected,
     variantExamples,
     queries: [...new Set(queries)],
@@ -430,8 +580,10 @@ export async function researchMarket(title: string, options: ResearchOptions = {
     pagesWithPrices,
     pageLog,
     errors: errors.slice(0, 12),
+    marketplace: { offers: marketplaceFinal, stats: stats(marketplaceFinal) },
+    valuation: computeValuation(finalOffers, segments, checkedAt),
   };
-  if (finalOffers.length) cache.set(cacheKey, { at: Date.now(), value: result });
+  if (finalOffers.length && !options.fresh) cache.set(cacheKey, { at: Date.now(), value: result });
   if (cache.size > 200) cache.delete(cache.keys().next().value as string);
   return result;
 }

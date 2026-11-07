@@ -46,24 +46,22 @@ export async function POST(request: NextRequest) {
       location: postcode && radiusKm ? { postcode, distanceKm: radiusKm } : undefined,
       budgetMs: 45000,
     });
-    const used = research.segments.used;
+    // Market value: independent sources only. Marktplaats offers are the things you can buy.
+    const valuation = research.valuation;
     const newSeg = research.segments.new;
-    const basis = used.count >= 5 ? used.p25 : used.count >= 3 ? used.median : null;
-    const basisIsNew = basis === null && newSeg.count >= 2;
-    const resaleBasis = basis ?? (basisIsNew ? newSeg.median : null);
-    // Listings the user could buy: Marktplaats offers inside the requested price range.
-    const listings = research.offers
-      .filter((offer) => offer.segment === "used" && offer.method === "api")
+    const basisIsNew = valuation.marketValue === null && newSeg.count >= 2 && new Set(newSeg.domains).size >= 2;
+    const resaleBasis = valuation.conservativeValue ?? (basisIsNew ? newSeg.median : null);
+    const listings = research.marketplace.offers
       .filter((offer) => (maxPrice === null || offer.price <= maxPrice) && (minPrice === null || offer.price >= minPrice))
       .map((offer) => {
         const economics = resaleBasis ? resaleEconomics(offer.price, resaleBasis, basisIsNew) : null;
-        const status = economics && used.count >= 8 && economics.profit >= 50 && economics.roi >= PROFITABILITY.strong_min_roi ? "strong"
-          : economics && used.count >= 3 && economics.profit >= PROFITABILITY.min_profit_eur && economics.roi >= PROFITABILITY.min_roi ? "good" : "candidate";
+        const status = economics && valuation.confidence === "high" && economics.profit >= 50 && economics.roi >= PROFITABILITY.strong_min_roi ? "strong"
+          : economics && valuation.confidence !== "none" && economics.profit >= PROFITABILITY.min_profit_eur && economics.roi >= PROFITABILITY.min_roi ? "good" : "candidate";
         return { ...offer, estimatedProfit: economics?.profit ?? null, profitRoi: economics?.roi ?? null, status };
       })
       .sort((a, b) => (b.estimatedProfit ?? -Infinity) - (a.estimatedProfit ?? -Infinity));
     const warnings = [
-      ...(used.count < 3 && includeUsed ? ["Мало точных б/у предложений — прибыль не подтверждена."] : []),
+      ...(valuation.marketValue === null ? ["Рыночная стоимость не определена: " + valuation.reason + ". Цены Marktplaats как замена не используются."] : []),
       ...(research.providersUsed.length === 0 ? ["Все поисковые системы сейчас ограничили запросы; использованы Marktplaats, 2dehands и прямой поиск магазинов."] : []),
       ...(research.rejected.variants ? [research.rejected.variants + " предложений другой версии/комплектации не смешаны с этой моделью."] : []),
       "Цены объявлений — цены предложений, а не завершённых сделок.",
@@ -73,9 +71,11 @@ export async function POST(request: NextRequest) {
       checkedAt: research.checkedAt, durationMs: research.durationMs,
       location: postcode && radiusKm ? { postcode, radiusKm } : null,
       segments: research.segments,
-      resale: resaleBasis ? { basis: resaleBasis, basisLabel: basis !== null ? (used.count >= 5 ? "нижний квартиль б/у" : "медиана б/у") : "новая цена × " + PROFITABILITY.new_resale_factor } : null,
+      valuation,
+      marketplace: research.marketplace.stats,
+      resale: resaleBasis ? { basis: resaleBasis, basisLabel: basisIsNew ? "новая цена × " + PROFITABILITY.new_resale_factor : valuation.reason } : null,
       listings: listings.slice(0, 30),
-      offers: research.offers.filter((offer) => offer.method !== "api").slice(0, 30),
+      offers: research.offers.slice(0, 40),
       rejected: research.rejected, variantExamples: research.variantExamples,
       search: { queries: research.queries, providers: research.providersUsed, pagesFetched: research.pagesFetched, pagesWithPrices: research.pagesWithPrices,
         failedProviders: [...new Set(research.attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.provider))].filter((name) => !research.providersUsed.includes(name)) },

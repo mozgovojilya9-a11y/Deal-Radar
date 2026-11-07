@@ -32,6 +32,13 @@ const cases: Array<[string, string, MatchLevel]> = [
   ["iPhone 15 Pro 256GB", "iPhone 15 Pro Max 256GB", "variant"],
   ["iPhone 15 Pro 256GB", "iPhone 15 Pro 128GB", "variant"],
   ["iPhone 15 Pro 256GB", "iPhone 14 Pro 256GB", "mismatch"],
+  // A TV without article code is never priced against other sets.
+  ["55 inch TV QLED Ambilight Philips Smart TV [2026] Als Nieuw!", "Philips 55PUS6704 55 Zoll 4K Ambilight Smart TV", "similar"],
+  ["Sony PlayStation 5 Slim Disc Edition", "Sony PlayStation 5 Slim Digitale Editie (PS5 Slim)", "variant"],
+  ["Sony PlayStation 5 Slim Disc Edition", "Sony PlayStation 5 Slim Disc Edition Konsole inkl Controller", "variant"],
+  ["Sony PlayStation 5 Slim Disc Edition", "Sony PlayStation 5 Slim 1TB Disc Edition (mit Laufwerk)", "exact"],
+  ["Complete Sony A7iii met 6971 clicks", "Aquatech Edge conversion kit 10m A7RIII A7 III", "accessory"],
+  ["Complete Sony A7iii met 6971 clicks", "Sony A7 III systeemcamera", "exact"],
 ];
 
 for (const [query, candidate, expected] of cases) {

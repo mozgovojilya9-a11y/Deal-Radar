@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { SegmentStats } from "@/lib/market-research";
+import type { MarketValuation, SegmentStats } from "@/lib/market-research";
 import type { SearchSettings } from "@/lib/settings";
 import { radiusLabel } from "@/lib/settings";
 import { euro, pct } from "./ui";
@@ -13,6 +13,8 @@ type Result = {
   location: { postcode: string; radiusKm: number } | null;
   segments: { new: SegmentStats; used: SegmentStats; refurbished: SegmentStats };
   resale: { basis: number; basisLabel: string } | null;
+  valuation: MarketValuation;
+  marketplace: SegmentStats;
   listings: Offer[]; offers: Offer[];
   rejected: { variants: number; accessories: number; mismatches: number; outliers: number };
   variantExamples: Array<{ title: string; price: number; url: string; reason: string }>;
@@ -20,7 +22,8 @@ type Result = {
   warnings: string[];
 };
 
-const SEGMENTS = [["new", "Новые (магазины)"], ["used", "Б/у (площадки)"], ["refurbished", "Восстановленные"]] as const;
+const SEGMENTS = [["new", "Новые (магазины)"], ["used", "Б/у (вне Marktplaats)"], ["refurbished", "Восстановленные"]] as const;
+const CONF: Record<string, string> = { high: "высокая", medium: "средняя", low: "низкая", none: "нет данных" };
 
 export function Research({ settings }: { settings: SearchSettings }) {
   const [query, setQuery] = useState("");
@@ -88,8 +91,13 @@ export function Research({ settings }: { settings: SearchSettings }) {
                 <span>{stats.count ? (key === "used" ? "медиана, " : "минимум, ") + stats.count + " предл. · " + stats.domains.slice(0, 3).join(", ") : "не найдено"}</span></div>;
             })}
           </div>
+          <div className="why-box">
+            <b>Рыночная стоимость: {result.valuation.marketValue != null ? euro(result.valuation.marketValue, true) : "не определена"}</b>
+            <p>{result.valuation.reason} · надёжность {CONF[result.valuation.confidence]} · независимых источников {result.valuation.sourceCount} на {result.valuation.domainCount} сайтах · проверено {new Date(result.valuation.checkedAt).toLocaleString("ru-RU")}</p>
+            {result.marketplace.count ? <p>Marktplaats/2dehands сейчас: медиана {euro(result.marketplace.median, true)} по {result.marketplace.count} объявлениям — только для сравнения, в оценку не входит.</p> : null}
+          </div>
           {result.resale ? <p className="research-muted">База перепродажи: {euro(result.resale.basis, true)} ({result.resale.basisLabel}); прибыль ниже — после торга, комиссии 8% и €10 расходов.</p> : null}
-          <h4>Объявления, которые можно купить · {result.listings.length}</h4>
+          <h4>Объявления Marktplaats, которые можно купить · {result.listings.length}</h4>
           {result.listings.length ? <div className="research-offers">{result.listings.slice(0, 12).map((item) => (
             <a className="research-offer" href={item.url} target="_blank" rel="noopener noreferrer" key={item.url}>
               <span><b>{item.title}</b><small>{[item.domain, item.itemCondition, item.city, item.distanceKm != null ? item.distanceKm + " км" : ""].filter(Boolean).join(" · ")}</small></span>
@@ -97,10 +105,10 @@ export function Research({ settings }: { settings: SearchSettings }) {
               <em className={item.status === "strong" ? "profit-strong" : item.status === "good" ? "profit-good" : ""}>{item.estimatedProfit == null ? "нет базы" : (item.estimatedProfit >= 0 ? "+" : "") + euro(item.estimatedProfit) + " · " + pct(item.profitRoi)}</em>
             </a>
           ))}</div> : <p className="research-muted">Точных объявлений в выбранном диапазоне нет.</p>}
-          <h4>Магазины и восстановленные · {result.offers.length}</h4>
+          <h4>Независимые источники цены · {result.offers.length}</h4>
           {result.offers.length ? <div className="research-web-links">{result.offers.slice(0, 14).map((item) => (
             <a href={item.url} target="_blank" rel="noopener noreferrer" key={item.url + item.price}><span>{item.title}</span><b>{euro(item.price, true)}</b>
-              <small>{item.domain} · {item.segment === "new" ? "новый" : item.segment === "refurbished" ? "восстановленный" : "б/у"}{item.official ? " · официальный" : ""}</small></a>
+              <small>{item.domain} · {item.segment === "new" ? "новый" : item.segment === "refurbished" ? "восстановленный" : "б/у"}{item.official ? " · официальный" : ""} · проверено {new Date(result.checkedAt).toLocaleDateString("ru-RU")}</small></a>
           ))}</div> : <p className="research-muted">Страницы магазинов с ценой точной модели не найдены.</p>}
           {result.variantExamples.length ? (
             <details className="source-list"><summary>Не смешаны с этой моделью · {result.rejected.variants} других версий, {result.rejected.accessories} аксессуаров</summary>
