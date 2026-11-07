@@ -566,7 +566,14 @@ export default function HomePage() {
             listingId: selected.listing_id,
             title: selected.title, description: selected.description || "", price: selected.price,
             marketPrice: selected.market_price ?? null, newPrice: selected.new_price ?? null,
-            estimatedProfit: selected.estimated_profit ?? null, category: selected.category_label,
+            estimatedProfit: selected.estimated_profit ?? null,
+            marketSamples: selected.market_samples ?? 0,
+            marketConfidence: selected.market_confidence ?? "none",
+            priceReferenceType: selected.price_reference_type ?? "insufficient_data",
+            marketSources: Array.isArray(selected.market_sources) ? selected.market_sources.slice(0, 10).map((source) => ({
+              title: source.title, url: source.url, price: source.price_eur ?? null, condition: source.condition ?? "unknown"
+            })) : [],
+            category: selected.category_label,
             city: selected.city || "Нидерланды",
             warningFlags: selected.warning_flags || [], listingUrl: selected.listing_url
           },
