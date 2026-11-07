@@ -1632,6 +1632,8 @@ def run_once(cfg, db, dry=False):
 
         for listing_id, (item, group, flags) in candidates.items():
             metrics["candidates"] += 1
+            ai_decision = ai_decisions.get(listing_id)
+            ai_confident = bool(ai_decision and ai_decision.get("confidence", 0) >= 0.90)
             local_prices = [] if group == "unknown" else market_price_samples(db, qkey, group, listing_id, window)
             sample_count = len(local_prices)
             median_price = _market_median(local_prices)
@@ -1781,12 +1783,11 @@ def run_once(cfg, db, dry=False):
 
     db.execute("DELETE FROM listings WHERE last_seen<?", (now - 30 * 86400,))
     db.commit()
-    if fails == len(cfg["queries"]):
-        log("все запросы к Marktplaats не удались — каталог не обновлён")
-        return False
     if fails == len(cfg["queries"]) and not feed_deals:
         log("все запросы и внешние источники недоступны — каталог не перезаписывается")
         return False
+    if fails == len(cfg["queries"]):
+        log("Marktplaats недоступен во всех категориях; сохраняю свежие оценки из внешних источников и сохранённого фида")
     max_age_hours = cfg.get("max_age_hours", 720)
     current_deals = []
     for deal in feed_deals.values():
