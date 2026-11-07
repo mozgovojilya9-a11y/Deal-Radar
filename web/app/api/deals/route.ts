@@ -96,6 +96,8 @@ export async function GET(request: NextRequest) {
           && typeof deal.estimated_profit === "number" && deal.estimated_profit >= 50;
       })
       : [];
+    // Count the complete eligible catalogue before applying user-requested price filters.
+    const catalogCount = deals.length;
     if (category && /^[a-z0-9-]{1,64}$/i.test(category)) deals = deals.filter((deal) => deal.category_key === category);
     const minPriceRaw = request.nextUrl.searchParams.get("minPrice");
     const maxPriceRaw = request.nextUrl.searchParams.get("maxPrice");
@@ -121,6 +123,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       deals,
       count: deals.length,
+      catalogCount,
       valuationReady,
       updatedAt: valuationReady && typeof feed.updatedAt === "string" ? feed.updatedAt : null,
       scannedAt: valuationReady && typeof feed.scannedAt === "string" ? feed.scannedAt : null,

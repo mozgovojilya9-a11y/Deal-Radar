@@ -239,9 +239,8 @@ function readSettings(raw: unknown): UserSettings {
     categories,
     minDiscount: typeof stored.minDiscount === "number" && Number.isInteger(stored.minDiscount) ? Math.min(90, Math.max(0, stored.minDiscount)) : 0,
     minPrice: positive(stored.minPrice),
-    maxPrice: stored.priceFilterConfigured === true
-      ? positive(stored.maxPrice)
-      : (positive(stored.maxPrice) ?? 800)
+    // Older builds persisted €800 as an implicit default; only keep an explicit user-set limit.
+    maxPrice: stored.priceFilterConfigured === true ? positive(stored.maxPrice) : null
   };
 }
 
@@ -321,6 +320,7 @@ function DealCard({ deal, saved, onSave, onOpen }: {
 
 export default function HomePage() {
   const [deals, setDeals] = useState<Deal[]>([]);
+  const [catalogCount, setCatalogCount] = useState(0);
   const [researchQuery, setResearchQuery] = useState("");
   const [researchMaxPrice, setResearchMaxPrice] = useState("");
   const [researchIncludeUsed, setResearchIncludeUsed] = useState(true);
@@ -404,6 +404,9 @@ export default function HomePage() {
       if (!response.ok) throw new Error(data.error || "Не удалось загрузить предложения");
       if (id !== requestId.current) return;
       setDeals(Array.isArray(data.deals) ? data.deals as Deal[] : []);
+      setCatalogCount(typeof data.catalogCount === "number" && Number.isFinite(data.catalogCount)
+        ? data.catalogCount
+        : (Array.isArray(data.deals) ? data.deals.length : 0));
       setCatalogUpdating(data.valuationReady === false);
       setUpdatedAt(data.scannedAt || data.updatedAt || null);
       setScannerStats(data.scannerStats && typeof data.scannerStats === "object" ? data.scannerStats as ScannerStats : null);
@@ -586,6 +589,7 @@ export default function HomePage() {
   function resetFilters() {
     setSearch("");
     setCategory("");
+    setTier("all");
     updateFilters({ ...DEFAULT_SETTINGS });
   }
 
@@ -794,8 +798,19 @@ export default function HomePage() {
       {tab === "home" ? (
       <section className="content-section" id="deals">
         <div className="section-heading">
-          <div><h2>Находки<span className="heading-count">{filtered.length}</span></h2>{updatedAt ? <p>Обновлено {ageLabel(updatedAt)}{bestDiscount ? " · лучшая скидка −" + bestDiscount + "%" : ""}</p> : null}</div>
-          <button className="refresh-button" onClick={() => void loadDeals(true)} disabled={loading || refreshing} aria-label="Обновить список"><span className={loading || refreshing ? "spin" : ""} aria-hidden="true">↻</span> Обновить</button>
+          <div>
+            <h2>Находки<span className="heading-count">{filtered.length}</span></h2>
+            {updatedAt || filtered.length < catalogCount ? (
+              <p>
+                {filtered.length < catalogCount ? `Показано ${filtered.length.toLocaleString("ru-RU")} из ${catalogCount.toLocaleString("ru-RU")} товаров · ` : ""}
+                {updatedAt ? "Обновлено " + ageLabel(updatedAt) + (bestDiscount ? " · лучшая скидка −" + bestDiscount + "%" : "") : ""}
+              </p>
+            ) : null}
+          </div>
+          <div>
+            {activeFilters > 0 ? <button type="button" className="reset-filters" onClick={resetFilters}>Показать весь каталог</button> : null}
+            <button className="refresh-button" onClick={() => void loadDeals(true)} disabled={loading || refreshing} aria-label="Обновить список"><span className={loading || refreshing ? "spin" : ""} aria-hidden="true">↻</span> Обновить</button>
+          </div>
         </div>
 
         <div className="seg" role="tablist" aria-label="Тип предложений">
