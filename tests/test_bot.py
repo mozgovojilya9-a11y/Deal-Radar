@@ -214,7 +214,7 @@ class ScannerTests(unittest.TestCase):
             now = int(datetime.now(timezone.utc).timestamp())
             for index, price in enumerate((100, 200, 300, 400, 500, 600, 700, 800)):
                 db.execute(
-                    "INSERT INTO listings VALUES(?,?,?,?,?,?,?)",
+                    "INSERT INTO listings(id,qkey,grp,title,price,first_seen,last_seen) VALUES(?,?,?,?,?,?,?)",
                     (f"sample-{index}", "sample-q", "exact-model", "Exact model", price, now, now),
                 )
             db.commit()
@@ -544,7 +544,7 @@ class ScannerTests(unittest.TestCase):
     def test_scanner_version_change_preserves_market_observation_history(self):
         db = bot.open_db()
         now = int(time.time())
-        db.execute("INSERT INTO listings VALUES(?,?,?,?,?,?,?)", ("historic", "ps5", "all", "PS5 console", 400, now, now))
+        db.execute("INSERT INTO listings(id,qkey,grp,title,price,first_seen,last_seen) VALUES(?,?,?,?,?,?,?)", ("historic", "ps5", "all", "PS5 console", 400, now, now))
         db.execute("INSERT OR REPLACE INTO meta(k,v) VALUES('scanner_version','3')")
         db.commit()
         db.close()

@@ -13,6 +13,7 @@ import sqlite3
 import statistics
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -79,8 +80,57 @@ def open_db():
             sample_count INTEGER NOT NULL, rationale TEXT, sources_json TEXT NOT NULL,
             checked_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS evaluations(
+            id TEXT PRIMARY KEY, qkey TEXT, status TEXT, reason TEXT,
+            checks INTEGER NOT NULL DEFAULT 0, first_evaluated INTEGER, last_evaluated INTEGER,
+            next_check INTEGER, last_seen_search INTEGER, last_verified INTEGER,
+            last_error TEXT, lease_until INTEGER, inactive INTEGER NOT NULL DEFAULT 0);
+        CREATE INDEX IF NOT EXISTS ix_eval_next ON evaluations(next_check);
+        CREATE TABLE IF NOT EXISTS geocache(
+            place TEXT PRIMARY KEY, lat REAL, lon REAL, checked_at INTEGER NOT NULL);
     """)
+    migrate_db(db)
     return db
+
+
+LISTING_COLUMNS = {
+    # Added in scanner v5: evidence for every comparable price. Older rows keep NULL
+    # until Marktplaats returns them again; URLs are never invented.
+    "url": "TEXT", "city": "TEXT", "item_condition": "TEXT", "price_type": "TEXT",
+    "lat": "REAL", "lon": "REAL", "posted": "TEXT",
+}
+
+
+def migrate_db(db):
+    """Backward-compatible, additive schema migration; never drops data."""
+    existing = {row[1] for row in db.execute("PRAGMA table_info(listings)")}
+    for column, kind in LISTING_COLUMNS.items():
+        if column not in existing:
+            db.execute(f"ALTER TABLE listings ADD COLUMN {column} {kind}")
+    db.commit()
+
+
+def upsert_listing(db, listing_id, qkey, group, item, now):
+    """Store a comparable observation together with its evidence (URL, condition, location)."""
+    values = (
+        qkey, group, item["title"], item["price"], now,
+        item.get("url") or None, item.get("city") or None, item.get("item_condition") or None,
+        item.get("ptype") or None, item.get("lat"), item.get("lon"), item.get("date") or None,
+    )
+    updated = db.execute(
+        "UPDATE listings SET qkey=?, grp=?, title=?, price=?, last_seen=?, url=COALESCE(?, url), "
+        "city=COALESCE(?, city), item_condition=COALESCE(?, item_condition), price_type=COALESCE(?, price_type), "
+        "lat=COALESCE(?, lat), lon=COALESCE(?, lon), posted=COALESCE(?, posted) WHERE id=?",
+        values + (listing_id,),
+    ).rowcount
+    if not updated:
+        db.execute(
+            "INSERT INTO listings(id,qkey,grp,title,price,first_seen,last_seen,url,city,item_condition,price_type,lat,lon,posted) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (listing_id, qkey, group, item["title"], item["price"], now, now,
+             item.get("url") or None, item.get("city") or None, item.get("item_condition") or None,
+             item.get("ptype") or None, item.get("lat"), item.get("lon"), item.get("date") or None),
+        )
 
 def market_stats(db, qkey, grp, exclude_id, since):
     """Return exact-comparable count, median and lower quartile."""
@@ -100,12 +150,42 @@ def market_stats(db, qkey, grp, exclude_id, since):
     return len(prices), median_price, lower_quartile
 
 def market_price_samples(db, qkey, grp, exclude_id, since):
-    sql = "SELECT price FROM listings WHERE qkey=? AND last_seen>=? AND id!=?"
+    """Fixed asking prices of comparable listings; "bieden vanaf" minimum bids are not prices."""
+    sql = ("SELECT price FROM listings WHERE qkey=? AND last_seen>=? AND id!=? "
+           "AND (price_type IS NULL OR price_type='FIXED')")
     args = [qkey, since, exclude_id]
     if grp is not None:
         sql += " AND grp=?"
         args.append(grp)
     return [float(row[0]) for row in db.execute(sql, args)]
+
+
+def market_comparables(db, qkey, grp, exclude_id, since, center=None, limit=8):
+    """Real comparable listings (with URLs) behind a Marktplaats estimate, closest to the estimate first."""
+    sql = ("SELECT id, title, price, url, city, item_condition, last_seen FROM listings "
+           "WHERE qkey=? AND last_seen>=? AND id!=? AND url IS NOT NULL AND url LIKE 'https://%' "
+           "AND (price_type IS NULL OR price_type='FIXED')")
+    args = [qkey, since, exclude_id]
+    if grp is not None:
+        sql += " AND grp=?"
+        args.append(grp)
+    rows = list(db.execute(sql, args))
+    if center:
+        rows.sort(key=lambda row: abs(float(row[2]) - float(center)))
+    chosen = sorted(rows[:limit], key=lambda row: float(row[2]))
+    return [{
+        "title": str(row[1] or "")[:180], "url": row[3], "price": round(float(row[2]), 2), "price_eur": round(float(row[2]), 2),
+        "domain": "marktplaats.nl", "condition": "used", "item_condition": row[5] or None, "city": row[4] or None,
+        "seen_at": datetime.fromtimestamp(int(row[6]), timezone.utc).isoformat(), "source": "deal_radar_comparable",
+    } for row in chosen]
+
+
+def price_spread(prices):
+    """Interquartile range relative to the median; high values mean an unreliable estimate."""
+    if len(prices) < 4:
+        return None
+    q1, median_value, q3 = statistics.quantiles(prices, n=4, method="inclusive")
+    return round((q3 - q1) / median_value, 3) if median_value else None
 
 
 def fetch_marktplaats_v2(cfg, query, pages):
@@ -286,6 +366,9 @@ def parse_listing(l):
     price_type = pi.get("priceType") or price_model.get("modelType")
     if isinstance(price_type, str):
         price_type = "FIXED" if price_type.lower() == "fixed" else price_type.upper()
+    # Auction listings ("Veiling - ...") start from a minimum price like "bieden vanaf".
+    if price_type == "FIXED" and re.match(r"\s*(?:veiling|auction)\b", str(l.get("title") or ""), re.I):
+        price_type = "MIN_BID"
     location = l.get("location")
     if not isinstance(location, dict):
         location = {}
@@ -303,7 +386,29 @@ def parse_listing(l):
         if isinstance(location.get("distanceMeters"), (int, float)) else None,
         "date": l.get("date") or l.get("dateCreated") or l.get("createdAt"),
         "url": url,
+        "lat": _coordinate(location.get("latitude"), -90, 90),
+        "lon": _coordinate(location.get("longitude"), -180, 180),
+        "item_condition": _listing_attribute(l, "condition"),
+        "delivery": _listing_attribute(l, "delivery"),
     }
+
+
+def _coordinate(value, low, high):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    # Marktplaats sends 0/0 when the seller hides the location.
+    return round(number, 5) if low <= number <= high and number != 0 else None
+
+
+def _listing_attribute(listing, key):
+    for field in ("attributes", "extendedAttributes"):
+        for attribute in listing.get(field) or []:
+            if isinstance(attribute, dict) and attribute.get("key") == key:
+                value = attribute.get("value")
+                return str(value)[:60] if value else None
+    return None
 
 def parse_listing_datetime(value):
     """Parse ISO timestamps and the Dutch relative/date labels used by Marktplaats."""
@@ -581,7 +686,8 @@ def primary_rejection(q, it, cfg):
     # rescue a free, auction, out-of-range, distant, or externally linked listing.
     if not it.get("id") or it.get("price") is None or it["price"] <= 0:
         return "invalid"
-    if it.get("ptype") not in (None, "FIXED"):
+    # "Bieden vanaf" (MIN_BID) has a real minimum price: evaluate it, but never as a comparable.
+    if it.get("ptype") not in (None, "FIXED", "MIN_BID"):
         return "price_type"
     minimum_price = float(q.get("min_price", 0) or 0)
     if float(it["price"]) < minimum_price:
@@ -598,7 +704,58 @@ def primary_rejection(q, it, cfg):
     title_field = str(it.get("title") or "")
     if not title_matches_query(q, searchable_text if q.get("match_description") else title_field):
         return "title"
+    if is_accessory_listing(q, title_field):
+        return "accessory"
+    if MULTI_ITEM_RE.search(title_field):
+        return "quantity"
     return None
+
+
+# "2x MacBook", "3 stuks", "partij", "lot van 5": one price for several items is not comparable.
+MULTI_ITEM_RE = re.compile(r"^\s*(?:[2-9]|1\d)\s*x\s|(?:^|\s)(?:[2-9]|1\d)\s*(?:stuks|st\.)(?:\s|$)|\bpartij\b|\blot\s+(?:van\s+)?\d|\bbulk\b", re.I)
+
+
+ELECTRONICS_PREFIXES = ("iphone", "ps", "airpods", "headphones", "camera", "action-camera", "drones", "televisions",
+                        "rayban", "microphone", "samsung", "macbook", "ipad", "switch", "xbox", "steam", "watch-apple",
+                        "pixel", "garmin", "lens", "gopro", "dji", "sonos", "kindle", "galaxy", "apple-watch", "dyson")
+ACCESSORY_TERMS = re.compile(
+    r"(?<![a-z0-9])(hoesje|hoes|case|cover|sleeve|skin|sticker|screenprotector|screen protector|beschermglas|tempered glass|"
+    r"standaard|houder|mount|oplader|charger|lader|kabel|cable|adapter|dock|laadstation|oplaadstation|oplaadcase|laadcase|"
+    r"oorkussens|earpads|ear pads|eartips|vervangende|replacement|onderdeel|onderdelen|batterij|accu|battery|lensdop|"
+    r"strap|bandje|draagtas|etui|pouch|lege doos|empty box|doos alleen|alleen doos|box only|afstandsbediening|decal|faceplate|"
+    r"links|rechts|linker|rechter|losse|los oordopje|enkele oordop|single earbud|games?|spel(?:len)?|"
+    r"controllers?|dualsense|dualshock|headset)(?![a-z0-9])",
+    re.I,
+)
+FOR_DEVICE = re.compile(r"(?<![a-z0-9])(?:voor|for|geschikt voor|compatible (?:with|met)|compatibel met|past op|suitable for)\s", re.I)
+BUNDLE_MARKER = re.compile(r"\+|(?<![a-z0-9])(?:met|with|incl\.?|inclusief|including|bundel|bundle|set|console|compleet|complete)(?![a-z0-9])", re.I)
+
+
+def is_accessory_listing(q, title):
+    """True for cases, chargers, single earbuds, games etc. listed in a device category."""
+    key = str((q or {}).get("key") or "")
+    if not key.startswith(ELECTRONICS_PREFIXES) or (q or {}).get("allow_accessories"):
+        return False
+    lowered = str(title or "").lower()
+    if re.search(r"(?<![a-z0-9])(?:geschikt voor|compatible (?:with|met)|compatibel met|suitable for)(?![a-z0-9])", lowered):
+        return True
+    aliases = sorted(expand_query_aliases(q), key=len, reverse=True)
+    device_index = min((lowered.find(alias) for alias in aliases if alias and lowered.find(alias) >= 0), default=-1)
+    for_device = FOR_DEVICE.search(lowered)
+    if (for_device and device_index > for_device.start()
+            and not any(alias in lowered[:for_device.start()] for alias in aliases if alias)
+            and not BUNDLE_MARKER.search(lowered[:for_device.start()])):
+        return True  # "Controller voor PS5", "Etui voor Ray-Ban Meta"
+    match = ACCESSORY_TERMS.search(lowered)
+    if not match:
+        return False
+    bundle = BUNDLE_MARKER.search(lowered)
+    if bundle and bundle.start() < match.start():
+        return False  # "PS5 Slim + 2 controllers", "AirPods met oplaadcase"
+    # Parts and software are accessories wherever they appear in the title.
+    if re.match(r"(links|rechts|linker|rechter|losse|enkele|single|oplaadcase|laadcase|games?|spel(?:len)?)$", match.group(1)):
+        return True
+    return device_index < 0 or match.start() < device_index
 
 def _structured_schema(schema):
     """Keep the JSON Schema subset accepted by Gemini and Ollama."""
@@ -1506,6 +1663,118 @@ def calculate_resale_economics(q, asking_price, reference_price, sample_count, r
     }
 
 
+def check_listing_alive(url, timeout=12):
+    """Returns True (live), False (404/410: removed) or None (could not check)."""
+    if not str(url or "").startswith("https://www.marktplaats.nl/"):
+        return None
+    try:
+        request = urllib.request.Request(url, headers={**HEADERS, "Accept": "text/html"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            final_url = response.geturl()
+            response.read(2048)
+            # A removed listing can also redirect to a search/category page instead of the ad.
+            return "/v/" in final_url or "/a/" in final_url
+    except urllib.error.HTTPError as error:
+        if error.code in (404, 410):
+            return False
+        return None
+    except Exception:
+        return None
+
+
+def verify_listing_liveness(db, feed_deals, metrics, now, cfg):
+    limit = int(cfg.get("liveness_checks_per_run", 40))
+    stale_after = int(cfg.get("liveness_after_hours", 36)) * 3600
+    queue = []
+    for listing_id, deal in feed_deals.items():
+        row = db.execute("SELECT last_seen_search, last_verified FROM evaluations WHERE id=?", (listing_id,)).fetchone()
+        last_seen = int(row[0]) if row and row[0] else 0
+        last_verified = int(row[1]) if row and row[1] else 0
+        if now - last_seen < stale_after or now - last_verified < 12 * 3600:
+            continue
+        queue.append((last_verified, listing_id, deal))
+    queue.sort(key=lambda item: item[0])
+    for _verified, listing_id, deal in queue[:limit]:
+        alive = check_listing_alive(deal.get("listing_url"))
+        metrics["livenessChecked"] += 1
+        if alive is None:
+            metrics["technicalErrors"] += 1
+            db.execute("INSERT INTO evaluations(id, last_error) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET last_error=excluded.last_error",
+                       (listing_id, "liveness check failed"))
+            continue
+        db.execute("INSERT INTO evaluations(id, last_verified, inactive) VALUES(?,?,?) "
+                   "ON CONFLICT(id) DO UPDATE SET last_verified=excluded.last_verified, inactive=excluded.inactive",
+                   (listing_id, now, 0 if alive else 1))
+        if not alive:
+            metrics["verifiedInactive"] += 1
+            feed_deals.pop(listing_id, None)
+        time.sleep(random.uniform(0.3, 0.8))
+    db.commit()
+
+
+def geocode_place(db, place, now):
+    """City -> (lat, lon) via the public PDOK Locatieserver (Dutch government), cached for 180 days."""
+    key = re.sub(r"\s+", " ", str(place or "").strip().lower())
+    if not key:
+        return None
+    cached = db.execute("SELECT lat, lon, checked_at FROM geocache WHERE place=?", (key,)).fetchone()
+    if cached and now - int(cached[2]) < 180 * 86400:
+        return (cached[0], cached[1]) if cached[0] is not None else None
+    url = ("https://api.pdok.nl/bzk/locatieserver/search/v3_1/free?" + urllib.parse.urlencode(
+        {"q": place, "fq": "type:woonplaats", "rows": 1, "fl": "centroide_ll,weergavenaam"}))
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"Accept": "application/json"}), timeout=10) as response:
+            docs = json.load(response).get("response", {}).get("docs", [])
+        point = re.match(r"POINT\(([-\d.]+) ([-\d.]+)\)", (docs[0].get("centroide_ll") if docs else "") or "")
+        coords = (round(float(point.group(2)), 5), round(float(point.group(1)), 5)) if point else None
+    except Exception:
+        return None
+    db.execute("INSERT OR REPLACE INTO geocache(place, lat, lon, checked_at) VALUES(?,?,?,?)",
+               (key, coords[0] if coords else None, coords[1] if coords else None, now))
+    return coords
+
+
+def backfill_coordinates(db, feed_deals, metrics, now, cfg):
+    limit = int(cfg.get("geocode_per_run", 60))
+    done = 0
+    for deal in feed_deals.values():
+        if deal.get("latitude") is not None or not deal.get("city"):
+            continue
+        if done >= limit:
+            break
+        coords = geocode_place(db, deal["city"], now)
+        done += 1
+        if coords:
+            deal["latitude"], deal["longitude"] = coords
+            deal["location_precision"] = "city"
+            metrics["geocoded"] += 1
+    db.commit()
+
+
+def record_evaluation(db, listing_id, qkey, status, reason, now, seen, has_market=True):
+    """Persist the lifecycle state and schedule the next re-check (backoff when data is missing)."""
+    row = db.execute("SELECT checks FROM evaluations WHERE id=?", (listing_id,)).fetchone()
+    checks = (int(row[0]) if row and row[0] else 0) + 1
+    if status in ("strong", "good"):
+        delay = 6 * 3600
+    elif status == "rejected":
+        delay = 24 * 3600
+    elif has_market:
+        delay = 3 * 3600
+    else:
+        # Missing comparables: retry soon, then back off; never spin on the same listing.
+        delay = [3600, 3 * 3600, 6 * 3600, 12 * 3600][min(checks - 1, 3)] if checks <= 14 else 48 * 3600
+    next_check = now + delay
+    db.execute(
+        "INSERT INTO evaluations(id, qkey, status, reason, checks, first_evaluated, last_evaluated, next_check, last_seen_search, lease_until) "
+        "VALUES(?,?,?,?,?,?,?,?,?,NULL) ON CONFLICT(id) DO UPDATE SET qkey=excluded.qkey, status=excluded.status, "
+        "reason=excluded.reason, checks=?, last_evaluated=excluded.last_evaluated, next_check=excluded.next_check, "
+        "last_seen_search=COALESCE(excluded.last_seen_search, evaluations.last_seen_search), lease_until=NULL",
+        (listing_id, qkey, status, str(reason or "")[:300], checks, now, now, next_check, now if seen else None, checks),
+    )
+    return checks, next_check
+
+
 def make_feed_deal(q, it, med, discount, flags, grp, status, market_samples, reason=None,
                    economics=None, reference_type="marktplaats", new_price=None, model_year=None,
                    market_median_price=None, market_sources=None):
@@ -1562,7 +1831,13 @@ def run_once(cfg, db, dry=False):
         "aiReviewed": 0, "aiRejected": 0, "aiRescued": 0,
         "aiSearchPlans": 0, "aiSearchVariants": 0,
         "webSearchGroups": 0, "webPriceOffers": 0, "cachedCandidatesReevaluated": 0,
+        "rejectedAccessory": 0, "newListings": 0, "evaluated": 0, "awaitingRecheck": 0,
+        "promoted": 0, "demoted": 0, "verifiedInactive": 0, "livenessChecked": 0,
+        "technicalErrors": 0, "minBidCandidates": 0, "rejectedSpread": 0, "geocoded": 0,
     }
+    previous_deals = {str(deal.get("listing_id")): deal for deal in feed_doc.get("deals", [])
+                      if isinstance(deal, dict) and deal.get("listing_id")}
+    seen_in_search = set()
     queries_by_key = {q["key"]: q for q in cfg["queries"]}
     feed_deals = {}
     compatible_feed = (
@@ -1673,6 +1948,7 @@ def run_once(cfg, db, dry=False):
                     "old_model": "rejectedOldModel", "invalid": "rejectedInvalid",
                     "price_type": "rejectedPriceType", "price_range": "rejectedPriceRange",
                     "distance": "rejectedDistance", "ai_mismatch": "aiRejected",
+                    "accessory": "rejectedAccessory", "quantity": "rejectedInvalid",
                 }[rejection]
                 metrics[metric] += 1
                 if listing_id:
@@ -1699,30 +1975,46 @@ def run_once(cfg, db, dry=False):
             if ai_confident and ai_decision["same_product"] and not ai_decision["comparable"]:
                 group = "unknown"
             known = db.execute("SELECT 1 FROM listings WHERE id=?", (listing_id,)).fetchone()
-            if known:
-                db.execute("UPDATE listings SET last_seen=?, price=?, qkey=?, grp=?, title=? WHERE id=?",
-                           (now, item["price"], qkey, group, item["title"], listing_id))
-            else:
-                db.execute("INSERT INTO listings VALUES(?,?,?,?,?,?,?)",
-                           (listing_id, qkey, group, item["title"], item["price"], now, now))
+            if not known and listing_id not in previous_deals:
+                metrics["newListings"] += 1
+            upsert_listing(db, listing_id, qkey, group, item, now)
+            seen_in_search.add(listing_id)
             candidates[listing_id] = (item, group, flags)
         db.commit()
 
-        # Revisit recent cached candidates if Marktplaats paging omits them or returns HTTP 403.
-        cached_cutoff = now - 24 * 3600
+        # Priority re-evaluation queue: listings that this run's search pages did not return
+        # are re-valued against the current market when their next check is due.
+        due_queue = []
         for cached_deal in list(feed_deals.values()):
             cached_id = str(cached_deal.get("listing_id") or "")
             if not cached_id or cached_id in candidates or cached_deal.get("category_key") != qkey:
                 continue
-            if cached_deal.get("status") != "candidate" or cached_deal.get("active") is False:
+            if cached_deal.get("active") is False:
                 continue
-            detected = parse_listing_datetime(cached_deal.get("detected_at"))
-            if detected is None or detected.timestamp() < cached_cutoff:
+            state_row = db.execute("SELECT next_check, inactive, lease_until FROM evaluations WHERE id=?", (cached_id,)).fetchone()
+            if state_row and state_row[1]:
+                feed_deals.pop(cached_id, None)
                 continue
+            if state_row and state_row[2] and int(state_row[2]) > now:
+                continue  # another scanner process is evaluating this listing right now
+            if state_row and state_row[0] and int(state_row[0]) > now:
+                metrics["awaitingRecheck"] += 1
+                continue
+            rank_value = {"strong": 0, "good": 1}.get(str(cached_deal.get("status")), 2)
+            due_queue.append((rank_value, int(state_row[0]) if state_row and state_row[0] else 0, cached_id, cached_deal))
+        due_queue.sort(key=lambda row: (row[0], row[1]))
+        max_recheck = int(cfg.get("max_rechecks_per_query", 80))
+        metrics["awaitingRecheck"] += max(0, len(due_queue) - max_recheck)
+        for _rank, _due, cached_id, cached_deal in due_queue[:max_recheck]:
             cached_title = str(cached_deal.get("title") or "")
             cached_description = str(cached_deal.get("description") or "")
             cached_text = cached_title + " " + cached_description
             if not title_matches_query(q, cached_text if q.get("match_description") else cached_title):
+                feed_deals.pop(cached_id, None)
+                continue
+            if is_accessory_listing(q, cached_title):
+                metrics["rejectedAccessory"] += 1
+                feed_deals.pop(cached_id, None)
                 continue
             cached_price = cached_deal.get("price")
             if not isinstance(cached_price, (int, float)) or cached_price <= 0:
@@ -1733,17 +2025,25 @@ def run_once(cfg, db, dry=False):
                 "url": str(cached_deal.get("listing_url") or ""),
                 "city": str(cached_deal.get("city") or ""),
                 "dist_km": cached_deal.get("distance_km"),
-                "date": cached_deal.get("posted_at") or cached_deal.get("detected_at"),
+                "date": cached_deal.get("posted_at") or cached_deal.get("first_detected_at") or cached_deal.get("detected_at"),
                 "image_url": cached_deal.get("image_url"),
+                "lat": cached_deal.get("latitude"), "lon": cached_deal.get("longitude"),
+                "item_condition": cached_deal.get("item_condition"),
+                "ptype": cached_deal.get("price_type") or "FIXED",
             }
             cached_flags = cached_deal.get("warning_flags") if isinstance(cached_deal.get("warning_flags"), list) else []
             if risks(cached_item) is None:
+                feed_deals.pop(cached_id, None)
                 continue
             cached_group = str(cached_deal.get("model_group") or group_of(q, cached_text))
             candidates[cached_id] = (cached_item, cached_group, cached_flags)
             if isinstance(cached_deal.get("ai_review"), dict):
                 ai_decisions.setdefault(cached_id, cached_deal["ai_review"])
             metrics["cachedCandidatesReevaluated"] += 1
+        # Lease every listing of this batch so a concurrent scanner on the same DB skips it.
+        for listing_id in candidates:
+            db.execute("INSERT INTO evaluations(id, qkey, lease_until) VALUES(?,?,?) "
+                       "ON CONFLICT(id) DO UPDATE SET lease_until=excluded.lease_until", (listing_id, qkey, now + 900))
         db.commit()
 
         # Search outside websites and cache actual new/used price observations.
@@ -1766,9 +2066,11 @@ def run_once(cfg, db, dry=False):
             lower_quartile_price = _market_lower_quartile(local_prices)
             strict_comparison = bool(q.get("strict_group") or q.get("group_regex")
                                      or q.get("group_type") in ("model_required", "television"))
+            comparable_group = None if group == "unknown" else group
             if group != "all" and not strict_comparison and sample_count < min_n:
                 category_prices = market_price_samples(db, qkey, None, listing_id, window)
                 if len(category_prices) >= min_n:
+                    comparable_group = None
                     local_prices = category_prices
                     sample_count = len(local_prices)
                     median_price = _market_median(local_prices)
@@ -1786,11 +2088,17 @@ def run_once(cfg, db, dry=False):
             else:
                 reference_type = "marktplaats" if median_price is not None else "insufficient_data"
 
+            spread = price_spread(local_prices + (external_used_prices if reference_type == "web_used" else []))
             status, discount, reason = "candidate", None, None
             reference = None
             new_price = None
             valuation_price = lower_quartile_price if sample_count >= min_n and lower_quartile_price is not None else median_price
             market_source_rows = list(web_reference.get("sources") or [])
+            if reference_type in ("marktplaats", "web_used") and group != "unknown":
+                # Persist the real listings behind the estimate so the app and the AI can show them.
+                comparables = market_comparables(db, qkey, comparable_group, listing_id, window, center=valuation_price)
+                market_source_rows = comparables + [row for row in market_source_rows
+                                                    if row.get("url") not in {item["url"] for item in comparables}]
             new_evidence_count = 0
 
             if (sample_count < candidate_min_n or median_price is None) and group != "unknown":
@@ -1860,8 +2168,14 @@ def run_once(cfg, db, dry=False):
                 else:
                     if not economics or economics["estimated_profit"] < 50 or economics["estimated_profit"] < economics["minimum_profit_required"] or economics["profit_roi"] < economics["minimum_roi_required"]:
                         metrics["rejectedProfit"] += 1
+                        drop_reason = "Нет прибыли после торга и комиссий"
                     else:
                         metrics["rejectedDiscount"] += 1
+                        drop_reason = "Скидка ниже порога"
+                    previous_status = str((previous_deals.get(listing_id) or {}).get("status") or "")
+                    if previous_status in ("strong", "good"):
+                        metrics["demoted"] += 1
+                    record_evaluation(db, listing_id, qkey, "rejected", drop_reason, now, listing_id in seen_in_search)
                     feed_deals.pop(listing_id, None)
                     continue
             else:
@@ -1880,6 +2194,41 @@ def run_once(cfg, db, dry=False):
                 else:
                     reason = "Недостаточно надёжных сравнений; прибыль от перепродажи пока не подтверждена"
 
+            # A wide price spread means the "market price" is not one market: do not call it a deal.
+            max_spread = float(cfg.get("max_price_spread", 0.8))
+            if status in ("strong", "good") and spread is not None and spread > max_spread and reference_type != "new_retail":
+                metrics["strongDeals" if status == "strong" else "goodDeals"] -= 1
+                metrics["reviewCandidates"] += 1
+                metrics["rejectedSpread"] += 1
+                status = "candidate"
+                reason = f"Большой разброс цен сравнений ({spread:.0%} от медианы) — оценка ненадёжна, нужна проверка модели"
+            if item.get("ptype") == "MIN_BID":
+                if status == "candidate":
+                    # A minimum bid without confirmed profit is noise, not a lead.
+                    metrics["reviewCandidates"] -= 1
+                    metrics["rejectedPriceType"] += 1
+                    record_evaluation(db, listing_id, qkey, "rejected", "«Bieden vanaf» без подтверждённой выгоды", now,
+                                      listing_id in seen_in_search, has_market=valuation_price is not None)
+                    feed_deals.pop(listing_id, None)
+                    continue
+                metrics["minBidCandidates"] += 1
+                flags = list(flags) + ["цена «bieden vanaf» — это минимальная ставка, итоговая цена может быть выше"]
+                if status == "strong":
+                    metrics["strongDeals"] -= 1
+                    metrics["goodDeals"] += 1
+                    status = "good"
+            if status in ("strong", "good") and not reason and economics:
+                basis_text = "нижнему квартилю" if sample_count >= min_n else "медиане"
+                reason = (f"Цена на {discount:.0%} ниже оценки по {basis_text} {sample_count} сравнений; "
+                          f"прибыль ≈ €{economics['estimated_profit']:.0f} после торга, комиссии и расходов")
+            if not reason:
+                reason = "Оценка обновлена"
+            previous_status = str((previous_deals.get(listing_id) or {}).get("status") or "")
+            if previous_status == "candidate" and status in ("strong", "good"):
+                metrics["promoted"] += 1
+            elif previous_status in ("strong", "good") and status == "candidate":
+                metrics["demoted"] += 1
+            metrics["evaluated"] += 1
             already_published = db.execute("SELECT 1 FROM sent WHERE id=?", (listing_id,)).fetchone()
             if already_published:
                 metrics["alreadyPublished"] += 1
@@ -1893,6 +2242,25 @@ def run_once(cfg, db, dry=False):
                 market_median_price=median_price if reference_type in ("marktplaats", "web_used") else None,
                 market_sources=market_source_rows[:12]
             )
+            checks, next_check = record_evaluation(db, listing_id, qkey, status, reason, now, listing_id in seen_in_search,
+                                                   has_market=valuation_price is not None)
+            previous = previous_deals.get(listing_id) or {}
+            feed_deals[listing_id].update({
+                "first_detected_at": previous.get("first_detected_at") or previous.get("detected_at") or feed_deals[listing_id]["detected_at"],
+                "detected_at": previous.get("first_detected_at") or previous.get("detected_at") or feed_deals[listing_id]["detected_at"],
+                "evaluated_at": datetime.now(timezone.utc).isoformat(),
+                "last_seen_at": datetime.now(timezone.utc).isoformat() if listing_id in seen_in_search else previous.get("last_seen_at"),
+                "latitude": item.get("lat") if item.get("lat") is not None else previous.get("latitude"),
+                "longitude": item.get("lon") if item.get("lon") is not None else previous.get("longitude"),
+                "item_condition": item.get("item_condition") or previous.get("item_condition"),
+                "price_type": item.get("ptype") or previous.get("price_type") or "FIXED",
+                "market_spread": spread,
+                "match_level": ("variant" if (ai_confident and ai_decision["same_product"] and not ai_decision["comparable"])
+                                else "exact" if group not in ("unknown",) else "similar"),
+                "checks": checks,
+                "next_check_at": datetime.fromtimestamp(next_check, timezone.utc).isoformat(),
+                "status_changed": previous.get("status") != status if previous else False,
+            })
             if ai_decision:
                 feed_deals[listing_id]["ai_review"] = {
                     "confidence": round(ai_decision["confidence"], 3),
@@ -1906,6 +2274,12 @@ def run_once(cfg, db, dry=False):
                     f"ROI {economics['profit_roi']:.0%}, цена €{item['price']:.0f} "
                     f"(ориентир €{valuation_price:.0f}, {sample_count} сравнений, {reference_type}) {item['title'][:70]}")
         time.sleep(random.uniform(2, 4))
+
+    # Listings missing from search for a while are opened directly: HTTP 404/410 means sold or removed.
+    verify_listing_liveness(db, feed_deals, metrics, now, cfg)
+    # Older records have only a city name: geocode it once (PDOK, cached) so radius filters work.
+    backfill_coordinates(db, feed_deals, metrics, now, cfg)
+    metrics["technicalErrors"] += fails
 
     db.execute("DELETE FROM listings WHERE last_seen<?", (now - 30 * 86400,))
     db.commit()

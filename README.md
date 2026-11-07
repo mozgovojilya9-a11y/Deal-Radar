@@ -82,6 +82,34 @@ npm run build
 npm run dev
 ```
 
+## What changed in v5 (scanner, AI advisor, settings)
+
+### AI advisor (`web/lib/advisor.ts`, `web/lib/market-research.ts`)
+- Real web research on every question: Brave, Bing, DuckDuckGo (HTML and Lite), Yahoo and Bing RSS with automatic failover and cool-down after rate limits; optional Brave Search API (`BRAVE_SEARCH_API_KEY`) and Google Custom Search (`GOOGLE_CSE_KEY`, `GOOGLE_CSE_CX`).
+- Independent of search engines: the official Marktplaats/2dehands search API and the Coolblue/MediaMarkt search pages.
+- Result pages are opened (manual, validated redirects) and prices are extracted from JSON-LD `Product`/`Offer`/`AggregateOffer`, microdata, `product:price` meta tags and, only on product pages, the visible price after the heading. Formats like `€419`, `EUR419.00`, `419 EUR`, `1.299,00`, `419,-` are parsed; non-EUR currencies are rejected.
+- Every offer is matched to the exact model (`web/lib/product-identity.ts`): exact / variant / similar / accessory / mismatch. Generations, storage, screen size, editions (Slim/Pro/Digital), bundles and article codes are never merged.
+- New retail, used (marketplaces) and refurbished prices are kept in separate segments; outliers and implausible prices are removed.
+- The scanner estimate (`market_price`, `market_median_price`, `market_samples`, `market_confidence`, `price_reference_type`, `market_sources`) is always passed to the advisor and shown as "Оценка Deal Radar", never as a shop price.
+- All amounts are computed by code; Gemini only phrases a short answer and risks, and any sentence with an amount not present in the data is removed.
+- Each product has its own temporary chat: switching or closing the card destroys it, in-flight requests are aborted, late answers are ignored. Nothing is stored.
+
+### Scanner (`bot.py`)
+- Comparable listings are stored with URL, condition, city, coordinates and price type (additive migration, no data is deleted), so `market_sources` contains real Marktplaats links behind every estimate.
+- Lifecycle: `evaluations` table with priority re-check queue, exponential back-off when data is missing, lease against parallel processing, liveness check (HTTP 404/410 = sold/removed) for listings missing from search, PDOK geocoding for older records without coordinates.
+- "Bieden vanaf" (MIN_BID) listings are evaluated but never used as comparables and only kept when profit is confirmed; auction ("Veiling") and lots ("2x …") are not single-item deals; generic accessory detection for device categories; wide price spread blocks a verified deal.
+- 11 new categories (Galaxy S, MacBook, iPad, Switch, Xbox Series, Steam Deck, Apple Watch, AirPods Pro 2, Sony FE lenses, Dyson, Sonos).
+- New metrics: found, evaluated, new, rejected, candidates, awaiting re-check, promoted, demoted, removed, technical errors.
+
+### Settings (all applied server-side by `/api/deals`)
+Location (GPS with permission or city/postcode via PDOK, `/api/location`), radius 5–150 km or the whole country (haversine on listing coordinates), min/max price with no hidden cap, minimum discount, profit and ROI, categories, new/used, exact model only, profit or distance priority. Settings are stored per device and never touch favourites or scanner history.
+
+### Tests
+```bash
+python -m unittest discover -s tests          # scanner, lifecycle, migration
+cd web && npm test                             # identity, prices, economics, advisor, settings, /api/deals
+```
+
 ## Features
 
 - Actual Marktplaats listings with photos, asking price, estimated market price, discount, location, and risk flags.

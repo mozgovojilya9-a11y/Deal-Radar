@@ -17,7 +17,22 @@ export type Deal = {
   status?: DealStatus;
   market_confidence?: "high" | "preliminary" | "retail_proxy" | "none";
   market_samples?: number;
-  market_sources?: Array<{ title: string; url: string; domain?: string; price_eur?: number; condition?: "used" | "new" | "refurbished" }>;
+  market_sources?: Array<{ title: string; url: string; price?: number | null; price_eur?: number | null; condition?: string; item_condition?: string | null; city?: string | null; domain?: string; seen_at?: string; source?: string }>;
+  market_spread?: number | null;
+  match_level?: "exact" | "variant" | "similar";
+  latitude?: number | null;
+  longitude?: number | null;
+  location_precision?: "listing" | "city";
+  item_condition?: string | null;
+  price_type?: string | null;
+  first_detected_at?: string | null;
+  evaluated_at?: string | null;
+  last_seen_at?: string | null;
+  next_check_at?: string | null;
+  checks?: number;
+  status_changed?: boolean;
+  /** Distance from the user's location, computed by /api/deals. */
+  user_distance_km?: number | null;
   evaluation_reason?: string | null;
   category_key: string;
   category_label: string;
@@ -66,6 +81,27 @@ export type ScannerStats = {
   failedQueries: number;
   queryCount: number;
   finishedAt: string;
+  rejectedAccessory?: number;
+  newListings?: number;
+  evaluated?: number;
+  awaitingRecheck?: number;
+  promoted?: number;
+  demoted?: number;
+  verifiedInactive?: number;
+  livenessChecked?: number;
+  technicalErrors?: number;
+  minBidCandidates?: number;
+  rejectedSpread?: number;
+  geocoded?: number;
+  cachedCandidatesReevaluated?: number;
+};
+
+export type CatalogCounts = {
+  feed: number;
+  matched: number;
+  unknownLocation: number;
+  outsideRadius: number;
+  byStatus: Record<DealStatus, number>;
 };
 
 export type DealFeed = {

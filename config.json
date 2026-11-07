@@ -653,7 +653,17 @@
       "min_profit_eur": 70,
       "min_roi": 0.25,
       "ai_discovery": true,
-      "ai_review_max_per_query": 6
+      "ai_review_max_per_query": 6,
+      "search_variants": [
+        "televisie",
+        "oled tv",
+        "qled tv",
+        "lg oled",
+        "samsung tv",
+        "sony bravia",
+        "philips ambilight tv"
+      ],
+      "variant_pages": 1
     },
     {
       "key": "drones",
@@ -1301,6 +1311,499 @@
       "min_profit_eur": 45,
       "min_roi": 0.25,
       "require_regex": "\\b(?:hero\\s*(?:11|12|13|14)|max\\s*2)\\b"
+    },
+    {
+      "key": "galaxy-s",
+      "label": "Samsung Galaxy S",
+      "query": "samsung galaxy s24",
+      "search_variants": [
+        "samsung galaxy s25",
+        "samsung galaxy s24",
+        "samsung galaxy s23",
+        "galaxy s24 ultra",
+        "galaxy s25 ultra"
+      ],
+      "variant_pages": 1,
+      "include_any": [
+        "galaxy s2",
+        "samsung s2"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "cover",
+        "screenprotector",
+        "beschermglas",
+        "lader",
+        "oplader",
+        "kabel",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "doos alleen",
+        "lege doos",
+        "scherm",
+        "display",
+        "behuizing"
+      ],
+      "exclude_regex": [
+        "^(?:scherm|display|batterij|accu|camera|onderdeel)\\b"
+      ],
+      "require_regex": "\\b(?:galaxy\\s*)?s\\s?2[345]\\b",
+      "group_regex": "\\b(?:s\\s?2[345](?:\\s*(?:ultra|plus|\\+|fe|edge))?|128\\s?gb|256\\s?gb|512\\s?gb|1\\s?tb)\\b",
+      "group_type": "model_required",
+      "strict_group": true,
+      "min_price": 150,
+      "threshold": 0.25,
+      "good_threshold": 0.17,
+      "min_profit_eur": 50,
+      "min_roi": 0.22,
+      "search_price_sorted": true
+    },
+    {
+      "key": "macbook",
+      "label": "MacBook Air / Pro",
+      "query": "macbook",
+      "search_variants": [
+        "macbook air m2",
+        "macbook air m3",
+        "macbook air m4",
+        "macbook pro m3",
+        "macbook pro m4",
+        "macbook pro m1"
+      ],
+      "variant_pages": 1,
+      "include_any": [
+        "macbook"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "cover",
+        "screenprotector",
+        "beschermglas",
+        "lader",
+        "oplader",
+        "kabel",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "doos alleen",
+        "lege doos",
+        "toetsenbord",
+        "keyboard",
+        "scherm",
+        "display",
+        "logic board",
+        "moederbord",
+        "sleeve",
+        "tas"
+      ],
+      "exclude_regex": [
+        "\\b(?:voor\\s+onderdelen|icloud\\s*lock|mdm)\\b"
+      ],
+      "require_regex": "\\bm[1-5]\\b",
+      "group_regex": "\\b(?:air|pro|m[1-5](?:\\s*(?:pro|max))?|13|14|15|16|8\\s?gb|16\\s?gb|18\\s?gb|24\\s?gb|256\\s?gb|512\\s?gb|1\\s?tb)\\b",
+      "group_type": "model_required",
+      "strict_group": true,
+      "min_price": 300,
+      "threshold": 0.25,
+      "good_threshold": 0.17,
+      "min_profit_eur": 80,
+      "min_roi": 0.2,
+      "search_price_sorted": true
+    },
+    {
+      "key": "ipad",
+      "label": "iPad",
+      "query": "ipad",
+      "search_variants": [
+        "ipad pro m4",
+        "ipad air m2",
+        "ipad air m3",
+        "ipad mini 7",
+        "ipad 10e generatie",
+        "ipad 11"
+      ],
+      "variant_pages": 1,
+      "include_any": [
+        "ipad"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "cover",
+        "screenprotector",
+        "beschermglas",
+        "lader",
+        "oplader",
+        "kabel",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "doos alleen",
+        "lege doos",
+        "toetsenbord",
+        "keyboard",
+        "pencil alleen",
+        "scherm",
+        "display",
+        "smart folio",
+        "folio"
+      ],
+      "require_regex": "\\bipad\\b",
+      "group_regex": "\\b(?:pro|air|mini|m[1-5]|1[01]\\.?\\d?|12\\.9|13|(?:\\d{1,2})e\\s*generatie|gen\\s*\\d{1,2}|wifi|cellular|5g|64\\s?gb|128\\s?gb|256\\s?gb|512\\s?gb|1\\s?tb)\\b",
+      "group_type": "model_required",
+      "strict_group": true,
+      "min_price": 120,
+      "threshold": 0.25,
+      "good_threshold": 0.17,
+      "min_profit_eur": 45,
+      "min_roi": 0.22
+    },
+    {
+      "key": "switch",
+      "label": "Nintendo Switch",
+      "query": "nintendo switch",
+      "search_variants": [
+        "nintendo switch 2",
+        "nintendo switch oled",
+        "switch 2 console"
+      ],
+      "variant_pages": 1,
+      "include_any": [
+        "switch"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "cover",
+        "screenprotector",
+        "beschermglas",
+        "lader",
+        "oplader",
+        "kabel",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "doos alleen",
+        "lege doos",
+        "joycon",
+        "joy-con",
+        "controller",
+        "pro controller",
+        "game",
+        "games",
+        "spel",
+        "spellen",
+        "dock alleen",
+        "grip"
+      ],
+      "require_regex": "\\bnintendo\\b|\\bswitch\\s*2\\b",
+      "group_regex": "\\b(?:switch\\s*2|oled|lite)\\b",
+      "group_type": "model_required",
+      "strict_group": true,
+      "min_price": 120,
+      "threshold": 0.24,
+      "good_threshold": 0.16,
+      "min_profit_eur": 45,
+      "min_roi": 0.22,
+      "search_price_sorted": true
+    },
+    {
+      "key": "xbox-series",
+      "label": "Xbox Series X|S",
+      "query": "xbox series x",
+      "search_variants": [
+        "xbox series x",
+        "xbox series s"
+      ],
+      "variant_pages": 1,
+      "include_any": [
+        "xbox"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "cover",
+        "screenprotector",
+        "beschermglas",
+        "lader",
+        "oplader",
+        "kabel",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "doos alleen",
+        "lege doos",
+        "controller",
+        "game",
+        "games",
+        "spel",
+        "spellen",
+        "headset",
+        "standaard"
+      ],
+      "require_regex": "\\bseries\\s*[xs]\\b",
+      "group_regex": "\\b(?:series\\s*[xs]|512\\s?gb|1\\s?tb|2\\s?tb|digital)\\b",
+      "group_type": "model_required",
+      "strict_group": true,
+      "min_price": 150,
+      "threshold": 0.24,
+      "good_threshold": 0.16,
+      "min_profit_eur": 45,
+      "min_roi": 0.22
+    },
+    {
+      "key": "steam-deck",
+      "label": "Steam Deck",
+      "query": "steam deck",
+      "search_variants": [
+        "steam deck oled",
+        "steam deck 512gb"
+      ],
+      "variant_pages": 1,
+      "include_any": [
+        "steam deck",
+        "steamdeck"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "cover",
+        "screenprotector",
+        "beschermglas",
+        "lader",
+        "oplader",
+        "kabel",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "doos alleen",
+        "lege doos",
+        "dock alleen",
+        "grip",
+        "skin"
+      ],
+      "group_regex": "\\b(?:oled|lcd|64\\s?gb|256\\s?gb|512\\s?gb|1\\s?tb)\\b",
+      "group_type": "model_required",
+      "strict_group": true,
+      "min_price": 180,
+      "threshold": 0.24,
+      "good_threshold": 0.16,
+      "min_profit_eur": 50,
+      "min_roi": 0.22
+    },
+    {
+      "key": "apple-watch",
+      "label": "Apple Watch",
+      "query": "apple watch",
+      "search_variants": [
+        "apple watch ultra 2",
+        "apple watch series 10",
+        "apple watch series 9",
+        "apple watch series 11"
+      ],
+      "variant_pages": 1,
+      "include_any": [
+        "apple watch"
+      ],
+      "exclude": [
+        "hoesje",
+        "case",
+        "cover",
+        "screenprotector",
+        "beschermglas",
+        "lader",
+        "oplader",
+        "kabel",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "doos alleen",
+        "lege doos",
+        "bandje",
+        "band",
+        "armband",
+        "strap",
+        "oplaadkabel"
+      ],
+      "require_regex": "\\b(?:series\\s*(?:[4-9]|1[01])|ultra(?:\\s*[23])?|se)\\b",
+      "group_regex": "\\b(?:series\\s*(?:[4-9]|1[01])|ultra(?:\\s*[23])?|se|4[0-9]\\s?mm|gps|cellular|lte)\\b",
+      "group_type": "model_required",
+      "strict_group": true,
+      "min_price": 80,
+      "threshold": 0.25,
+      "good_threshold": 0.17,
+      "min_profit_eur": 40,
+      "min_roi": 0.22
+    },
+    {
+      "key": "airpods-pro-2",
+      "label": "AirPods Pro 2",
+      "query": "airpods pro 2",
+      "search_variants": [
+        "airpods pro 2",
+        "airpods pro 2e generatie",
+        "airpods pro 2 usb-c"
+      ],
+      "variant_pages": 1,
+      "include_any": [
+        "airpods pro",
+        "airpods-pro"
+      ],
+      "exclude": [
+        "hoesje",
+        "case alleen",
+        "cover",
+        "losse",
+        "linker",
+        "rechter",
+        "oordopje",
+        "oortje",
+        "oplaadcase los",
+        "alleen case"
+      ],
+      "require_regex": "(?=.*\\bairpods[\\s-]*pro\\b)(?=.*(?:\\bpro[\\s-]*2\\b|\\b2(?:nd)?[\\s.-]*(?:gen(?:eration)?|e[\\s-]*generatie)\\b|\\bgen(?:eration)?[\\s.-]*2\\b|\\bsecond[\\s-]*generation\\b))",
+      "group_regex": "\\b(?:usb-?c|lightning|magsafe)\\b",
+      "min_price": 50,
+      "threshold": 0.22,
+      "good_threshold": 0.15,
+      "min_profit_eur": 35,
+      "min_roi": 0.22
+    },
+    {
+      "key": "lens-sony-fe",
+      "label": "Объективы Sony FE",
+      "query": "sony fe lens",
+      "search_variants": [
+        "sony fe 24-70",
+        "sony fe 70-200",
+        "sony fe 85mm",
+        "sony fe 16-35",
+        "sony fe 50mm",
+        "sony g master"
+      ],
+      "variant_pages": 1,
+      "include_any": [
+        "sony",
+        "fe "
+      ],
+      "exclude": [
+        "lensdop",
+        "dop",
+        "filter",
+        "zonnekap",
+        "adapter",
+        "cap",
+        "tas",
+        "bag",
+        "defect",
+        "kapot",
+        "onderdelen"
+      ],
+      "require_regex": "\\bfe\\b",
+      "group_regex": "\\b(?:\\d{2,3}-\\d{2,3}\\s?mm|\\d{2,3}\\s?mm|f\\/?\\s?\\d(?:[.,]\\d)?|gm\\s*ii|gm2|gm|g\\s*master|ii)\\b",
+      "group_type": "model_required",
+      "strict_group": true,
+      "min_price": 120,
+      "threshold": 0.25,
+      "good_threshold": 0.17,
+      "min_profit_eur": 60,
+      "min_roi": 0.2
+    },
+    {
+      "key": "dyson",
+      "label": "Dyson",
+      "query": "dyson",
+      "search_variants": [
+        "dyson v15",
+        "dyson v12",
+        "dyson v11",
+        "dyson airwrap",
+        "dyson supersonic",
+        "dyson gen5"
+      ],
+      "variant_pages": 1,
+      "include_any": [
+        "dyson"
+      ],
+      "exclude": [
+        "accu",
+        "batterij",
+        "battery",
+        "filter",
+        "borstel",
+        "opzetstuk",
+        "onderdelen",
+        "onderdeel",
+        "defect",
+        "kapot",
+        "reparatie",
+        "lader",
+        "houder",
+        "wandhouder"
+      ],
+      "require_regex": "\\b(?:v1[0-5]|v8|gen\\s?5|airwrap|supersonic|corrale|outsize|detect|absolute)\\b",
+      "group_regex": "\\b(?:v1[0-5]|v8|gen\\s?5|airwrap|supersonic|corrale|outsize|detect|absolute|complete|slim|origin)\\b",
+      "group_type": "model_required",
+      "strict_group": true,
+      "min_price": 100,
+      "threshold": 0.25,
+      "good_threshold": 0.17,
+      "min_profit_eur": 50,
+      "min_roi": 0.22
+    },
+    {
+      "key": "sonos",
+      "label": "Sonos",
+      "query": "sonos",
+      "search_variants": [
+        "sonos era 100",
+        "sonos era 300",
+        "sonos arc",
+        "sonos beam",
+        "sonos move",
+        "sonos ace"
+      ],
+      "variant_pages": 1,
+      "include_any": [
+        "sonos"
+      ],
+      "exclude": [
+        "muurbeugel",
+        "beugel",
+        "standaard",
+        "stand",
+        "mount",
+        "kabel",
+        "defect",
+        "kapot",
+        "onderdelen"
+      ],
+      "require_regex": "\\b(?:era\\s*(?:100|300)|arc(?:\\s*ultra)?|beam|move\\s*2?|roam\\s*2?|ace|sub(?:\\s*mini)?|five|one\\s*sl|one)\\b",
+      "group_regex": "\\b(?:era\\s*(?:100|300)|arc(?:\\s*ultra)?|beam(?:\\s*gen\\s*2)?|move\\s*2?|roam\\s*2?|ace|sub(?:\\s*mini|\\s*4)?|five|one\\s*sl|one)\\b",
+      "group_type": "model_required",
+      "strict_group": true,
+      "min_price": 80,
+      "threshold": 0.25,
+      "good_threshold": 0.17,
+      "min_profit_eur": 45,
+      "min_roi": 0.22
     }
   ],
   "candidate_min_samples": 3,
@@ -1326,5 +1829,10 @@
     "cache_success_hours": 18,
     "cache_empty_hours": 2,
     "min_new_sources": 2
-  }
+  },
+  "max_price_spread": 0.8,
+  "max_rechecks_per_query": 80,
+  "liveness_checks_per_run": 40,
+  "liveness_after_hours": 36,
+  "geocode_per_run": 60
 }

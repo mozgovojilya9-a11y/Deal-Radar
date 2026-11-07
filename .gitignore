@@ -9,3 +9,5 @@ state.db
 web/node_modules/
 web/.next/
 web/out/
+web/tsconfig.tsbuildinfo
+*.tsbuildinfo

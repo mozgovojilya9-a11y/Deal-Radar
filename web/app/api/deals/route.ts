@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { Deal, DealFeed } from "@/lib/deals";
+import type { CatalogCounts, Deal, DealFeed } from "@/lib/deals";
+import { haversineKm, parseCoordinate } from "@/lib/geo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,6 +74,33 @@ function isRecent(deal: Deal) {
     && publishedAt <= Date.now() + 5 * 60 * 1000;
 }
 
+type Sort = "profit" | "distance" | "newest" | "price" | "discount" | "score";
+
+function numberParam(params: URLSearchParams, name: string, min: number, max: number): number | null {
+  const raw = params.get(name);
+  if (raw === null || raw.trim() === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= min && value <= max ? value : null;
+}
+
+/** Combined ranking: profit, ROI and evidence quality, minus a small distance penalty. */
+function score(deal: Deal, distanceWeight: number): number {
+  const profit = deal.estimated_profit ?? 0;
+  const roi = deal.profit_roi ?? 0;
+  const evidence = deal.market_confidence === "high" ? 1 : deal.market_confidence === "preliminary" ? 0.6 : deal.market_confidence === "retail_proxy" ? 0.5 : 0.2;
+  const distance = deal.user_distance_km ?? 0;
+  return profit * evidence * (1 + Math.min(1, Math.max(0, roi))) - distance * distanceWeight;
+}
+
+function isNewCondition(deal: Deal): boolean {
+  return /^nieuw$/i.test(String(deal.item_condition || "").trim());
+}
+
+/**
+ * Catalogue API. All user settings are applied here, on the server:
+ * location + radius (haversine on listing coordinates), price range, discount, profit, ROI,
+ * categories, condition, exact-model only and sort priority. No hidden price caps.
+ */
 export async function GET(request: NextRequest) {
   try {
     const minuteBucket = Math.floor(Date.now() / (REVALIDATE_SECONDS * 1000));
@@ -80,50 +108,88 @@ export async function GET(request: NextRequest) {
       headers: { Accept: "application/json" },
       next: { revalidate: REVALIDATE_SECONDS }
     });
-
     if (!response.ok) throw new Error(`GitHub feed returned HTTP ${response.status}`);
     const feed = await response.json() as Partial<DealFeed>;
     const valuationReady = feed.valuationVersion === 2;
-    const category = request.nextUrl.searchParams.get("category") || "";
-    const sortParam = request.nextUrl.searchParams.get("sort");
-    const sort = sortParam === "newest" || sortParam === "price" || sortParam === "discount" ? sortParam : "profit";
+    const params = request.nextUrl.searchParams;
 
-    let deals = valuationReady && Array.isArray(feed.deals)
-      ? feed.deals.filter(isDeal).filter((deal) => {
-        if (deal.active === false || !isRecent(deal)) return false;
-        if (deal.status === "candidate") return true;
-        return (deal.status === "strong" || deal.status === "good")
-          && typeof deal.estimated_profit === "number" && deal.estimated_profit >= 50;
-      })
+    const all = valuationReady && Array.isArray(feed.deals)
+      ? feed.deals.filter(isDeal).filter((deal) => deal.active !== false && isRecent(deal)
+        && (deal.status === "candidate" || deal.status === "strong" || deal.status === "good"))
       : [];
-    // Count the complete eligible catalogue before applying user-requested price filters.
-    const catalogCount = deals.length;
-    if (category && /^[a-z0-9-]{1,64}$/i.test(category)) deals = deals.filter((deal) => deal.category_key === category);
-    const minPriceRaw = request.nextUrl.searchParams.get("minPrice");
-    const maxPriceRaw = request.nextUrl.searchParams.get("maxPrice");
-    if (minPriceRaw !== null) {
-      const minPrice = Number(minPriceRaw);
-      if (Number.isFinite(minPrice) && minPrice >= 0) deals = deals.filter((deal) => deal.price >= minPrice);
-    }
-    if (maxPriceRaw !== null) {
-      const maxPrice = Number(maxPriceRaw);
-      if (Number.isFinite(maxPrice) && maxPrice > 0) deals = deals.filter((deal) => deal.price <= maxPrice);
+
+    const lat = parseCoordinate(params.get("lat"), -90, 90);
+    const lon = parseCoordinate(params.get("lon"), -180, 180);
+    const radiusKm = numberParam(params, "radiusKm", 1, 2000);
+    const minPrice = numberParam(params, "minPrice", 0, 1_000_000);
+    const maxPrice = numberParam(params, "maxPrice", 0.01, 1_000_000);
+    const minDiscount = numberParam(params, "minDiscount", 0, 100);
+    const minProfit = numberParam(params, "minProfit", -100_000, 1_000_000);
+    const minRoi = numberParam(params, "minRoi", -100, 10_000);
+    const categories = new Set((params.get("categories") || params.get("category") || "").split(",").map((key) => key.trim()).filter((key) => /^[a-z0-9-]{1,64}$/i.test(key)));
+    const condition = params.get("condition") === "new" || params.get("condition") === "used" ? params.get("condition") : "all";
+    const exactOnly = params.get("exactOnly") === "1";
+    const sortParam = params.get("sort") as Sort | null;
+    const sort: Sort = sortParam && ["profit", "distance", "newest", "price", "discount", "score"].includes(sortParam) ? sortParam : "profit";
+    const hasLocation = lat !== null && lon !== null;
+    // Favourites are requested by id and are never hidden by filters.
+    const ids = new Set((params.get("ids") || "").split(",").map((id) => id.trim()).filter((id) => /^[a-z0-9_-]{1,40}$/i.test(id)).slice(0, 300));
+
+    let unknownLocation = 0;
+    let outsideRadius = 0;
+    const deals: Deal[] = [];
+    for (const original of all) {
+      const deal: Deal = { ...original };
+      if (hasLocation && typeof deal.latitude === "number" && typeof deal.longitude === "number") {
+        deal.user_distance_km = Math.round(haversineKm(lat, lon, deal.latitude, deal.longitude) * 10) / 10;
+      } else {
+        deal.user_distance_km = null;
+      }
+      if (ids.size) {
+        if (ids.has(deal.listing_id)) deals.push(deal);
+        continue;
+      }
+      if (hasLocation && radiusKm !== null) {
+        if (deal.user_distance_km == null) { unknownLocation += 1; continue; }
+        if (deal.user_distance_km > radiusKm) { outsideRadius += 1; continue; }
+      }
+      if (minPrice !== null && deal.price < minPrice) continue;
+      if (maxPrice !== null && deal.price > maxPrice) continue;
+      if (minDiscount !== null && minDiscount > 0 && !(deal.discount != null && deal.discount * 100 >= minDiscount)) continue;
+      if (minProfit !== null && !(deal.estimated_profit != null && deal.estimated_profit >= minProfit)) continue;
+      if (minRoi !== null && !(deal.profit_roi != null && deal.profit_roi * 100 >= minRoi)) continue;
+      if (categories.size && !categories.has(deal.category_key)) continue;
+      if (condition === "new" && !isNewCondition(deal)) continue;
+      if (condition === "used" && isNewCondition(deal)) continue;
+      if (exactOnly && (deal.match_level ? deal.match_level !== "exact" : !deal.model_group || deal.model_group === "unknown")) continue;
+      deals.push(deal);
     }
 
+    const distanceWeight = params.get("priority") === "distance" ? 2 : 0.3;
+    const rank = (deal: Deal) => deal.status === "strong" ? 3 : deal.status === "good" ? 2 : 1;
     deals.sort((a, b) => {
-      const rank = (deal: Deal) => deal.status === "candidate" ? 1 : deal.status === "good" ? 2 : 3;
-      const tier = rank(b) - rank(a);
-      if (tier) return tier;
-      if (sort === "newest") return Date.parse(b.detected_at) - Date.parse(a.detected_at);
+      if (sort !== "distance" && sort !== "score") {
+        const tier = rank(b) - rank(a);
+        if (tier) return tier;
+      }
+      if (sort === "distance") return (a.user_distance_km ?? Infinity) - (b.user_distance_km ?? Infinity) || rank(b) - rank(a);
+      if (sort === "score") return score(b, distanceWeight) - score(a, distanceWeight);
+      if (sort === "newest") return Date.parse(b.first_detected_at || b.detected_at) - Date.parse(a.first_detected_at || a.detected_at);
       if (sort === "price") return a.price - b.price;
       if (sort === "discount") return (b.discount ?? -1) - (a.discount ?? -1);
-      return (b.estimated_profit ?? -1) - (a.estimated_profit ?? -1);
+      return (b.estimated_profit ?? -Infinity) - (a.estimated_profit ?? -Infinity);
     });
+
+    const byStatus = { strong: 0, good: 0, candidate: 0 };
+    for (const deal of deals) byStatus[(deal.status || "candidate") as keyof typeof byStatus] += 1;
+    const counts: CatalogCounts = { feed: all.length, matched: deals.length, unknownLocation, outsideRadius, byStatus };
 
     return NextResponse.json({
       deals,
       count: deals.length,
-      catalogCount,
+      catalogCount: all.length,
+      counts,
+      applied: { lat, lon, radiusKm: hasLocation ? radiusKm : null, minPrice, maxPrice, minDiscount, minProfit, minRoi, categories: [...categories], condition, exactOnly, sort },
       valuationReady,
       updatedAt: valuationReady && typeof feed.updatedAt === "string" ? feed.updatedAt : null,
       scannedAt: valuationReady && typeof feed.scannedAt === "string" ? feed.scannedAt : null,
