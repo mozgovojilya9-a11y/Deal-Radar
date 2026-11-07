@@ -10,8 +10,8 @@ type Sort = "profit" | "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
 type MatchType = "exact" | "variant" | "related" | "accessory" | "unrelated";
 type ResearchListing = { title: string; price: number; url: string; source: string; condition: "used" | "new" | "refurbished" | "unknown"; kind: "marktplaats" | "web"; estimatedProfit?: number | null; profitRoi?: number | null; status?: string; matchType?: MatchType; matchConfidence?: number; matchReason?: string };
-type AdvisorSource = { id: number; title: string; url: string; domain: string };
-type AdvisorMessage = { role: "user" | "model"; text: string; sources?: AdvisorSource[]; searchQueries?: string[]; searchEntryPoint?: string; searchPerformed?: boolean };
+type AdvisorSource = { id: number; title: string; url: string; domain: string; snippet?: string };
+type AdvisorMessage = { role: "user" | "model"; text: string; sources?: AdvisorSource[]; searchQueries?: string[]; searchProvider?: string; searchPerformed?: boolean };
 type ProductResearch = {
   query: string; maxPrice: number | null; checkedAt: string; usedMedian: number | null; usedReferencePrice: number | null; newMedian: number | null;
   expectedResalePrice: number | null; netResalePrice: number | null; sampleCount: number;
@@ -561,7 +561,7 @@ export default function HomePage() {
         answer?: string;
         sources?: AdvisorSource[];
         searchQueries?: string[];
-        searchEntryPoint?: string;
+        searchProvider?: string;
         searchPerformed?: boolean;
       };
       if (!response.ok) throw new Error(data.error || "AI временно недоступен.");
@@ -570,7 +570,7 @@ export default function HomePage() {
         text: String(data.answer || "Не удалось сформировать ответ."),
         sources: Array.isArray(data.sources) ? data.sources : [],
         searchQueries: Array.isArray(data.searchQueries) ? data.searchQueries : [],
-        searchEntryPoint: typeof data.searchEntryPoint === "string" ? data.searchEntryPoint : "",
+        searchProvider: typeof data.searchProvider === "string" ? data.searchProvider : "",
         searchPerformed: Boolean(data.searchPerformed)
       }].slice(-12));
     } catch (error) {
@@ -966,7 +966,7 @@ export default function HomePage() {
                     ))}
                   </div>
                   <div className="advisor-thread" aria-live="polite">
-                    {!advisorMessages.length ? <p className="advisor-empty">Задай вопрос об этом товаре. Для актуальных цен и характеристик AI использует Google Search и показывает источники.</p> : advisorMessages.map((message, index) => (
+                    {!advisorMessages.length ? <p className="advisor-empty">Задай вопрос об этом товаре. Для актуальных цен и характеристик AI ищет страницы в интернете и показывает источники.</p> : advisorMessages.map((message, index) => (
                       <div className={"advisor-message " + message.role} key={index}>
                         <span>{message.role === "user" ? "Вы" : "AI"}</span>
                         <p>{message.text.split(/(\[\d+\])/g).map((part, partIndex) => {
@@ -981,22 +981,16 @@ export default function HomePage() {
                             <small>ИСТОЧНИКИ</small>
                             {message.sources.map((source) => (
                               <a href={source.url} target="_blank" rel="noopener noreferrer" key={source.id}>
-                                <span>[{source.id}] {source.title}</span><small>{source.domain}</small>
+                                <span>[{source.id}] {source.title}<small className="advisor-source-snippet">{source.snippet}</small></span><small>{source.domain}</small>
                               </a>
                             ))}
                           </div>
                         ) : null}
-                        {message.role === "model" && message.searchEntryPoint ? (
-                          <iframe
-                            className="advisor-google-search"
-                            title="Google Search suggestions"
-                            srcDoc={message.searchEntryPoint}
-                            sandbox="allow-popups allow-popups-to-escape-sandbox"
-                            referrerPolicy="no-referrer"
-                          />
+                        {message.role === "model" && message.searchProvider ? (
+                          <small className="advisor-search-provider">Веб-поиск: {message.searchProvider}</small>
                         ) : null}
                         {message.role === "model" && message.searchPerformed && !message.sources?.length ? (
-                          <small className="advisor-no-sources">Google Search не вернул доступных ссылок на источники для этого ответа.</small>
+                          <small className="advisor-no-sources">Веб-поиск не вернул доступных ссылок на источники для этого ответа.</small>
                         ) : null}
                       </div>
                     ))}

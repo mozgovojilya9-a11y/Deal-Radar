@@ -240,5 +240,6 @@ h1, h2, h3, h4, p { margin: 0; }
 .advisor-sources a { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--soft); font-size: 12px; text-decoration: none; }
 .advisor-sources a > span { min-width: 0; overflow-wrap: anywhere; }
 .advisor-sources a > small { flex: none; color: var(--muted); font-size: 10px; }
-.advisor-google-search { display: block; width: 100%; height: 56px; margin-top: 10px; border: 0; background: transparent; }
+.advisor-source-snippet { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.4; font-weight: 400; }
+.advisor-search-provider { display: block; margin-top: 7px; color: var(--muted); font-size: 10px; }
 .advisor-no-sources { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.45; }
