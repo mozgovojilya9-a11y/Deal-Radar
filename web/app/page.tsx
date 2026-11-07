@@ -808,7 +808,7 @@ export default function HomePage() {
             ) : null}
           </div>
           <div>
-            {activeFilters > 0 ? <button type="button" className="reset-filters" onClick={resetFilters}>Показать весь каталог</button> : null}
+            {activeFilters > 0 || filtered.length < catalogCount ? <button type="button" className="reset-filters" onClick={resetFilters}>Показать все {catalogCount.toLocaleString("ru-RU")} товаров</button> : null}
             <button className="refresh-button" onClick={() => void loadDeals(true)} disabled={loading || refreshing} aria-label="Обновить список"><span className={loading || refreshing ? "spin" : ""} aria-hidden="true">↻</span> Обновить</button>
           </div>
         </div>
