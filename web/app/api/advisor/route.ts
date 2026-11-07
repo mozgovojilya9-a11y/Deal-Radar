@@ -6,8 +6,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 type ChatMessage = { role: "user" | "model"; text: string };
-type SearchResult = { title: string; url: string; snippet: string; provider?: string };
-type AdvisorSource = SearchResult & { id: number; domain: string; prices: number[] };
+type ProductCondition = "used" | "new" | "refurbished" | "unknown";
+type SearchResult = { title: string; url: string; snippet: string; provider?: string; pageTitle?: string; pageExcerpt?: string; pagePrices?: number[]; pageCondition?: ProductCondition };
+type AdvisorSource = SearchResult & { id: number; domain: string; prices: number[]; condition: ProductCondition };
 const rateBuckets = new Map<string, number[]>();
 
 function decodeHtml(value: string) {
@@ -188,12 +189,96 @@ function parseEuro(raw: string) {
 
 function pricesInText(value: string) {
   const results: number[] = [];
-  const pattern = /€\s*([0-9][0-9.\s]*(?:,[0-9]{1,2})?)|([0-9][0-9.\s]*(?:,[0-9]{1,2})?)\s*EUR\b/gi;
+  // Retail pages often render prices as "EUR419.00", not only "€419.00".
+  const pattern = /(?:€\s*|EUR\s*)([0-9][0-9.\s]*(?:,[0-9]{1,2})?)|([0-9][0-9.\s]*(?:,[0-9]{1,2})?)\s*EUR\b/gi;
   for (const match of value.matchAll(pattern)) {
     const amount = parseEuro(match[1] || match[2] || "");
     if (amount !== null) results.push(amount);
   }
   return [...new Set(results)];
+}
+
+function structuredPagePrices(html: string): number[] {
+  const found: number[] = [];
+  const tags = html.match(/<meta\b[^>]*>/gi) || [];
+  for (const tag of tags) {
+    const key = (htmlAttribute(tag, "property") || htmlAttribute(tag, "name") || htmlAttribute(tag, "itemprop") || "").toLowerCase();
+    if (!/(?:product:)?price(?::amount)?$|^price$|^itemprop:price$/.test(key)) continue;
+    const currency = (htmlAttribute(tag, "content") || "").trim();
+    const amount = parseEuro(htmlAttribute(tag, "content"));
+    if (amount !== null && (!currency || currency.toUpperCase() === "EUR")) found.push(amount);
+  }
+
+  const scripts = html.match(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) || [];
+  const visit = (value: unknown, depth = 0) => {
+    if (depth > 8 || value == null) return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item, depth + 1));
+      return;
+    }
+    if (typeof value !== "object") return;
+    const object = value as Record<string, unknown>;
+    const offers = object.offers;
+    if (offers && typeof offers === "object") {
+      for (const offer of (Array.isArray(offers) ? offers : [offers])) {
+        if (!offer || typeof offer !== "object") continue;
+        const row = offer as Record<string, unknown>;
+        const currency = String(row.priceCurrency || object.priceCurrency || "EUR").toUpperCase();
+        if (currency !== "EUR") continue;
+        const raw = row.price ?? row.lowPrice;
+        const amount = parseEuro(String(raw ?? ""));
+        if (amount !== null) found.push(amount);
+      }
+    }
+    Object.values(object).forEach((item) => {
+      if (item && typeof item === "object") visit(item, depth + 1);
+    });
+  };
+  for (const script of scripts) {
+    const body = script.replace(/^<script\b[^>]*>/i, "").replace(/<\/script>$/i, "");
+    try { visit(JSON.parse(body)); } catch { /* Ignore malformed structured metadata. */ }
+  }
+  return [...new Set(found)];
+}
+
+function classifySourceCondition(source: SearchResult, domain: string): ProductCondition {
+  const text = [source.title, source.snippet, source.pageTitle, source.pageExcerpt].filter(Boolean).join(" ");
+  if (/\b(refurbished|reconditioned|renewed|gereviseerd|refurb)\b/i.test(text)) return "refurbished";
+  if (/\b(tweedehands|gebruikt|used|pre-owned|occasion|second.hand)\b/i.test(text)
+      || /(?:^|\.)marktplaats\.nl$|(?:^|\.)2dehands\.be$|(?:^|\.)ebay\.(?:nl|de|com)$|(?:^|\.)tweakers\.net$/i.test(domain)) return "used";
+  if (/\b(nieuw|new|sealed|geseald|ongeopend|brand new)\b/i.test(text)
+      || /(?:^|\.)ray-ban\.com$|(?:^|\.)pearle\.nl$|(?:^|\.)sunglasshut\.com$|(?:^|\.)coolblue\.nl$|(?:^|\.)bol\.com$|(?:^|\.)mediamarkt\.nl$/i.test(domain)) return "new";
+  return "unknown";
+}
+
+async function enrichSearchResultPage(source: SearchResult): Promise<SearchResult> {
+  try {
+    const url = new URL(source.url);
+    if (!safeWebUrl(url.href) || (url.port && url.port !== "443")) return source;
+    const response = await fetch(url.href, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8"
+      },
+      redirect: "error",
+      signal: AbortSignal.timeout(6500),
+      cache: "no-store"
+    });
+    if (!response.ok || !/^(text\/html|application\/xhtml\+xml)/i.test(response.headers.get("content-type") || "")) return source;
+    const html = (await response.text()).slice(0, 750000);
+    const pageTitle = stripHtml(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "");
+    const pageExcerpt = stripHtml(html).slice(0, 2400);
+    const metadataPrices = structuredPagePrices(html);
+    const visiblePrices = pricesInText(pageExcerpt);
+    const pagePrices = [...new Set([...metadataPrices, ...visiblePrices])].slice(0, 12);
+    const enriched = { ...source, pageTitle, pageExcerpt, pagePrices };
+    enriched.pageCondition = classifySourceCondition(enriched, url.hostname.toLowerCase().replace(/^www\./, ""));
+    return enriched;
+  } catch {
+    // Search snippets and their URLs are still retained when a seller blocks page fetching.
+    return source;
+  }
 }
 
 function addSourceCitations(answer: string, sources: AdvisorSource[]) {
