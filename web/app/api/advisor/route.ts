@@ -257,41 +257,51 @@ function classifySourceCondition(source: SearchResult, domain: string): ProductC
 
 async function enrichSearchResultPage(source: SearchResult): Promise<SearchResult> {
   try {
-    const url = new URL(source.url);
-    if (!safeWebUrl(url.href) || (url.port && url.port !== "443")) return source;
-    const response = await fetch(url.href, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8"
-      },
-      redirect: "error",
-      signal: AbortSignal.timeout(6500),
-      cache: "no-store"
-    });
-    if (!response.ok || !/^(text\/html|application\/xhtml\+xml)/i.test(response.headers.get("content-type") || "")) return source;
-    const html = (await response.text()).slice(0, 750000);
+    let currentUrl = new URL(source.url);
+    if (!safeWebUrl(currentUrl.href) || (currentUrl.port && currentUrl.port !== "443")) return source;
+    let response: Response | null = null;
+    // Follow a small number of redirects manually. "redirect:error" caused real retailer
+    // product pages to be silently discarded when their URLs redirected to canonical pages.
+    for (let hop = 0; hop <= 3; hop += 1) {
+      response = await fetch(currentUrl.href, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml",
+          "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8"
+        },
+        redirect: "manual",
+        signal: AbortSignal.timeout(7500),
+        cache: "no-store"
+      });
+      if (![301, 302, 303, 307, 308].includes(response.status)) break;
+      const location = response.headers.get("location");
+      if (!location || hop === 3) return source;
+      const nextUrl = new URL(location, currentUrl);
+      if (!safeWebUrl(nextUrl.href) || (nextUrl.port && nextUrl.port !== "443")) return source;
+      currentUrl = nextUrl;
+    }
+    if (!response?.ok || !/^(text\/html|application\/xhtml\+xml)/i.test(response.headers.get("content-type") || "")) return source;
+    const html = (await response.text()).slice(0, 900000);
     const pageTitle = stripHtml(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "");
-    const pageText = stripHtml(html).slice(0, 16000);
-    const pageExcerpt = pageText.slice(0, 2400);
+    const pageText = stripHtml(html).slice(0, 20000);
+    const pageExcerpt = pageText.slice(0, 3200);
     const metadataPrices = structuredPagePrices(html);
     const visiblePrices = pricesInText(pageText);
     const pagePrices = [...new Set([...metadataPrices, ...visiblePrices])].slice(0, 12);
-    const enriched = { ...source, pageTitle, pageExcerpt, pagePrices };
-    enriched.pageCondition = classifySourceCondition(enriched, url.hostname.toLowerCase().replace(/^www\./, ""));
+    const enriched = { ...source, url: currentUrl.href, pageTitle, pageExcerpt, pagePrices };
+    enriched.pageCondition = classifySourceCondition(enriched, currentUrl.hostname.toLowerCase().replace(/^www\./, ""));
     return enriched;
-  } catch {
-    // Search snippets and their URLs are still retained when a seller blocks page fetching.
+  } catch (error) {
+    console.warn("Deal Radar advisor source page fetch failed:", source.url, error instanceof Error ? error.message : String(error));
     return source;
   }
 }
-
 function addSourceCitations(answer: string, sources: AdvisorSource[]) {
   const valid = new Set(sources.map((source) => source.id));
   return answer.replace(/\[(\d+)\]/g, (marker, rawId: string) => valid.has(Number(rawId)) ? marker : "");
 }
 
-function removeUnsupportedPriceClaims(answer: string, askingPrice: number | null, sources: AdvisorSource[]) {
+function removeUnsupportedPriceClaims(answer: string, askingPrice: number | null, marketEstimate: number | null, sources: AdvisorSource[]) {
   const sentences = answer.match(/[^.!?\n]+[.!?]?/g);
   if (!sentences) return answer;
   let removed = false;
@@ -303,14 +313,16 @@ function removeUnsupportedPriceClaims(answer: string, askingPrice: number | null
     const mentionsListingPrice = /(в объявлени|объявлени[ея]|продавец просит|цена продавца|asking price|listing price)/i.test(sentence);
     const listingPriceIsValid = askingPrice !== null && mentionsListingPrice
       && amounts.every((amount) => Math.abs(amount - askingPrice) < 0.02);
+    const mentionsRadarEstimate = /(оценк[а-яё]* deal radar|предварительн[а-яё]* оценк[а-яё]* deal radar|внутренн[а-яё]* оценк[а-яё]*)/i.test(sentence);
+    const radarEstimateIsValid = marketEstimate !== null && mentionsRadarEstimate
+      && amounts.every((amount) => Math.abs(amount - marketEstimate) < 0.02);
     const sourcePricesAreValid = amounts.every((amount) => citedPrices.some((price) => Math.abs(price - amount) < 0.02));
-    if (listingPriceIsValid || sourcePricesAreValid) return sentence;
+    if (listingPriceIsValid || radarEstimateIsValid || sourcePricesAreValid) return sentence;
     removed = true;
-    return "Цену не указываю: сумма не подтверждается непосредственно процитированными результатами поиска.";
+    return "Цену не указываю: сумма не подтверждается напрямую в источниках, на которые ссылается это предложение.";
   });
   return filtered.join("") + (removed ? "\n\nРыночные цены и диапазоны показываю только при наличии точного подтверждения в источниках." : "");
 }
-
 function verifyInitData(raw: string, token: string): string | null {
   if (!raw || raw.length > 8192) return null;
   const params = new URLSearchParams(raw);
