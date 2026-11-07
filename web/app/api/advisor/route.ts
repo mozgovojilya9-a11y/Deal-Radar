@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 type ChatMessage = { role: "user" | "model"; text: string };
-type SearchResult = { title: string; url: string; snippet: string };
+type SearchResult = { title: string; url: string; snippet: string; provider?: string };
 type AdvisorSource = SearchResult & { id: number; domain: string; prices: number[] };
 const rateBuckets = new Map<string, number[]>();
 
@@ -33,45 +33,147 @@ function safeWebUrl(value: string) {
   } catch { return false; }
 }
 
-function unwrapSearchUrl(raw: string) {
+function unwrapSearchUrl(raw: string, base = "https://html.duckduckgo.com") {
   try {
-    const url = new URL(raw, "https://html.duckduckgo.com");
-    const target = url.searchParams.get("uddg");
-    return target ? decodeURIComponent(target) : url.href;
-  } catch { return raw; }
+    const url = new URL(decodeHtml(raw.trim()), base);
+    const host = url.hostname.toLowerCase();
+    if (host.endsWith("bing.com") || host.endsWith("duckduckgo.com")) {
+      for (const key of ["uddg", "url"]) {
+        const target = url.searchParams.get(key);
+        if (target) {
+          const destination = new URL(decodeHtml(target));
+          if (safeWebUrl(destination.href)) return destination.href;
+        }
+      }
+    }
+    return url.href;
+  } catch { return ""; }
 }
 
 function htmlAttribute(tag: string, name: string) {
-  const match = tag.match(new RegExp(name + "\\s*=\\s*[\\\"']([^\\\"']+)[\\\"']", "i"));
-  return match?.[1] ? decodeHtml(match[1]) : "";
+  const match = tag.match(new RegExp("\\b" + name + "\\s*=\\s*(?:\\"([^\\"]*)\\"|'([^']*)'|([^\\s>]+))", "i"));
+  const value = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
+  return value ? decodeHtml(value) : "";
 }
 
 function parseSearchResults(html: string): SearchResult[] {
-  const anchors = [...html.matchAll(/<a\b[^>]*class=["'][^"']*result__a[^"']*["'][^>]*>[\s\S]*?<\/a>/gi)];
-  const snippets = [...html.matchAll(/<(?:a|div)\b[^>]*class=["'][^"']*result__snippet[^"']*["'][^>]*>([\s\S]*?)<\/(?:a|div)>/gi)];
-  return anchors.slice(0, 8).map((match, index) => {
+  const anchors = [...html.matchAll(/<a\b(?=[^>]*\bclass=["'][^"']*(?:result__a|result-link)[^"']*["'])[^>]*>[\s\S]*?<\/a>/gi)];
+  const snippets = [...html.matchAll(/<(?:a|div)\b(?=[^>]*\bclass=["'][^"']*(?:result__snippet|result-snippet)[^"']*["'])[^>]*>([\s\S]*?)<\/(?:a|div)>/gi)];
+  const results = anchors.slice(0, 10).map((match, index) => {
     const tag = match[0].match(/^<a\b[^>]*>/i)?.[0] || "";
     return {
       url: unwrapSearchUrl(htmlAttribute(tag, "href")),
       title: stripHtml(match[0].replace(/^<a\b[^>]*>/i, "").replace(/<\/a>$/i, "")),
-      snippet: snippets[index]?.[1] ? stripHtml(snippets[index][1]) : ""
+      snippet: snippets[index]?.[1] ? stripHtml(snippets[index][1]) : "",
+      provider: "DuckDuckGo"
     };
   }).filter((item) => item.title.length > 0 && safeWebUrl(item.url));
+  return [...new Map(results.map((item) => [item.url, item])).values()];
 }
 
-async function searchWeb(query: string): Promise<SearchResult[]> {
-  const url = "https://html.duckduckgo.com/html/?kl=nl-nl&q=" + encodeURIComponent(query);
+function rssField(fragment: string, tagName: string) {
+  const match = fragment.match(new RegExp("<" + tagName + "\\b[^>]*>([\\s\\S]*?)</" + tagName + "\\s*>", "i"));
+  if (!match) return "";
+  const value = match[1].trim()
+    .replace(/^<!\[CDATA\[/i, "")
+    .replace(/\]\]>$/, "")
+    .replace(/<!\[CDATA\[|\]\]>/gi, "");
+  return stripHtml(value);
+}
+
+function parseBingRssResults(xml: string): SearchResult[] {
+  const results: SearchResult[] = [];
+  const seen = new Set<string>();
+  for (const match of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item\s*>/gi)) {
+    const fragment = match[1];
+    const title = rssField(fragment, "title");
+    const url = unwrapSearchUrl(rssField(fragment, "link"), "https://www.bing.com");
+    const snippet = rssField(fragment, "description");
+    if (title && safeWebUrl(url) && !seen.has(url)) {
+      seen.add(url);
+      results.push({ title: title.slice(0, 220), url, snippet: snippet.slice(0, 900), provider: "Bing" });
+    }
+    if (results.length >= 10) break;
+  }
+  return results;
+}
+
+function parseBingHtmlResults(html: string): SearchResult[] {
+  const results: SearchResult[] = [];
+  const seen = new Set<string>();
+  for (const match of html.matchAll(/<li\b[^>]*\bclass=["'][^"']*\bb_algo\b[^"']*["'][^>]*>([\s\S]*?)<\/li\s*>/gi)) {
+    const block = match[1];
+    const heading = block.match(/<h2\b[^>]*>([\s\S]*?)<\/h2\s*>/i);
+    const tag = heading?.[1].match(/<a\b[^>]*>/i)?.[0] || "";
+    const url = unwrapSearchUrl(htmlAttribute(tag, "href"), "https://www.bing.com");
+    const title = stripHtml(heading?.[1] || "");
+    const caption = block.match(/<div\b[^>]*\bclass=["'][^"']*\bb_caption\b[^"']*["'][^>]*>([\s\S]*?)<\/div\s*>/i);
+    const snippet = stripHtml(caption?.[1] || "");
+    if (title && safeWebUrl(url) && !seen.has(url)) {
+      seen.add(url);
+      results.push({ title: title.slice(0, 220), url, snippet: snippet.slice(0, 900), provider: "Bing" });
+    }
+    if (results.length >= 10) break;
+  }
+  return results;
+}
+
+async function searchBing(query: string): Promise<SearchResult[]> {
+  const url = "https://www.bing.com/search?" + new URLSearchParams({ q: query, format: "rss" }).toString();
   const response = await fetch(url, {
     headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; DealRadarAdvisor/1.0)",
-      Accept: "text/html",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36",
+      Accept: "application/rss+xml, application/xml, text/xml, */*",
       "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8"
     },
     signal: AbortSignal.timeout(9000),
     cache: "no-store"
   });
-  if (!response.ok) throw new Error("Web search HTTP " + response.status);
-  return parseSearchResults(await response.text());
+  if (!response.ok) throw new Error("Bing search HTTP " + response.status);
+  const payload = (await response.text()).slice(0, 1200000);
+  const rss = parseBingRssResults(payload);
+  return rss.length ? rss : parseBingHtmlResults(payload);
+}
+
+async function searchDuckDuckGo(query: string): Promise<SearchResult[]> {
+  const url = "https://html.duckduckgo.com/html/?" + new URLSearchParams({ kl: "nl-nl", q: query }).toString();
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml",
+      "Accept-Language": "nl-NL,nl;q=0.9,en;q=0.8"
+    },
+    signal: AbortSignal.timeout(9000),
+    cache: "no-store"
+  });
+  if (!response.ok) throw new Error("DuckDuckGo search HTTP " + response.status);
+  return parseSearchResults((await response.text()).slice(0, 1200000));
+}
+
+async function searchWeb(query: string): Promise<{ results: SearchResult[]; providers: string[] }> {
+  const merged: SearchResult[] = [];
+  const providers: string[] = [];
+  const errors: string[] = [];
+  // Bing RSS has a compact, stable result format. DuckDuckGo is a second provider, not a single point of failure.
+  for (const provider of [
+    { name: "Bing", search: searchBing },
+    { name: "DuckDuckGo", search: searchDuckDuckGo }
+  ]) {
+    try {
+      const results = await provider.search(query);
+      for (const result of results) {
+        if (!merged.some((item) => item.url === result.url)) merged.push(result);
+      }
+      if (results.length) providers.push(provider.name);
+      if (merged.length >= 8) break;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn("Deal Radar advisor " + provider.name + " search failed:", query, detail.slice(0, 180));
+      errors.push(provider.name + ": " + detail.slice(0, 120));
+    }
+  }
+  if (!merged.length) throw new Error(errors.join("; ") || "No parseable web search results");
+  return { results: merged.slice(0, 10), providers };
 }
 
 function parseEuro(raw: string) {
