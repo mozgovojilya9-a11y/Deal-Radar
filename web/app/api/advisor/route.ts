@@ -202,8 +202,8 @@ function structuredPagePrices(html: string): number[] {
   const found: number[] = [];
   const tags = html.match(/<meta\b[^>]*>/gi) || [];
   const currencyTag = tags.find((tag) => {
-    const key = (htmlAttribute(tag, "property") || htmlAttribute(tag, "name") || "").toLowerCase();
-    return /(?:product:)?price:currency$|^pricecurrency$/.test(key);
+    const key = (htmlAttribute(tag, "property") || htmlAttribute(tag, "name") || htmlAttribute(tag, "itemprop") || "").toLowerCase();
+    return /(?:product:|og:)?price:currency$|^pricecurrency$/.test(key);
   });
   const pageCurrency = currencyTag ? htmlAttribute(currencyTag, "content").trim().toUpperCase() : "";
   for (const tag of tags) {
@@ -251,7 +251,7 @@ function classifySourceCondition(source: SearchResult, domain: string): ProductC
   if (/\b(tweedehands|gebruikt|used|pre-owned|occasion|second.hand)\b/i.test(text)
       || /(?:^|\.)marktplaats\.nl$|(?:^|\.)2dehands\.be$|(?:^|\.)ebay\.(?:nl|de|com)$|(?:^|\.)tweakers\.net$/i.test(domain)) return "used";
   if (/\b(nieuw|new|sealed|geseald|ongeopend|brand new)\b/i.test(text)
-      || /(?:^|\.)ray-ban\.com$|(?:^|\.)pearle\.nl$|(?:^|\.)sunglasshut\.com$|(?:^|\.)coolblue\.nl$|(?:^|\.)bol\.com$|(?:^|\.)mediamarkt\.nl$/i.test(domain)) return "new";
+      || /(?:^|\.)ray-ban\.com$|(?:^|\.)pearle\.nl$|(?:^|\.)sunglasshut\.com$|(?:^|\.)koopmanoptics\.com$|(?:^|\.)coolblue\.nl$|(?:^|\.)bol\.com$|(?:^|\.)mediamarkt\.nl$/i.test(domain)) return "new";
   return "unknown";
 }
 
@@ -478,7 +478,7 @@ export async function POST(request: NextRequest) {
     });
     const hasPriceEvidence = sources.some((source) => source.prices.length > 0);
 
-    if (sources.length === 0) {
+    if (sources.length === 0 && productContext.estimatedMarketPrice === null && productContext.newRetailPrice === null) {
       return NextResponse.json({
         answer: "Сейчас веб-поиск не вернул проверяемых страниц ни через Bing, ни через DuckDuckGo. Поэтому я не буду выдавать этот ответ за проверенный по интернет-источникам или делать выводы о рыночной цене по памяти. Попробуй повторить запрос позже.",
         model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
