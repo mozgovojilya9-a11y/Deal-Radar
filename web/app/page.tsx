@@ -613,7 +613,7 @@ export default function HomePage() {
         <div className="stat-card"><span className="stat-label">Результатов поиска</span><strong>{scannerStats ? scannerStats.checked.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">включая совпадения между запросами</span></div>
         <div className="stat-card accent-stat"><span className="stat-label">Уникальных объявлений</span><strong>{scannerStats?.unique != null ? scannerStats.unique.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">по ID Marktplaats</span></div>
         <div className="stat-card"><span className="stat-label">Повторных совпадений</span><strong>{scannerStats?.duplicates != null ? scannerStats.duplicates.toLocaleString("ru-RU") : "—"}</strong><span className="stat-caption">одно объявление найдено в нескольких запросах</span></div>
-        <div className="stat-card"><span className="stat-label">В каталоге</span><strong>{deals.length}</strong><span className="stat-caption">выгодные предложения и кандидаты</span></div>
+        <div className="stat-card"><span className="stat-label">Всего в каталоге</span><strong>{catalogCount.toLocaleString("ru-RU")}</strong><span className="stat-caption">активные предложения и кандидаты без ценовых фильтров</span></div>
       </section>
       ) : null}
 
@@ -625,7 +625,7 @@ export default function HomePage() {
           </div>
           <div className="analytics-summary">
             <div className="analytics-primary"><span>Объявлений проверено</span><strong>{scannerStats ? scannerStats.checked.toLocaleString("ru-RU") : "—"}</strong><small>{scannerStats ? "за один запуск · " + ageLabel(scannerStats.finishedAt) : "статистика появится после публикации нового сканирования"}</small></div>
-            <div className="analytics-primary green"><span>Выгодных добавлено за запуск</span><strong>{scannerStats ? scannerStats.newDeals.toLocaleString("ru-RU") : "—"}</strong><small>Всего активных предложений в каталоге: {deals.length}</small></div>
+            <div className="analytics-primary green"><span>Выгодных добавлено за запуск</span><strong>{scannerStats ? scannerStats.newDeals.toLocaleString("ru-RU") : "—"}</strong><small>Всего активных предложений: {catalogCount.toLocaleString("ru-RU")} · сейчас загружено с ценовыми фильтрами: {deals.length.toLocaleString("ru-RU")}</small></div>
           </div>
           <div className="analytics-grid">
             <div className="analytics-card"><span>Первично прошли фильтры</span><strong>{scannerStats ? scannerStats.accepted.toLocaleString("ru-RU") : "—"}</strong><small>уникальные объявления после проверки товара, цены и региона</small></div>
@@ -799,7 +799,7 @@ export default function HomePage() {
       <section className="content-section" id="deals">
         <div className="section-heading">
           <div>
-            <h2>Находки<span className="heading-count">{filtered.length}</span></h2>
+            <h2>Находки<span className="heading-count">{catalogCount.toLocaleString("ru-RU")}</span></h2>
             {updatedAt || filtered.length < catalogCount ? (
               <p>
                 {filtered.length < catalogCount ? `Показано ${filtered.length.toLocaleString("ru-RU")} из ${catalogCount.toLocaleString("ru-RU")} товаров · ` : ""}
