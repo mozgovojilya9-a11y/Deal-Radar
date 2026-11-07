@@ -10,7 +10,7 @@ type Sort = "profit" | "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
 type MatchType = "exact" | "variant" | "related" | "accessory" | "unrelated";
 type ResearchListing = { title: string; price: number; url: string; source: string; condition: "used" | "new" | "refurbished" | "unknown"; kind: "marktplaats" | "web"; estimatedProfit?: number | null; profitRoi?: number | null; status?: string; matchType?: MatchType; matchConfidence?: number; matchReason?: string };
-type AdvisorSource = { id: number; title: string; url: string; domain: string; snippet?: string };
+type AdvisorSource = { id: number; title: string; url: string; domain: string; snippet?: string; prices?: number[]; condition?: "used" | "new" | "refurbished" | "unknown" };
 type AdvisorMessage = { role: "user" | "model"; text: string; sources?: AdvisorSource[]; searchQueries?: string[]; searchProvider?: string; searchPerformed?: boolean };
 type ProductResearch = {
   query: string; maxPrice: number | null; checkedAt: string; usedMedian: number | null; usedReferencePrice: number | null; newMedian: number | null;
@@ -347,6 +347,7 @@ export default function HomePage() {
   const [scannerStats, setScannerStats] = useState<ScannerStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const requestId = useRef(0);
+  const advisorRequestId = useRef(0);
   const [tier, setTier] = useState<Tier>("all");
   const [exploreView, setExploreView] = useState<"categories" | "research">("categories");
   const [catQuery, setCatQuery] = useState("");
@@ -391,6 +392,17 @@ export default function HomePage() {
       })
       .catch(() => undefined);
   }, []);
+
+  // Each product gets a fresh, temporary assistant thread. Closing or switching
+  // the selected listing clears all messages and invalidates any in-flight reply.
+  useEffect(() => {
+    advisorRequestId.current += 1;
+    setAdvisorOpen(false);
+    setAdvisorInput("");
+    setAdvisorMessages([]);
+    setAdvisorLoading(false);
+    setAdvisorError("");
+  }, [selected?.listing_id]);
 
   const loadDeals = useCallback(async (silent = false) => {
     const id = ++requestId.current;
@@ -538,6 +550,7 @@ export default function HomePage() {
     if (!selected || !question || advisorLoading) return;
     const initData = window.Telegram?.WebApp?.initData || "";
     if (!initData) { setAdvisorError("Открой приложение внутри Telegram, чтобы консультироваться с AI."); return; }
+    const currentRequestId = ++advisorRequestId.current;
     const nextMessages = [...advisorMessages, { role: "user" as const, text: question }].slice(-12);
     setAdvisorMessages(nextMessages);
     setAdvisorInput("");
@@ -568,6 +581,7 @@ export default function HomePage() {
         searchPerformed?: boolean;
       };
       if (!response.ok) throw new Error(data.error || "AI временно недоступен.");
+      if (currentRequestId !== advisorRequestId.current) return;
       setAdvisorMessages((current) => [...current, {
         role: "model" as const,
         text: String(data.answer || "Не удалось сформировать ответ."),
@@ -577,9 +591,11 @@ export default function HomePage() {
         searchPerformed: Boolean(data.searchPerformed)
       }].slice(-12));
     } catch (error) {
-      setAdvisorError(error instanceof Error ? error.message : "Не удалось отправить вопрос.");
+      if (currentRequestId === advisorRequestId.current) {
+        setAdvisorError(error instanceof Error ? error.message : "Не удалось отправить вопрос.");
+      }
     } finally {
-      setAdvisorLoading(false);
+      if (currentRequestId === advisorRequestId.current) setAdvisorLoading(false);
     }
   }
 
@@ -996,7 +1012,7 @@ export default function HomePage() {
                             <small>ИСТОЧНИКИ</small>
                             {message.sources.map((source) => (
                               <a href={source.url} target="_blank" rel="noopener noreferrer" key={source.id}>
-                                <span>[{source.id}] {source.title}<small className="advisor-source-snippet">{source.snippet}</small></span><small>{source.domain}</small>
+                                <span>[{source.id}] {source.title}<small className="advisor-source-snippet">{source.snippet}</small>{source.prices?.length ? <small className="advisor-source-snippet">Цена на странице: {source.prices.slice(0, 3).map(euro).join(" · ")} · {source.condition === "used" ? "б/у" : source.condition === "new" ? "новый" : source.condition === "refurbished" ? "восстановленный" : "тип не уточнён"}</small> : null}</span><small>{source.domain}</small>
                               </a>
                             ))}
                           </div>
