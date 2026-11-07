@@ -1,4 +1,4 @@
-import { extractPage, type ExtractedOffer, type OfferCondition } from "./price-extract";
+import { extractPage, textPrices, type ExtractedOffer, type OfferCondition } from "./price-extract";
 import { buildIdentity, matchProduct, type MatchLevel, type ProductIdentity } from "./product-identity";
 import { safeWebUrl, searchWithFailover, type SearchAttempt, type SearchResult } from "./web-search";
 import { groundedMarketOffers } from "./grounded-search";
@@ -592,6 +592,25 @@ export async function researchMarket(title: string, options: ResearchOptions = {
     if (pageUrls.length >= 16) break;
   }
 
+  // Pages a provider already fetched (Tavily raw content): extract prices from that text directly.
+  const prefetched = new Map<string, string>();
+  for (const row of searchRows) if (row.rawContent && !prefetched.has(row.url)) prefetched.set(row.url, row.rawContent);
+  const fromRawText = (url: string, title: string, raw: string) => {
+    const domain = domainOf(url);
+    if (MARKETPLACE_DOMAINS.test(domain) || LISTING_PAGE.test(url)) return 0;
+    // The product page price: the first euro amount after the product name appears in the text.
+    const lower = raw.toLowerCase();
+    const anchor = identity.coreTokens.map((token) => lower.indexOf(token)).filter((index) => index >= 0).sort((a, b) => a - b)[0] ?? 0;
+    const window = raw.slice(anchor, anchor + 1500);
+    const price = textPrices(window)[0]?.price;
+    if (!price) return 0;
+    const segment = segmentFor(domain, { condition: "unknown", name: title }, window);
+    if (!segment) return 0;
+    const before = offers.length;
+    accept({ title: title.slice(0, 220), price, url, domain, method: "text", official: OFFICIAL.test(domain), availability: "unknown" }, segment, title);
+    return offers.length - before;
+  };
+
   let pagesFetched = 0;
   let pagesWithPrices = 0;
   const pageLog: MarketResearch["pageLog"] = [];
@@ -599,6 +618,15 @@ export async function researchMarket(title: string, options: ResearchOptions = {
   await Promise.all(Array.from({ length: 6 }, async () => {
     while (queue.length && Date.now() < deadline - 1500) {
       const url = queue.shift()!;
+      const raw = prefetched.get(url);
+      if (raw) {
+        const row = searchRows.find((item) => item.url === url);
+        const found = fromRawText(url, row?.title || url, raw);
+        pagesFetched += 1;
+        if (found) pagesWithPrices += 1;
+        pageLog.push({ url, status: found ? "ok" : "no_price", offers: found, kept: found, method: "text" });
+        continue;
+      }
       try {
         const page = await fetchPage(url, deadline);
         if (!page) {
