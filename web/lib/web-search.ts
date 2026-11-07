@@ -163,15 +163,18 @@ const PROVIDERS: Provider[] = [
     // Tavily: free 1,000 searches/month, no card. Fetches the pages itself, so shops that block
     // data-centre IPs still reach us as page text.
     name: "Tavily",
-    enabled: () => Boolean(process.env.TAVILY_API_KEY),
+    enabled: () => Boolean(String(process.env.TAVILY_API_KEY || "").trim()),
     search: async (query, signal) => {
       const response = await fetch("https://api.tavily.com/search", {
         method: "POST",
-        headers: { Authorization: "Bearer " + String(process.env.TAVILY_API_KEY), "Content-Type": "application/json" },
+        headers: { Authorization: "Bearer " + String(process.env.TAVILY_API_KEY).trim(), "Content-Type": "application/json" },
         body: JSON.stringify({ query, search_depth: "basic", max_results: 10, include_raw_content: "text", country: "netherlands" }),
         signal, cache: "no-store",
       });
-      if (!response.ok) throw new Error("HTTP " + response.status + (response.status === 432 || response.status === 429 ? " (лимит Tavily)" : ""));
+      if (!response.ok) {
+        const reason = response.status === 401 ? " (ключ Tavily неверный)" : [429, 432, 433, 434].includes(response.status) ? " (лимит Tavily)" : "";
+        throw new Error("HTTP " + response.status + reason);
+      }
       const data = await response.json() as { results?: Array<{ title?: string; url?: string; content?: string; raw_content?: string | null }> };
       return (data.results || []).map((row) => ({
         title: String(row.title || ""), url: String(row.url || ""), snippet: String(row.content || "").slice(0, 600),

@@ -1,6 +1,6 @@
 import { extractPage, textPrices, type ExtractedOffer, type OfferCondition } from "./price-extract";
 import { buildIdentity, matchProduct, type MatchLevel, type ProductIdentity } from "./product-identity";
-import { safeWebUrl, searchWithFailover, type SearchAttempt, type SearchResult } from "./web-search";
+import { providerNames, safeWebUrl, searchWithFailover, type SearchAttempt, type SearchResult } from "./web-search";
 import { groundedMarketOffers } from "./grounded-search";
 import { domainMatchesShop } from "./shops";
 
@@ -392,7 +392,7 @@ export async function researchMarket(title: string, options: ResearchOptions = {
   const includeNew = options.includeNew !== false;
   const includeUsed = options.includeUsed !== false;
   const includeRefurbished = options.includeRefurbished !== false;
-  const cacheKey = JSON.stringify([identity.searchName, includeNew, includeUsed, includeRefurbished, options.location?.postcode || "", options.location?.distanceKm || 0, options.maxPrice || 0, (options.focusShops || []).map((shop) => shop.name)]);
+  const cacheKey = JSON.stringify([identity.searchName, includeNew, includeUsed, includeRefurbished, options.location?.postcode || "", options.location?.distanceKm || 0, options.maxPrice || 0, (options.focusShops || []).map((shop) => shop.name), providerNames()]);
   const cached = options.fresh ? undefined : cache.get(cacheKey);
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.value;
 
