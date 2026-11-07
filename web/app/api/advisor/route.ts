@@ -370,6 +370,7 @@ export async function POST(request: NextRequest) {
   const latestQuestion = String(body.messages?.filter((message) => message?.role === "user").slice(-1)[0]?.text || "").trim().slice(0, 700);
   const asksCurrentPrice = /(цен[а-яё]*|стоимост|сколько|поч[её]м|рыноч|перепрод|за сколько|price|cost|worth|resale|waarde|prijs)/i.test(latestQuestion);
   const productContext = {
+    listingId: String(product.listingId || "").slice(0, 80),
     title,
     description: String(product.description || "").slice(0, 2500),
     askingPrice: Number.isFinite(Number(product.price)) && Number(product.price) > 0 ? Number(product.price) : null,
