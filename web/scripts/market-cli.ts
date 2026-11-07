@@ -55,6 +55,8 @@ await Promise.all(Array.from({ length: concurrency }, async () => {
         errors: research.errors.slice(0, 6),
         providerFailures: [...new Set(research.attempts.filter((attempt) => !attempt.ok && attempt.error).map((attempt) => attempt.provider + ": " + attempt.error))].slice(0, 6),
         groundedOffers: research.offers.filter((offer) => offer.method === "grounding").length,
+        sourceHealth: research.sourceHealth,
+        offerDomains: research.offers.reduce((acc, offer) => { acc[offer.domain] = (acc[offer.domain] || 0) + 1; return acc; }, {} as Record<string, number>),
         durationMs: Date.now() - started,
       });
     } catch (error) {

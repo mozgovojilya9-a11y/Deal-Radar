@@ -21,7 +21,7 @@ function research(offers: MarketResearch["offers"]): MarketResearch {
     rejected: { variants: 0, accessories: 0, mismatches: 0, outliers: 0 }, variantExamples: [], queries: [], attempts: [], providersUsed: ["DuckDuckGo"],
     pagesFetched: 1, pagesWithPrices: 1, pageLog: [], errors: [],
     marketplace: { offers: [], stats: { count: 0, min: null, p25: null, median: null, max: null, domains: [], official: null } },
-    valuation: computeValuation(offers, { new: stats("new"), used: stats("used"), refurbished: stats("refurbished") }, "2026-11-07T00:00:00Z") };
+    valuation: computeValuation(offers, { new: stats("new"), used: stats("used"), refurbished: stats("refurbished") }, "2026-11-07T00:00:00Z"), sourceHealth: {} };
 }
 const offer = (id: number, price: number, segment: "new" | "used" | "refurbished", domain: string) => ({ id, title: "Ray-Ban Meta Wayfarer Gen 2", price, url: `https://${domain}/p${id}`, domain, segment, match: "exact" as const, matchReason: "", method: "jsonld" as const, official: false, availability: "in_stock" as const });
 

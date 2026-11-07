@@ -63,6 +63,11 @@ const ACCESSORY_WORDS = [
   "charging case", "losse", "los", "linker", "rechter", "left earbud", "right earbud", "oordopje", "links",
   "rechts", "enkele", "single", "conversion kit", "housing", "onderwaterbehuizing", "underwater", "cage",
   "battery grip", "batterijgrip", "batteriegriff", "grip", "rig", "gimbal",
+  // Vinted and Kleinanzeigen are international: German, French, Portuguese, Spanish, Italian.
+  "ladecase", "ladeetui", "ladegerat", "ladekabel", "hulle", "huelle", "schutzhulle", "ersatz", "einzeln",
+  "coque", "chargeur", "boitier", "remplacement", "gauche", "droite", "ecouteur seul",
+  "caixa", "caixa de carregamento", "estojo", "capa", "carregador", "esquerdo", "direito",
+  "funda", "cargador", "estuche", "izquierdo", "derecho", "custodia", "caricatore", "sinistro", "destro",
 ];
 const ACCESSORY_RE = new RegExp(
   "(?:^|[^a-z0-9])(?:" + ACCESSORY_WORDS.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+")).join("|") + ")(?=$|[^a-z0-9])",
@@ -218,9 +223,9 @@ export function looksLikeAccessory(candidate: string, identity: ProductIdentity)
     if (!identity.coreTokens.some((token) => before.includes(token))) return true;
   }
   // Single earbuds, charging cases and spare parts are parts wherever the word appears.
-  if (/\b(?:links|rechts|linker|rechter|left|right|enkele|single|oplaadcase|laadcase|charging case|losse?|los)\b(?!\s+(?:en|and|\+)\s+(?:rechts|links|right|left))/.test(normalized)
-      && !/\b(?:links en rechts|left and right|beide|both|compleet|complete|set)\b/.test(normalized)
-      && !/\b(?:met|with|incl|inclusief)\s+(?:[a-z]+[\s-]+){0,2}(?:oplaadcase|laadcase|charging case)\b/.test(normalized)) return true;
+  if (/\b(?:links|rechts|linker|rechter|left|right|enkele|single|oplaadcase|laadcase|ladecase|lade case|ladeetui|charging case|losse?|los|nur|seul|seulement|solo|apenas|droit|gauche)\b(?!\s+(?:en|and|und|et|\+)\s+(?:rechts|links|right|left|droit|gauche))/.test(normalized)
+      && !/\b(?:links en rechts|links und rechts|left and right|beide|both|compleet|complete|komplett|set)\b/.test(normalized)
+      && !/\b(?:met|mit|with|con|avec|com|incl|inkl|inclusief|inklusive)\s+(?:[a-z0-9]+[\s-]+){0,3}(?:oplaadcase|laadcase|ladecase|lade case|charging case|boitier|caja|estuche|custodia)\b/.test(normalized)) return true;
   if (!ACCESSORY_RE.test(normalized)) return false;
   // A bundle such as "PS5 Slim + 2 controllers" is the device with extras.
   const accessoryIndex = normalized.search(ACCESSORY_RE);
@@ -332,7 +337,7 @@ export function matchProduct(candidate: string, identity: ProductIdentity): Matc
   let familyConflict = false;
   for (const token of identity.criticalTokens) {
     const found = criticalConflicts(token, tokens);
-    if (found.values.length && !hasCritical(token, tokens, joined)) {
+    if (found.values.length) {
       conflicts.push(...found.values);
       familyConflict ||= found.family;
     }

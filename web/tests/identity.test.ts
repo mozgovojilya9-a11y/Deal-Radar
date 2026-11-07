@@ -39,6 +39,12 @@ const cases: Array<[string, string, MatchLevel]> = [
   ["Sony PlayStation 5 Slim Disc Edition", "Sony PlayStation 5 Slim 1TB Disc Edition (mit Laufwerk)", "exact"],
   ["Complete Sony A7iii met 6971 clicks", "Aquatech Edge conversion kit 10m A7RIII A7 III", "accessory"],
   ["Complete Sony A7iii met 6971 clicks", "Sony A7 III systeemcamera", "exact"],
+  ["Apple AirPods Pro 2 USB-C", "Caixa de carregamento AirPods Pro 2 USB-C", "accessory"],
+  ["Apple AirPods Pro 2 USB-C", "Original Apple AirPods Pro 2 Ladecase (USB-C)", "accessory"],
+  ["Apple AirPods Pro 2 USB-C", "Coque protection silicone Apple AirPods Pro 2", "accessory"],
+  ["Apple AirPods Pro 2 USB-C", "Apple AirPods Pro 2 USB-C, Model: AirPods Pro 2", "exact"],
+  ["Apple AirPods Pro 2 USB-C", "Apple Airpods Pro (2.Gen.2023), Model: AirPods Pro 3 (2025)", "variant"],
+  ["Apple AirPods Pro 2 USB-C", "Apple AirPods Pro 2. Generation mit USB-C Ladecase", "exact"],
 ];
 
 for (const [query, candidate, expected] of cases) {

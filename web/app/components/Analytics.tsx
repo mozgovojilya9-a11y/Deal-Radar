@@ -57,6 +57,16 @@ export function Analytics({ stats, counts, scannedAt }: { stats: ScannerStats | 
         <div className="metric-tile"><span>Понижены</span><strong>{fmt(stats.demoted)}</strong><small>рынок изменился, выгода пропала</small></div>
         <div className="metric-tile"><span>Ошибки запросов</span><strong>{fmt(stats.failedQueries)} / {fmt(stats.queryCount)}</strong><small>категорий Marktplaats</small></div>
       </div>
+      {stats.externalOfferDomains && Object.keys(stats.externalOfferDomains).length ? (
+        <div className="rejection-panel">
+          <div className="rejection-heading"><div><h3>Независимые источники цен</h3></div><strong>{fmt(stats.externalValued)} <small>моделей оценено</small></strong></div>
+          {Object.entries(stats.externalOfferDomains).map(([domain, count]) => {
+            const max = Math.max(...Object.values(stats.externalOfferDomains || {}));
+            return <div className="rejection-row" key={domain}><div className="rejection-label"><span>{domain}</span><strong>{fmt(count)}</strong></div><div className="rejection-track"><i className="rejection-fill samples" style={{ width: (count / max) * 100 + "%" }} /></div></div>;
+          })}
+          {stats.sourceHealth ? <p className="analytics-note">Ответили: {Object.entries(stats.sourceHealth).filter(([, h]) => h.ok > 0).map(([name]) => name).join(", ") || "—"}. Не ответили: {Object.entries(stats.sourceHealth).filter(([, h]) => h.ok === 0).map(([name, h]) => name + (h.lastError ? " (" + h.lastError + ")" : "")).join(", ") || "—"}. Marktplaats в оценку не входит.</p> : null}
+        </div>
+      ) : null}
       <div className="rejection-panel">
         <div className="rejection-heading"><div><h3>Почему отсеяны</h3></div><strong>{fmt(stats.rejectedTotal)} <small>всего</small></strong></div>
         {reasons.map((item) => (

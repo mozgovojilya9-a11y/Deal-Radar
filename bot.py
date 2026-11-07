@@ -1914,9 +1914,11 @@ def store_external(db, result, now):
     )
 
 
-def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals, search_issues=None):
+def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals, search_issues=None, source_health=None, offer_domains=None):
     """Fresh-or-queued independent valuations for every model group seen in this run."""
     search_issues = search_issues if search_issues is not None else []
+    source_health = source_health if source_health is not None else {}
+    offer_domains = offer_domains if offer_domains is not None else {}
     settings = cfg.get("external_market", {})
     ttl = int(settings.get("cache_hours", 24)) * 3600
     per_run = int(settings.get("per_run", 45))
@@ -1963,6 +1965,14 @@ def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals, 
                 store_external(db, result, now)
                 metrics["externalResearched"] += 1
                 metrics["externalGroundedOffers"] += int(result.get("groundedOffers") or 0)
+                for source, health in (result.get("sourceHealth") or {}).items():
+                    entry = source_health.setdefault(str(source)[:40], {"ok": 0, "failed": 0, "parsed": 0, "lastError": None})
+                    entry["ok" if health.get("ok") else "failed"] += 1
+                    entry["parsed"] += int(health.get("parsed") or 0)
+                    if health.get("error"):
+                        entry["lastError"] = str(health["error"])[:100]
+                for domain, count in (result.get("offerDomains") or {}).items():
+                    offer_domains[str(domain)[:60]] = offer_domains.get(str(domain)[:60], 0) + int(count or 0)
                 for issue in result.get("providerFailures") or []:
                     if len(search_issues) < 8 and issue not in search_issues:
                         search_issues.append(str(issue)[:160])
@@ -2063,6 +2073,8 @@ def run_once(cfg, db, dry=False):
         "externalFailed": 0, "externalQueued": 0, "externalValued": 0, "externalGroundedOffers": 0,
     }
     search_issues = []
+    source_health = {}
+    offer_domains = {}
     previous_deals = {str(deal.get("listing_id")): deal for deal in feed_doc.get("deals", [])
                       if isinstance(deal, dict) and deal.get("listing_id")}
     seen_in_search = set()
@@ -2315,7 +2327,7 @@ def run_once(cfg, db, dry=False):
 
     # Phase 2: independent market value for every model group (shops, refurbishers and used
     # platforms outside Marktplaats). Phase 3: evaluate every candidate against that value.
-    external_by_key = prepare_external_valuations(db, pending_evaluations, cfg, now, metrics, previous_deals, search_issues)
+    external_by_key = prepare_external_valuations(db, pending_evaluations, cfg, now, metrics, previous_deals, search_issues, source_health, offer_domains)
     max_spread = float(cfg.get("max_price_spread", 0.8))
     for q, candidates, ai_decisions in pending_evaluations:
         qkey = q["key"]
@@ -2554,7 +2566,8 @@ def run_once(cfg, db, dry=False):
         "scannerVersion": SCANNER_DATA_VERSION,
         "updatedAt": now_iso if changed or not feed_doc.get("updatedAt") or not compatible_feed else feed_doc["updatedAt"],
         "scannedAt": now_iso,
-        "scannerStats": {**metrics, "externalSearchIssues": search_issues, "primaryRejected": primary_rejected, "rejectedTotal": rejected_total,
+        "scannerStats": {**metrics, "externalSearchIssues": search_issues, "sourceHealth": source_health,
+                         "externalOfferDomains": dict(sorted(offer_domains.items(), key=lambda kv: -kv[1])[:25]), "primaryRejected": primary_rejected, "rejectedTotal": rejected_total,
                          "queryCount": len(cfg["queries"]), "failedQueries": fails, "finishedAt": now_iso},
         "deals": fresh_deals,
     }

@@ -107,6 +107,10 @@ export type ScannerStats = {
   rejectedSpread?: number;
   geocoded?: number;
   cachedCandidatesReevaluated?: number;
+  sourceHealth?: Record<string, { ok: number; failed: number; parsed: number; lastError: string | null }>;
+  externalOfferDomains?: Record<string, number>;
+  externalResearched?: number;
+  externalValued?: number;
 };
 
 export type CatalogCounts = {

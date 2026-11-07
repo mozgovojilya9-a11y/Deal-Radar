@@ -69,14 +69,16 @@ export type MarketResearch = {
   /** Marktplaats/2dehands asking prices: context only, never part of the valuation. */
   marketplace: { offers: MarketOffer[]; stats: SegmentStats };
   valuation: MarketValuation;
+  /** Per direct source: offers parsed and kept, or the error. Shows which sources work from this IP. */
+  sourceHealth: Record<string, { ok: boolean; parsed: number; error?: string }>;
 };
 
 const BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
 const OFFICIAL = /(?:^|\.)(?:apple\.com|samsung\.com|sony\.(?:nl|com|eu)|playstation\.com|meta\.com|ray-ban\.com|dji\.com|gopro\.com|bose\.(?:nl|com)|jbl\.com|sennheiser\.com|nintendo\.com|xbox\.com|microsoft\.com|garmin\.com|canon\.(?:nl|com)|nikon\.(?:nl|com)|fujifilm\.com|lg\.com|philips\.nl|dyson\.nl|google\.com|lenovo\.com|dell\.com|hp\.com|shure\.com|rode\.com|beatsbydre\.com|casio\.com|tissotwatch\.com|michaelkors\.(?:nl|eu|com)|fjallraven\.com|thenorthface\.(?:nl|com)|osprey\.com|deuter\.com|eastpak\.com|diesel\.com|hugoboss\.com|tommy\.com)$/;
-const USED_DOMAINS = /(?:^|\.)(?:marktplaats\.nl|2dehands\.be|ebay\.[a-z.]+|vinted\.[a-z.]+|kleinanzeigen\.de|tweakers\.net|budgetgaming\.nl|gameshoptwente\.nl|catawiki\.[a-z]+|vintedgo\.com)$/;
+const USED_DOMAINS = /(?:^|\.)(?:marktplaats\.nl|2dehands\.be|vinted\.nl|ebay\.[a-z.]+|vinted\.[a-z.]+|kleinanzeigen\.de|tweakers\.net|budgetgaming\.nl|gameshoptwente\.nl|catawiki\.[a-z]+|vintedgo\.com)$/;
 const REFURB_DOMAINS = /(?:^|\.)(?:backmarket\.[a-z.]+|refurbed\.[a-z.]+|swappie\.com|forzarefurbished\.nl|rebuy\.[a-z.]+|leapp\.nl|renewd\.com|mobilezwaar\.nl|refurbishedstore\.nl|ireparatie\.nl|thephonelab\.nl)$/;
-const NEW_RETAIL = /(?:^|\.)(?:coolblue\.(?:nl|be)|bol\.com|mediamarkt\.(?:nl|be)|amazon\.(?:nl|de|com\.be)|alternate\.(?:nl|be)|bcc\.nl|expert\.nl|ep\.nl|wehkamp\.nl|kamera-express\.nl|cameranu\.nl|fotokonijnenberg\.nl|belsimpel\.nl|megekko\.nl|azerty\.nl|informatique\.nl|paradigit\.nl|intertoys\.nl|gamemania\.nl|nedgame\.nl|koopmanoptics\.com|pearle\.nl|hansanders\.nl|specsavers\.nl|baumsport\.nl|supersales\.nl|kieskeurig\.nl|beslist\.nl|bax-shop\.nl|thomann\.(?:de|nl)|mobiel\.nl|gsmpunt\.nl|dreamland\.be|vandenborre\.be|krefel\.be|fnac\.(?:be|nl)|hifi\.nl|hificorner\.nl|zalando\.nl|debijenkorf\.nl|otto\.nl|sunglasshut\.com|optiek\.nl)$/;
+const NEW_RETAIL = /(?:^|\.)(?:alternate\.nl|coolblue\.(?:nl|be)|bol\.com|mediamarkt\.(?:nl|be)|amazon\.(?:nl|de|com\.be)|alternate\.(?:nl|be)|bcc\.nl|expert\.nl|ep\.nl|wehkamp\.nl|kamera-express\.nl|cameranu\.nl|fotokonijnenberg\.nl|belsimpel\.nl|megekko\.nl|azerty\.nl|informatique\.nl|paradigit\.nl|intertoys\.nl|gamemania\.nl|nedgame\.nl|koopmanoptics\.com|pearle\.nl|hansanders\.nl|specsavers\.nl|baumsport\.nl|supersales\.nl|kieskeurig\.nl|beslist\.nl|bax-shop\.nl|thomann\.(?:de|nl)|mobiel\.nl|gsmpunt\.nl|dreamland\.be|vandenborre\.be|krefel\.be|fnac\.(?:be|nl)|hifi\.nl|hificorner\.nl|zalando\.nl|debijenkorf\.nl|otto\.nl|sunglasshut\.com|optiek\.nl)$/;
 const SKIP_PAGES = /(?:^|\.)(?:marktplaats\.nl|2dehands\.be)$/;
 /** Same platform as the candidate listings: never independent evidence of market value. */
 export const MARKETPLACE_DOMAINS = /(?:^|\.)(?:marktplaats\.nl|2dehands\.be|2ememain\.be)$/;
@@ -340,6 +342,47 @@ async function fetchRefurbed(name: string, deadline: number) {
   return rows;
 }
 
+/** Vinted.nl: independent second-hand marketplace in the Netherlands (catalog search cards). */
+async function fetchVinted(name: string, deadline: number) {
+  const page = await fetchPage("https://www.vinted.nl/catalog?search_text=" + encodeURIComponent(name), deadline);
+  if (!page) throw new Error("страница недоступна");
+  const rows: Array<{ title: string; offer: Omit<MarketOffer, "id" | "match" | "matchReason" | "segment"> }> = [];
+  // <a href="/items/123-…" data-testid="product-item-id-123--overlay-link" title="Title, Merk: X, Staat: Y, 200.00 €, 211.20 €">
+  for (const match of page.html.matchAll(/<a\b[^>]*href="(\/items\/[^"?]+)[^"]*"[^>]*data-testid="product-item-id-\d+--overlay-link"[^>]*title="([^"]+)"/gi)) {
+    const label = decodeEntities(match[2]);
+    const parts = label.split(/,\s*/);
+    const title = parts.filter((part) => !/^(merk|staat|maat):/i.test(part) && !/€/.test(part)).join(", ").trim();
+    const price = Number((label.match(/(\d+(?:\.\d{1,2})?)\s*€/) || [])[1]);
+    const condition = (parts.find((part) => /^staat:/i.test(part)) || "").replace(/^staat:\s*/i, "");
+    if (!title || !Number.isFinite(price) || price < 5) continue;
+    rows.push({ title, offer: { title: title.slice(0, 220), price, url: "https://www.vinted.nl" + match[1], domain: "vinted.nl", method: "text", official: false, availability: "in_stock", itemCondition: condition || null } });
+  }
+  return rows;
+}
+
+/** Alternate.nl: Dutch electronics shop (search result cards with name and price). */
+async function fetchAlternate(name: string, deadline: number) {
+  const page = await fetchPage("https://www.alternate.nl/listing.xhtml?q=" + encodeURIComponent(name), deadline);
+  if (!page) throw new Error("страница недоступна");
+  const rows: Array<{ title: string; offer: Omit<MarketOffer, "id" | "match" | "matchReason" | "segment"> }> = [];
+  const cards = [...page.html.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*class="[^"]*\bproductBox\b[^"]*"[^>]*>/gi)];
+  cards.forEach((card, index) => {
+    const end = cards[index + 1]?.index ?? Math.min(page.html.length, (card.index ?? 0) + 20000);
+    const chunk = page.html.slice(card.index ?? 0, end);
+    const title = stripTags(chunk.match(/class="product-name[^"]*"[^>]*>([\s\S]*?)<\/div>/i)?.[1] || "");
+    const priceText = chunk.match(/<span class="price[^"]*">\s*€\s*([\d.]+,\d{2}|[\d.]+)/i)?.[1];
+    if (!title || !priceText) return;
+    const price = Number(priceText.replace(/\./g, "").replace(",", "."));
+    if (!Number.isFinite(price)) return;
+    rows.push({ title, offer: { title: title.slice(0, 220), price, url: new URL(decodeEntities(card[1]), "https://www.alternate.nl").href, domain: "alternate.nl", method: "text", official: false, availability: "in_stock" } });
+  });
+  return rows;
+}
+
+function decodeEntities(value: string): string {
+  return value.replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&euro;/g, "€").replace(/&nbsp;/g, " ");
+}
+
 function stripTags(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;|&#160;/g, " ").replace(/&amp;/g, "&").replace(/&euro;/g, "€").replace(/\s+/g, " ").trim();
 }
@@ -448,7 +491,25 @@ export async function researchMarket(title: string, options: ResearchOptions = {
     directPages.push("https://www.beslist.nl/products/r/" + encodeURIComponent(name.toLowerCase()).replace(/%20/g, "+") + "/");
   }
   const directTasks: Promise<void>[] = [];
-  const sourceErrors = (label: string) => (error: unknown) => { errors.push(label + ": " + (error instanceof Error ? error.message : String(error)).slice(0, 80)); };
+  const sourceHealth: MarketResearch["sourceHealth"] = {};
+  const sourceErrors = (label: string) => (error: unknown) => {
+    const message = (error instanceof Error ? error.message : String(error)).slice(0, 80);
+    errors.push(label + ": " + message);
+    sourceHealth[label] = { ok: false, parsed: 0, error: message };
+  };
+  const healthy = (label: string, parsed: number) => { sourceHealth[label] = { ok: parsed > 0, parsed, error: parsed ? undefined : "0 предложений" }; };
+  if (includeUsed) {
+    directTasks.push(fetchVinted(name, deadline).then((rows) => {
+      healthy("Vinted", rows.length);
+      for (const row of rows) accept(row.offer, "used", row.title);
+    }).catch(sourceErrors("Vinted")));
+  }
+  if (includeNew) {
+    directTasks.push(fetchAlternate(name, deadline).then((rows) => {
+      healthy("Alternate", rows.length);
+      for (const row of rows) accept(row.offer, "new", row.title);
+    }).catch(sourceErrors("Alternate")));
+  }
   if (includeUsed) {
     directTasks.push(fetchKleinanzeigen(name, deadline).then(async (rows) => {
       // Long seller titles often return nothing: retry with the article code or a shorter name.
@@ -456,11 +517,13 @@ export async function researchMarket(title: string, options: ResearchOptions = {
         const fallback = identity.modelCodes[0]?.toUpperCase() || name.split(/\s+/).slice(0, 4).join(" ");
         if (fallback && fallback !== name) rows = [...rows, ...(await fetchKleinanzeigen(fallback, deadline).catch(() => []))];
       }
+      healthy("Kleinanzeigen", rows.length);
       for (const row of rows) accept(row.offer, "used", row.title, row.description);
     }).catch(sourceErrors("Kleinanzeigen")));
   }
   if (includeRefurbished) {
     directTasks.push(fetchRefurbed(name, deadline).then((rows) => {
+      healthy("Refurbed", rows.length);
       for (const row of rows) accept(row.offer, "refurbished", row.title);
     }).catch(sourceErrors("Refurbed")));
   }
@@ -538,7 +601,11 @@ export async function researchMarket(title: string, options: ResearchOptions = {
       const url = queue.shift()!;
       try {
         const page = await fetchPage(url, deadline);
-        if (!page) { pageLog.push({ url, status: "failed", offers: 0, kept: 0 }); continue; }
+        if (!page) {
+          pageLog.push({ url, status: "failed", offers: 0, kept: 0 });
+          if (directPages.includes(url)) sourceHealth[domainOf(url)] = { ok: false, parsed: 0, error: "страница недоступна" };
+          continue;
+        }
         pagesFetched += 1;
         const domain = domainOf(page.url);
         const extracted = extractPage(page.html, page.url);
@@ -566,6 +633,7 @@ export async function researchMarket(title: string, options: ResearchOptions = {
         }
         if (found) pagesWithPrices += 1;
         pageLog.push({ url: page.url, status: found ? "ok" : "no_price", offers: extracted.offers.length, kept: found, method: extracted.offers[0]?.method });
+        if (directPages.includes(url)) sourceHealth[domainOf(url)] = { ok: extracted.offers.length > 0, parsed: extracted.offers.length, error: extracted.offers.length ? undefined : "нет цен на странице" };
       } catch (error) {
         pageLog.push({ url, status: "failed", offers: 0, kept: 0 });
         errors.push(domainOf(url) + ": " + (error instanceof Error ? (error.name === "TimeoutError" ? "таймаут" : error.message) : String(error)).slice(0, 80));
@@ -622,6 +690,7 @@ export async function researchMarket(title: string, options: ResearchOptions = {
     errors: errors.slice(0, 12),
     marketplace: { offers: marketplaceFinal, stats: stats(marketplaceFinal) },
     valuation: computeValuation(finalOffers, segments, checkedAt),
+    sourceHealth,
   };
   if (finalOffers.length && !options.fresh) cache.set(cacheKey, { at: Date.now(), value: result });
   if (cache.size > 200) cache.delete(cache.keys().next().value as string);
