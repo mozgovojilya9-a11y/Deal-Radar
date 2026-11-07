@@ -1834,5 +1834,5 @@
   "max_rechecks_per_query": 80,
   "liveness_checks_per_run": 40,
   "liveness_after_hours": 36,
-  "geocode_per_run": 60
+  "geocode_per_run": 400
 }

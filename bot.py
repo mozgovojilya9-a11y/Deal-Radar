@@ -1877,7 +1877,17 @@ def run_once(cfg, db, dry=False):
         feed_deals[deal_id] = deal
 
     raw_ids_seen = set()
-    for q in cfg["queries"]:
+    # Rotate the start category every run: if Marktplaats throttles the runner late in a run,
+    # a different set of categories is affected each time instead of always the last ones.
+    ordered_queries = list(cfg["queries"])
+    offset_row = db.execute("SELECT v FROM meta WHERE k='query_offset'").fetchone()
+    offset = int(offset_row[0]) % len(ordered_queries) if offset_row and str(offset_row[0]).isdigit() and ordered_queries else 0
+    ordered_queries = ordered_queries[offset:] + ordered_queries[:offset]
+    db.execute("INSERT OR REPLACE INTO meta(k,v) VALUES('query_offset',?)",
+               (str((offset + max(1, len(ordered_queries) // 3)) % max(1, len(ordered_queries))),))
+    db.commit()
+    consecutive_failures = 0
+    for q in ordered_queries:
         qkey = q["key"]
         existing = db.execute("SELECT COUNT(*) FROM listings WHERE qkey=?", (qkey,)).fetchone()[0]
         pages = cfg.get("seed_pages", 5) if existing == 0 else cfg.get("pages", 2)
@@ -1888,10 +1898,21 @@ def run_once(cfg, db, dry=False):
                 search_q["ai_search_variants"] = ai_variants
                 metrics["aiSearchPlans"] += 1
                 metrics["aiSearchVariants"] += len(ai_variants)
-            raw = fetch_query(cfg, search_q, pages)
+            try:
+                raw = fetch_query(cfg, search_q, pages)
+            except Exception as first_error:
+                if not re.search(r"\b(403|429|503)\b|timed out|reset", str(first_error)):
+                    raise
+                # Rate limit: back off and retry once instead of losing the whole category.
+                pause = min(120, 30 * (consecutive_failures + 1))
+                log(f"[{qkey}] Marktplaats ограничил запросы ({first_error}); пауза {pause} с и повтор")
+                time.sleep(pause)
+                raw = fetch_query(cfg, search_q, pages)
+            consecutive_failures = 0
         except Exception as exc:
             log(f"[{qkey}] ошибка запроса Marktplaats: {exc}; переоцениваю сохранённые объявления и веб-источники")
             fails += 1
+            consecutive_failures += 1
             raw = []
         metrics["checked"] += len(raw)
         if q.get("key") == "rayban":

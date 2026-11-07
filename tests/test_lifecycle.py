@@ -121,6 +121,35 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(feed["auction"]["price_type"], "MIN_BID")
         self.assertNotEqual(feed["auction"]["status"], "strong")
 
+    def test_rate_limited_category_is_retried_not_lost(self):
+        seed = [listing(f"s{i}", 400) for i in range(6)]
+        db = bot.open_db()
+        try:
+            with mock.patch.object(bot, "fetch_query", side_effect=[OSError("HTTP Error 429: Too Many Requests"), seed]), \
+                 mock.patch.object(bot, "get_web_market_reference", return_value={"sources": []}):
+                bot.run_once(CFG, db)
+        finally:
+            db.close()
+        stats = bot.load_feed()["scannerStats"]
+        self.assertEqual(stats["failedQueries"], 0)
+        self.assertEqual(stats["unique"], 6)
+
+    def test_category_order_rotates_between_runs(self):
+        cfg = dict(CFG, queries=[dict(CFG["queries"][0], key=k) for k in ("ps5", "ps4", "ps3")])
+        seen_orders = []
+        for _ in range(2):
+            calls = []
+            db = bot.open_db()
+            try:
+                with mock.patch.object(bot, "fetch_query", side_effect=lambda _cfg, q, _pages: calls.append(q["key"]) or []), \
+                     mock.patch.object(bot, "get_web_market_reference", return_value={"sources": []}):
+                    bot.run_once(cfg, db)
+            finally:
+                db.close()
+            seen_orders.append(calls)
+        self.assertEqual(sorted(seen_orders[0]), sorted(seen_orders[1]))
+        self.assertNotEqual(seen_orders[0][0], seen_orders[1][0])
+
     def test_accessories_are_rejected_and_counted(self):
         rows = [listing("acc1", 120, title="Controller voor PS5"), listing("acc2", 110, title="PS5 games: FIFA en GTA")]
         self.scan(rows)
