@@ -1,7 +1,7 @@
 # Deal Radar design
 
-Edit `index.html` to change the live app visual theme. The `<style>` block is injected into the Next.js app by `web/app/layout.tsx`. It controls colors, typography, spacing, cards, buttons, responsive rules and animations.
+Единственный источник стилей приложения — `web/app/globals.css` (подключается в `web/app/layout.tsx`).
 
-Keep existing CSS class names (for example `.deal-card`, `.bottom-nav`, `.hero`) so the React-rendered UI keeps its behavior and styling.
+Файл `index.html` в этой папке — старый автономный прототип. Он **не подключён** к Next.js-приложению, правки в нём ничего не меняют. Его можно удалить.
 
-API routes, Telegram authentication, scanner, market research, calculations and state remain outside this folder. The live content structure and React event handlers remain in `web/app/page.tsx`; structural HTML changes still require updating the corresponding React markup.
+Структура интерфейса и обработчики — в `web/app/page.tsx`. API, авторизация Telegram, сканер и расчёты остаются вне интерфейса.

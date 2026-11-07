@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { Deal, ScannerStats } from "@/lib/deals";
 
-type Tab = "home" | "strong" | "categories" | "saved" | "analytics" | "profile";
+type Tab = "home" | "categories" | "saved" | "analytics" | "profile";
+type Tier = "all" | "strong" | "good" | "review";
 type Sort = "profit" | "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
 type MatchType = "exact" | "variant" | "related" | "accessory" | "unrelated";
@@ -91,20 +92,20 @@ function finds(n: number) {
 }
 const ICONS = {
   home: "M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
-  grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+  search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3",
   chart: "M4 20V10M10 20V4M16 20v-7M22 20H2",
   heart: "M12 21s-8-5.3-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 5.7-8 11-8 11z",
   user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0"
 };
 function Icon({ name }: { name: keyof typeof ICONS }) {
-  return <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={ICONS[name]} /></svg>;
+  return <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={ICONS[name]} /></svg>;
 }
 
 function euro(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
   return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number(value));
 }
- 
+
 function priceValue(raw: string): number | null {
   const parsed = Number(raw.replace(",", "."));
   return raw.trim() !== "" && Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
@@ -281,7 +282,7 @@ function DealCard({ deal, saved, onSave, onOpen }: {
           {deal.image_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={deal.image_url} alt={deal.title} loading="lazy" referrerPolicy="no-referrer" />
-          ) : <span className="image-fallback">✦</span>}
+          ) : <span className="image-fallback" aria-hidden="true">▣</span>}
           <span className={"discount-pill" + (candidate ? " candidate-pill" : "") + (good ? " good-pill" : "")}>
             {discount === null ? "На проверке" : candidate ? "≈ −" + discount + "%" : "−" + discount + "%"}
           </span>
@@ -298,7 +299,7 @@ function DealCard({ deal, saved, onSave, onOpen }: {
         {deal.estimated_profit != null ? (
           <div className={"saving-line" + (candidate ? " preliminary-saving" : "")}>
             <span>{candidate ? "Предварительная прибыль" : "Прибыль после расходов"}</span>
-            <strong>{euro(deal.estimated_profit)}</strong>
+            <strong>{euro(deal.estimated_profit)}{deal.profit_roi != null ? <em>ROI {Math.round(Number(deal.profit_roi) * 100)}%</em> : null}</strong>
           </div>
         ) : hasEstimate && discount !== null ? (
           <div className={"saving-line" + (candidate ? " preliminary-saving" : "")}>
@@ -307,7 +308,7 @@ function DealCard({ deal, saved, onSave, onOpen }: {
           </div>
         ) : <p className="candidate-explanation">{deal.evaluation_reason || "Недостаточно похожих объявлений для подтверждения рыночной цены."}</p>}
         <div className="card-footer">
-          <span className="location">⌖ {deal.city || "Нидерланды"}{deal.distance_km != null ? <b className="distance"> · {Math.round(deal.distance_km)} км</b> : null}</span>
+          <span className="location">{deal.city || "Нидерланды"}{deal.distance_km != null ? <b className="distance"> · {Math.round(deal.distance_km)} км</b> : null}</span>
           <button className={"save-button" + (saved ? " active" : "")} onClick={onSave} aria-label={saved ? "Убрать из избранного" : "В избранное"}>{saved ? "♥" : "♡"}</button>
         </div>
         <a className="card-link" href={deal.listing_url} target="_blank" rel="noopener noreferrer">Открыть на Marktplaats <span>↗</span></a>
@@ -344,6 +345,8 @@ export default function HomePage() {
   const [scannerStats, setScannerStats] = useState<ScannerStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const requestId = useRef(0);
+  const [tier, setTier] = useState<Tier>("all");
+  const [exploreView, setExploreView] = useState<"categories" | "research">("categories");
   const [catQuery, setCatQuery] = useState("");
   const [catGroup, setCatGroup] = useState<string | null>(null);
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
@@ -574,47 +577,16 @@ export default function HomePage() {
 
   return (
     <main className="app-shell">
-      <div className="ambient ambient-one" />
-      <div className="ambient ambient-two" />
       <header className="topbar">
         <div className="brand-lockup">
-          <div className="brand-mark">D<span>↗</span></div>
-          <div>
-            <div className="brand-name">deal radar</div>
-            <div className="brand-tagline">умнее находи · выгоднее покупай</div>
-          </div>
+          <div className="brand-mark" aria-hidden="true">D</div>
+          <div className="brand-name">Deal Radar</div>
         </div>
         <div className="top-user">
           <span className="live-dot" />
-          {profile ? <span>{profile.firstName || "Пользователь"}</span> : <span>Радар включён</span>}
+          <span>{profile ? profile.firstName || "Пользователь" : "Радар включён"}</span>
         </div>
       </header>
-
-      {tab === "home" ? (
-      <section className="hero">
-        <div className="hero-copy">
-          <div className="eyebrow"><span className="eyebrow-line" /> Радар работает</div>
-          <h1>Лови цену.<br /><em>Не переплачивай.</em></h1>
-          <p>Находим объявления Marktplaats ниже рыночной цены и показываем, где действительно есть выгода.</p>
-          <div className="hero-actions">
-            <button className="primary-button" onClick={() => { setTab("home"); document.getElementById("deals")?.scrollIntoView({ behavior: "smooth" }); }}>
-              Смотреть предложения <span>↗</span>
-            </button>
-            <span className="trust-note">Только реальные объявления</span>
-          </div>
-        </div>
-        <div className="radar-art" aria-hidden="true">
-          <div className="radar-ring ring-a" />
-          <div className="radar-ring ring-b" />
-          <div className="radar-ring ring-c" />
-          <div className="radar-sweep" />
-          <div className="radar-core">D</div>
-          <div className="radar-node node-a">−34%</div>
-          <div className="radar-node node-b">−27%</div>
-          <div className="radar-node node-c">−42%</div>
-        </div>
-      </section>
-      ) : null}
 
       {tab === "analytics" ? (
       <section className="stats-grid scanner-overview">
@@ -665,10 +637,15 @@ export default function HomePage() {
 
       {tab === "categories" ? (
         <section className="content-section v2-section">
+          <div className="seg" role="tablist" aria-label="Раздел поиска">
+            <button type="button" role="tab" aria-selected={exploreView === "categories"} className={exploreView === "categories" ? "on" : ""} onClick={() => setExploreView("categories")}>Категории</button>
+            <button type="button" role="tab" aria-selected={exploreView === "research"} className={exploreView === "research" ? "on" : ""} onClick={() => setExploreView("research")}>Анализ товара</button>
+          </div>
+          {exploreView === "research" ? (
           <div className="research-card">
             <div className="research-head">
-              <div><div className="eyebrow">LIVE MARKET RESEARCH</div><h3>Исследовать товар</h3><p>Укажи любую модель. Радар соберёт объявления Marktplaats, сравнит цены б/у и проверит стоимость нового товара в магазинах.</p></div>
-              <span className="research-live">LIVE</span>
+              <div><h3>Анализ товара</h3><p>Укажи любую модель. Радар соберёт объявления Marktplaats, сравнит цены б/у и проверит стоимость нового товара в магазинах.</p></div>
+
             </div>
             <div className="research-form">
               <label className="research-query"><span>Что ищем?</span><input value={researchQuery} onChange={(event) => setResearchQuery(event.target.value)} placeholder="Например: Ray-Ban Meta Wayfarer Gen 2 RW4012" maxLength={100} /></label>
@@ -709,7 +686,8 @@ export default function HomePage() {
                       </div>
                     ) : null}
                     {researchResult.ai.googleSearchQueries?.length ? <small className="research-ai-note">Gemini проверил модель через Google Search: {researchResult.ai.googleSearchQueries.join(" · ")}</small> : null}
-                    {researchResult.ai.valuation?.googleSearchQueries?.length ? <small className="research-ai-note">Поиск цен: {researchResult.ai.valuation.googleSearchQueries.join(" · ")}</small> : null}\n                    {researchResult.ai.valuation?.groundedSources?.length ? <div className="research-web-links">{researchResult.ai.valuation.groundedSources.map((source) => <a href={source.url} target="_blank" rel="noopener noreferrer" key={source.url}>{source.title}</a>)}</div> : null}
+                    {researchResult.ai.valuation?.googleSearchQueries?.length ? <small className="research-ai-note">Поиск цен: {researchResult.ai.valuation.googleSearchQueries.join(" · ")}</small> : null}
+                    {researchResult.ai.valuation?.groundedSources?.length ? <div className="research-web-links">{researchResult.ai.valuation.groundedSources.map((source) => <a href={source.url} target="_blank" rel="noopener noreferrer" key={source.url}>{source.title}</a>)}</div> : null}
                     {researchResult.ai.groundedSources?.length ? <div className="research-web-links">{researchResult.ai.groundedSources.map((source) => <a href={source.url} target="_blank" rel="noopener noreferrer" key={source.url}>{source.title}</a>)}</div> : null}
                     {!researchResult.ai.enabled ? <small className="research-ai-note">Облачный AI не подключён; отображаются резервные результаты без grounded-проверки.</small> : null}
                   </section>
@@ -736,10 +714,12 @@ export default function HomePage() {
               </div>
             ) : null}
           </div>
+          ) : null}
+          {exploreView === "categories" ? (<>
           {openGroup && !catQuery.trim() ? (
             <>
               <button type="button" className="cg-back" onClick={() => setCatGroup(null)}>← Все категории</button>
-              <div className="v2-head"><h2><span aria-hidden="true">{openGroup.icon}</span> {openGroup.title}</h2><p>{openGroup.count ? openGroup.count + " " + finds(openGroup.count) + " сейчас" : "Находок пока нет, сканер продолжает поиск"}</p></div>
+              <div className="v2-head"><h2>{openGroup.title}</h2><p>{openGroup.count ? openGroup.count + " " + finds(openGroup.count) + " сейчас" : "Находок пока нет, сканер продолжает поиск"}</p></div>
               <button type="button" className="v2-all" onClick={() => pickCategory("group:" + openGroup.title)}><strong>Показать всё: {openGroup.title}</strong><span>{openGroup.count}</span></button>
               <div className="cg-list">
                 {[...openGroup.items].sort((a, b) => (categoryCounts[b.key] || 0) - (categoryCounts[a.key] || 0)).map((item) => {
@@ -765,7 +745,6 @@ export default function HomePage() {
                   <div className="cg-grid">
                     {groupStats.map((group) => (
                       <button type="button" key={group.title} className={"cg-card" + (group.count ? "" : " empty")} onClick={() => setCatGroup(group.title)}>
-                        <span className="cg-ico" aria-hidden="true">{group.icon}</span>
                         <strong>{group.title}</strong>
                         <small>{group.count ? group.count + " " + finds(group.count) : "пока пусто"}</small>
                         {group.best ? <em>до −{group.best}%</em> : null}
@@ -776,6 +755,7 @@ export default function HomePage() {
               )}
             </>
           )}
+          </>) : null}
         </section>
       ) : null}
 
@@ -795,78 +775,36 @@ export default function HomePage() {
         </section>
       ) : null}
 
-      {tab === "strong" ? (
-        <section className="content-section" id="strong-deals">
-          <div className="section-heading">
-            <div>
-              <h2>Сильные сделки<span className="heading-count">{strongDeals.length}</span></h2>
-              <p>Только предложения с подтверждённой прибылью от €50 и выше</p>
-            </div>
-            <button className="refresh-button" onClick={() => void loadDeals(true)} disabled={loading || refreshing}><span className={loading || refreshing ? "spin" : ""}>↻</span> Обновить</button>
-          </div>
-
-          <div className="summary-strip">
-            <span><strong>{strongDeals.length}</strong> сильных сделок</span>
-            {bestDiscount ? <span>лучшая скидка <strong>−{bestDiscount}%</strong></span> : null}
-            {updatedAt ? <span>обновлено {dateLabel(updatedAt)}</span> : null}
-          </div>
-
-          <div className="toolbar">
-            <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Найти сильную сделку..." /></label>
-            <label className="sort-select"><span>Сортировка</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="profit">По прибыли</option><option value="discount">По скидке</option><option value="newest">Сначала новые</option><option value="price">Сначала дешевле</option></select></label>
-          </div>
-
-          {error && deals.length === 0 ? (
-            <div className="state-panel error-panel"><div className="state-icon">!</div><h3>Лента пока не подключена</h3><p>{error}</p><button className="secondary-button" onClick={() => void loadDeals()}>Попробовать снова</button></div>
-          ) : loading && strongDeals.length === 0 ? (
-            <div className="deal-grid">{Array.from({ length: 6 }).map((_, index) => <div className="skeleton-card" key={index}><div /><span /><span /><span /></div>)}</div>
-          ) : strongDeals.length === 0 ? (
-            <div className="state-panel"><div className="state-icon">⌁</div>
-              <h3>Пока нет сильных сделок</h3>
-              <p>Сканер ищет предложения с прибылью от €50. Когда они появятся, они будут здесь.</p>
-              <button className="secondary-button" onClick={() => setTab("home")}>К основным находкам</button>
-            </div>
-          ) : (
-            <div className="deal-grid">{strongDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div>
-          )}
-        </section>
-      ) : null}
-
       {tab === "home" ? (
       <section className="content-section" id="deals">
         <div className="section-heading">
-          <div>
-            
-            <h2>Свежие находки<span className="heading-count">{filtered.length}</span></h2>
-            <p>Подтверждённые сделки отдельно от объявлений, которым ещё не хватает данных для оценки</p>
-          </div>
-          <button className="refresh-button" onClick={() => void loadDeals(true)} disabled={loading || refreshing}><span className={loading || refreshing ? "spin" : ""}>↻</span> Обновить</button>
+          <div><h2>Находки<span className="heading-count">{filtered.length}</span></h2>{updatedAt ? <p>Обновлено {ageLabel(updatedAt)}{bestDiscount ? " · лучшая скидка −" + bestDiscount + "%" : ""}</p> : null}</div>
+          <button className="refresh-button" onClick={() => void loadDeals(true)} disabled={loading || refreshing} aria-label="Обновить список"><span className={loading || refreshing ? "spin" : ""} aria-hidden="true">↻</span> Обновить</button>
         </div>
 
-        <div className="summary-strip">
-          <span><strong>{base.length}</strong> {finds(base.length)}</span>
-          {bestDiscount ? <span>лучшая скидка <strong>−{bestDiscount}%</strong></span> : null}
-          {updatedAt ? <span>обновлено {dateLabel(updatedAt)}</span> : null}
+        <div className="seg" role="tablist" aria-label="Тип предложений">
+          {([["all", "Все", filtered.length], ["strong", "Лучшие", strongDeals.length], ["good", "Хорошие", goodDeals.length], ["review", "Проверить", reviewDeals.length]] as const).map(([key, label, count]) => (
+            <button type="button" role="tab" aria-selected={tier === key} key={key} className={tier === key ? "on" : ""} onClick={() => setTier(key)}>{label}<b>{count}</b></button>
+          ))}
         </div>
 
         <div className="toolbar">
-          <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Найти товар..." /></label>
+          <label className="search-box"><span aria-hidden="true">⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Найти товар…" aria-label="Поиск товара" /></label>
           <label className="sort-select"><span>Сортировка</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="profit">По прибыли</option><option value="discount">По скидке</option><option value="newest">Сначала новые</option><option value="price">Сначала дешевле</option></select></label>
         </div>
 
         <div className="cat-bar">
-          <span>Категория</span>
-          <button type="button" className="cat-pick" onClick={() => setTab("categories")}><strong>{activeCategory}</strong><i>Выбрать</i></button>
+          <button type="button" className="cat-pick" onClick={() => setTab("categories")}><span>Категория: <strong>{activeCategory}</strong></span><i>Выбрать</i></button>
           {category ? <button type="button" className="cat-clear" onClick={() => setCategory("")} aria-label="Сбросить категорию">✕</button> : null}
         </div>
 
-        <details open className="filters-fold">
-          <summary>Параметры поиска · цена и скидка{settingsCount ? <b>{settingsCount}</b> : null}</summary>
+        <details className="filters-fold">
+          <summary>Фильтры: цена и скидка{settingsCount ? <b>{settingsCount}</b> : null}</summary>
         <div className="filter-panel" role="group" aria-label="Фильтры по цене и скидке">
           <div className="filter-group">
             <span className="filter-label">Территория поиска</span>
             <strong>Вся территория Нидерландов</strong>
-            <small className="settings-note">Сканер ищет объявления по всей стране, без привязки к индексу 7671.</small>
+            <small className="settings-note">Сканер ищет объявления по всей стране.</small>
           </div>
           <div className="filter-group">
             <span className="filter-label">Цена, €</span>
@@ -904,15 +842,15 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="deal-tiers">
-            <section className="deal-tier strong-tier"><div className="tier-heading"><div><div className="eyebrow">Лучшее</div><h3>Самые выгодные <span>{strongDeals.length}</span></h3><p>Лучшее подтверждённое соотношение цены и рынка</p></div></div>
+            {tier === "all" || tier === "strong" ? <section className="deal-tier strong-tier"><div className="tier-heading"><div><h3>Лучшие<span>{strongDeals.length}</span></h3><p>Подтверждённая прибыль от €50</p></div></div>
               {strongDeals.length ? <div className="deal-grid">{strongDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div> : <p className="tier-empty">Пока нет сделок, которые прошли полный порог проверки.</p>}
-            </section>
-            <section className="deal-tier good-tier"><div className="tier-heading"><div><div className="eyebrow">Хорошая цена</div><h3>Тоже хорошие предложения <span>{goodDeals.length}</span></h3><p>Скидка ниже максимального порога, но цена всё ещё привлекательная</p></div></div>
-              {goodDeals.length ? <div className="deal-grid">{goodDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div> : <p className="tier-empty">В этом проходе не нашлось предложений в среднем диапазоне выгоды.</p>}
-            </section>
-            <section className="deal-tier review-tier"><div className="tier-heading"><div><div className="eyebrow">Требует проверки</div><h3>Кандидаты на проверку <span>{reviewDeals.length}</span></h3><p>Не скрываем из-за нехватки сравнений. Скидка здесь не подтверждена.</p></div></div>
+            </section> : null}
+            {tier === "all" || tier === "good" ? <section className="deal-tier good-tier"><div className="tier-heading"><div><h3>Хорошая цена<span>{goodDeals.length}</span></h3><p>Скидка меньше, но цена привлекательная</p></div></div>
+              {goodDeals.length ? <div className="deal-grid">{goodDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div> : <p className="tier-empty">Предложений в этом диапазоне пока нет.</p>}
+            </section> : null}
+            {tier === "all" || tier === "review" ? <section className="deal-tier review-tier"><div className="tier-heading"><div><h3>Нужно проверить<span>{reviewDeals.length}</span></h3><p>Недостаточно сравнений — скидка не подтверждена</p></div></div>
               {reviewDeals.length ? <div className="deal-grid">{reviewDeals.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />)}</div> : <p className="tier-empty">Кандидатов пока нет.</p>}
-            </section>
+            </section> : null}
           </div>
         )}
       </section>
@@ -947,7 +885,7 @@ export default function HomePage() {
               <p className="v2-hint">Отметьте то, что вам интересно. Если ничего не выбрано, показываем всё.</p>
               {GROUPED_CATEGORIES.map((group) => (
                 <div className="v2-pick" key={group.title}>
-                  <span>{group.icon} {group.title}</span>
+                  <span>{group.title}</span>
                   <div>{group.items.map((item) => <button type="button" key={item.key} aria-pressed={settings.categories.includes(item.key)} className={"preference-chip" + (settings.categories.includes(item.key) ? " active" : "")} onClick={() => updateFilters({ categories: settings.categories.includes(item.key) ? settings.categories.filter((key) => key !== item.key) : [...settings.categories, item.key] })}>{item.label}</button>)}</div>
                 </div>
               ))}
@@ -966,10 +904,10 @@ export default function HomePage() {
       </footer>
 
       <nav className="bottom-nav" aria-label="Основная навигация">
-        <button className={tab === "home" ? "nav-active" : ""} onClick={() => setTab("home")}><Icon name="home" />Главная</button>
-        <button className={tab === "strong" ? "nav-active" : ""} onClick={() => setTab("strong")}><Icon name="grid" />Сильные</button>
-        <button className={tab === "categories" ? "nav-active" : ""} onClick={() => setTab("categories")}><Icon name="grid" />Категории</button>
+        <button className={tab === "home" ? "nav-active" : ""} onClick={() => setTab("home")}><Icon name="home" />Находки</button>
+        <button className={tab === "categories" ? "nav-active" : ""} onClick={() => setTab("categories")}><Icon name="search" />Поиск</button>
         <button className={tab === "analytics" ? "nav-active" : ""} onClick={() => setTab("analytics")}><Icon name="chart" />Аналитика</button>
+
         <button className={tab === "saved" ? "nav-active" : ""} onClick={() => setTab("saved")}><Icon name="heart" />Избранное{saved.length ? <i>{saved.length}</i> : null}</button>
         <button className={tab === "profile" ? "nav-active" : ""} onClick={() => setTab("profile")}><Icon name="user" />Профиль</button>
       </nav>
