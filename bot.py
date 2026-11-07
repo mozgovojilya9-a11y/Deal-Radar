@@ -1066,7 +1066,7 @@ def fetch_external_market_offer(row, q):
             **HEADERS, "User-Agent": "Mozilla/5.0 (compatible; DealRadarMarketResearch/1.0)",
             "Accept": "text/html,application/xhtml+xml",
         })
-        with urllib.request.urlopen(request, timeout=5) as response:
+        with urllib.request.urlopen(request, timeout=4) as response:
             final_url = response.geturl() if hasattr(response, "geturl") else url
             if _safe_web_url(final_url):
                 document = response.read(850000).decode("utf-8", errors="replace")
@@ -1150,7 +1150,7 @@ def get_web_market_reference(db, q, candidate_groups=None, cfg=None):
             except (TypeError, ValueError, json.JSONDecodeError):
                 pass
     rows, errors = [], []
-    per_condition = max(3, min(6, int(settings.get("results_per_condition", 3))))
+    per_condition = max(2, min(4, int(settings.get("results_per_condition", 2))))
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(search_external_web, query) for query in (used_query, new_query)]
         for future in as_completed(futures):
@@ -1158,7 +1158,7 @@ def get_web_market_reference(db, q, candidate_groups=None, cfg=None):
                 rows.extend(future.result()[:per_condition])
             except Exception as exc:
                 errors.append(type(exc).__name__ + ": " + str(exc)[:100])
-    unique_rows = list({row["url"]: row for row in rows if row.get("url")}.values())[:12]
+    unique_rows = list({row["url"]: row for row in rows if row.get("url")}.values())[:8]
     offers = []
     workers = max(2, min(8, int(settings.get("page_fetch_workers", 8))))
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -1624,11 +1624,14 @@ def run_once(cfg, db, dry=False):
         db.commit()
 
         # Search outside websites and cache actual new/used price observations.
-        candidate_groups = [group for _item, group, _flags in candidates.values()]
-        web_market_data = get_web_market_reference(db, q, candidate_groups, cfg)
-        if web_market_data.get("sources"):
-            metrics["webSearchGroups"] += 1
-            metrics["webPriceOffers"] += len(web_market_data["sources"])
+        candidate_groups = sorted({group for _item, group, _flags in candidates.values() if group and group != "unknown"})
+        if candidate_groups:
+            web_market_data = get_web_market_reference(db, q, candidate_groups, cfg)
+            if web_market_data.get("sources"):
+                metrics["webSearchGroups"] += 1
+                metrics["webPriceOffers"] += len(web_market_data["sources"])
+        else:
+            web_market_data = {"sources": []}
 
         for listing_id, (item, group, flags) in candidates.items():
             metrics["candidates"] += 1
