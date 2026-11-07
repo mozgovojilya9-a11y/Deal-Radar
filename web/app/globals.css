@@ -233,3 +233,12 @@ h1, h2, h3, h4, p { margin: 0; }
   .analytics-summary, .research-summary-grid { grid-template-columns: 1fr; } .research-form { grid-template-columns: 1fr; } .research-offer { grid-template-columns: 1fr auto; } .research-offer em { grid-column: 1 / -1; }
   .v2-note, .v2-result { flex-direction: column; align-items: flex-start; padding-block: 12px; } .modal-backdrop { align-items: flex-end; padding: 0; } .detail-modal { max-height: 94vh; border-radius: 20px 20px 0 0; }
 }
+
+.advisor-citation { color: var(--accent); font-weight: 800; text-decoration: underline; text-underline-offset: 2px; }
+.advisor-sources { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.advisor-sources > small { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+.advisor-sources a { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--soft); font-size: 12px; text-decoration: none; }
+.advisor-sources a > span { min-width: 0; overflow-wrap: anywhere; }
+.advisor-sources a > small { flex: none; color: var(--muted); font-size: 10px; }
+.advisor-google-search { display: block; width: 100%; height: 56px; margin-top: 10px; border: 0; background: transparent; }
+.advisor-no-sources { display: block; margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.45; }

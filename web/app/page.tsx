@@ -10,6 +10,8 @@ type Sort = "profit" | "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
 type MatchType = "exact" | "variant" | "related" | "accessory" | "unrelated";
 type ResearchListing = { title: string; price: number; url: string; source: string; condition: "used" | "new" | "refurbished" | "unknown"; kind: "marktplaats" | "web"; estimatedProfit?: number | null; profitRoi?: number | null; status?: string; matchType?: MatchType; matchConfidence?: number; matchReason?: string };
+type AdvisorSource = { id: number; title: string; url: string; domain: string };
+type AdvisorMessage = { role: "user" | "model"; text: string; sources?: AdvisorSource[]; searchQueries?: string[]; searchEntryPoint?: string; searchPerformed?: boolean };
 type ProductResearch = {
   query: string; maxPrice: number | null; checkedAt: string; usedMedian: number | null; usedReferencePrice: number | null; newMedian: number | null;
   expectedResalePrice: number | null; netResalePrice: number | null; sampleCount: number;
@@ -334,7 +336,7 @@ export default function HomePage() {
   const [selected, setSelected] = useState<Deal | null>(null);
   const [advisorOpen, setAdvisorOpen] = useState(false);
   const [advisorInput, setAdvisorInput] = useState("");
-  const [advisorMessages, setAdvisorMessages] = useState<Array<{ role: "user" | "model"; text: string }>>([]);
+  const [advisorMessages, setAdvisorMessages] = useState<AdvisorMessage[]>([]);
   const [advisorLoading, setAdvisorLoading] = useState(false);
   const [advisorError, setAdvisorError] = useState("");
   const [profile, setProfile] = useState<TelegramProfile | null>(null);
@@ -554,9 +556,23 @@ export default function HomePage() {
           messages: nextMessages
         })
       });
-      const data = await response.json();
+      const data = await response.json() as {
+        error?: string;
+        answer?: string;
+        sources?: AdvisorSource[];
+        searchQueries?: string[];
+        searchEntryPoint?: string;
+        searchPerformed?: boolean;
+      };
       if (!response.ok) throw new Error(data.error || "AI временно недоступен.");
-      setAdvisorMessages((current) => [...current, { role: "model" as const, text: String(data.answer || "Не удалось сформировать ответ.") }].slice(-12));
+      setAdvisorMessages((current) => [...current, {
+        role: "model" as const,
+        text: String(data.answer || "Не удалось сформировать ответ."),
+        sources: Array.isArray(data.sources) ? data.sources : [],
+        searchQueries: Array.isArray(data.searchQueries) ? data.searchQueries : [],
+        searchEntryPoint: typeof data.searchEntryPoint === "string" ? data.searchEntryPoint : "",
+        searchPerformed: Boolean(data.searchPerformed)
+      }].slice(-12));
     } catch (error) {
       setAdvisorError(error instanceof Error ? error.message : "Не удалось отправить вопрос.");
     } finally {
@@ -950,8 +966,39 @@ export default function HomePage() {
                     ))}
                   </div>
                   <div className="advisor-thread" aria-live="polite">
-                    {!advisorMessages.length ? <p className="advisor-empty">Задай вопрос об этом товаре. AI учтёт цену, описание, оценку рынка и предупреждения радара.</p> : advisorMessages.map((message, index) => (
-                      <div className={"advisor-message " + message.role} key={index}><span>{message.role === "user" ? "Вы" : "AI"}</span><p>{message.text}</p></div>
+                    {!advisorMessages.length ? <p className="advisor-empty">Задай вопрос об этом товаре. Для актуальных цен и характеристик AI использует Google Search и показывает источники.</p> : advisorMessages.map((message, index) => (
+                      <div className={"advisor-message " + message.role} key={index}>
+                        <span>{message.role === "user" ? "Вы" : "AI"}</span>
+                        <p>{message.text.split(/(\[\d+\])/g).map((part, partIndex) => {
+                          const citation = /^\[(\d+)\]$/.exec(part);
+                          const source = citation ? message.sources?.find((item) => item.id === Number(citation[1])) : undefined;
+                          return source
+                            ? <a className="advisor-citation" href={source.url} target="_blank" rel="noopener noreferrer" key={partIndex}>{part}</a>
+                            : <span key={partIndex}>{part}</span>;
+                        })}</p>
+                        {message.role === "model" && message.sources?.length ? (
+                          <div className="advisor-sources">
+                            <small>ИСТОЧНИКИ</small>
+                            {message.sources.map((source) => (
+                              <a href={source.url} target="_blank" rel="noopener noreferrer" key={source.id}>
+                                <span>[{source.id}] {source.title}</span><small>{source.domain}</small>
+                              </a>
+                            ))}
+                          </div>
+                        ) : null}
+                        {message.role === "model" && message.searchEntryPoint ? (
+                          <iframe
+                            className="advisor-google-search"
+                            title="Google Search suggestions"
+                            srcDoc={message.searchEntryPoint}
+                            sandbox="allow-popups allow-popups-to-escape-sandbox"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : null}
+                        {message.role === "model" && message.searchPerformed && !message.sources?.length ? (
+                          <small className="advisor-no-sources">Google Search не вернул доступных ссылок на источники для этого ответа.</small>
+                        ) : null}
+                      </div>
                     ))}
                     {advisorLoading ? <div className="advisor-thinking"><span /><span /><span /> Анализирую товар…</div> : null}
                   </div>
