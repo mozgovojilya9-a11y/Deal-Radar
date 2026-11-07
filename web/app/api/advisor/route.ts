@@ -51,11 +51,12 @@ function unwrapSearchUrl(raw: string, base = "https://html.duckduckgo.com") {
 }
 
 function htmlAttribute(tag: string, name: string) {
-  const match = tag.match(new RegExp("\\b" + name + "\\s*=\\s*(?:\\"([^\\"]*)\\"|'([^']*)'|([^\\s>]+))", "i"));
-  const value = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
+  const doubleQuoted = tag.match(new RegExp("\\b" + name + "\\s*=\\s*\"([^\"]*)\"", "i"));
+  const singleQuoted = tag.match(new RegExp("\\b" + name + "\\s*=\\s*'([^']*)'", "i"));
+  const unquoted = tag.match(new RegExp("\\b" + name + "\\s*=\\s*([^\\s>]+)", "i"));
+  const value = doubleQuoted?.[1] ?? singleQuoted?.[1] ?? unquoted?.[1] ?? "";
   return value ? decodeHtml(value) : "";
 }
-
 function parseSearchResults(html: string): SearchResult[] {
   const anchors = [...html.matchAll(/<a\b(?=[^>]*\bclass=["'][^"']*(?:result__a|result-link)[^"']*["'])[^>]*>[\s\S]*?<\/a>/gi)];
   const snippets = [...html.matchAll(/<(?:a|div)\b(?=[^>]*\bclass=["'][^"']*(?:result__snippet|result-snippet)[^"']*["'])[^>]*>([\s\S]*?)<\/(?:a|div)>/gi)];
