@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import hashlib
+import html as html_lib
 import random
 import re
 import sqlite3
@@ -13,6 +14,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -95,6 +97,15 @@ def market_stats(db, qkey, grp, exclude_id, since):
         if len(prices) >= 4 else min(prices)
     )
     return len(prices), median_price, lower_quartile
+
+def market_price_samples(db, qkey, grp, exclude_id, since):
+    sql = "SELECT price FROM listings WHERE qkey=? AND last_seen>=? AND id!=?"
+    args = [qkey, since, exclude_id]
+    if grp is not None:
+        sql += " AND grp=?"
+        args.append(grp)
+    return [float(row[0]) for row in db.execute(sql, args)]
+
 
 def fetch_marktplaats_v2(cfg, query, pages):
     """Fallback to the documented Marktplaats v2 search endpoint."""
@@ -891,128 +902,320 @@ def get_ai_search_variants(db, q):
 
 
 
-def get_ai_market_reference(db, q):
-    """Use Gemini Google Search grounding for a cached, evidence-based market reference."""
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key or not q.get("ai_discovery"):
+def _web_decode(value):
+    return html_lib.unescape(value or "")
+
+def _web_strip_html(value):
+    value = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", " ", value or "", flags=re.I)
+    value = re.sub(r"<style\b[^>]*>[\s\S]*?</style>", " ", value, flags=re.I)
+    return re.sub(r"\s+", " ", _web_decode(re.sub(r"<[^>]+>", " ", value))).strip()
+
+def _web_attr(tag, name):
+    match = re.search(r"(?<![\w:-])" + re.escape(name) + r"\s*=\s*([\"'])(.*?)\1", tag, re.I | re.S)
+    return _web_decode(match.group(2)) if match else ""
+
+def _safe_web_url(value):
+    try:
+        parsed = urllib.parse.urlparse(value)
+        host = (parsed.hostname or "").lower()
+        return parsed.scheme == "https" and "." in host and host != "localhost" and not host.endswith((".local", ".internal")) and not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", host)
+    except Exception:
+        return False
+
+def _unwrap_duckduckgo_url(value):
+    try:
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(value).query)
+        return params["uddg"][0] if params.get("uddg") else value
+    except Exception:
+        return value
+
+def parse_web_search_results(document):
+    anchors = list(re.finditer(r"<a\b[^>]*class=[\"'][^\"']*result__a[^\"']*[\"'][^>]*>[\s\S]*?</a>", document or "", re.I))
+    snippets = list(re.finditer(r"<(?:a|div)\b[^>]*class=[\"'][^\"']*result__snippet[^\"']*[\"'][^>]*>([\s\S]*?)</(?:a|div)>", document or "", re.I))
+    results, seen = [], set()
+    for index, match in enumerate(anchors[:10]):
+        tag_match = re.match(r"<a\b[^>]*>", match.group(0), re.I)
+        tag = tag_match.group(0) if tag_match else ""
+        url = _unwrap_duckduckgo_url(_web_attr(tag, "href"))
+        title = _web_strip_html(re.sub(r"^<a\b[^>]*>|</a>$", "", match.group(0), flags=re.I))
+        snippet = _web_strip_html(snippets[index].group(1)) if index < len(snippets) else ""
+        if title and _safe_web_url(url) and url not in seen:
+            seen.add(url)
+            results.append({"title": title[:220], "url": url, "snippet": snippet[:900]})
+    return results
+
+def search_external_web(query):
+    """Search Dutch websites without Gemini Search Grounding or a paid search API."""
+    address = "https://html.duckduckgo.com/html/?kl=nl-nl&q=" + urllib.parse.quote_plus(query)
+    request = urllib.request.Request(address, headers={
+        **HEADERS, "User-Agent": "Mozilla/5.0 (compatible; DealRadarMarketResearch/1.0)",
+        "Accept": "text/html,application/xhtml+xml",
+    })
+    with urllib.request.urlopen(request, timeout=7) as response:
+        if getattr(response, "status", 200) != 200:
+            raise RuntimeError("DuckDuckGo HTTP " + str(response.status))
+        return parse_web_search_results(response.read().decode("utf-8", errors="replace"))
+
+def _parse_euro_amount(raw):
+    value = re.sub(r"[^\d.,]", "", str(raw or "")).replace(" ", "")
+    if not value:
         return None
+    if "," in value and "." in value:
+        value = value.replace(".", "").replace(",", ".")
+    elif "," in value:
+        value = value.replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}(?:\.\d{3})+", value):
+        value = value.replace(".", "")
+    try:
+        amount = float(value)
+        return round(amount, 2) if 10 <= amount <= 50000 else None
+    except (TypeError, ValueError):
+        return None
+
+def _visible_euro_prices(text):
+    found = []
+    for pattern in (
+        r"€\s*([0-9][0-9.\s]*(?:,[0-9]{1,2})?)",
+        r"\bEUR\s*([0-9][0-9.\s]*(?:,[0-9]{1,2})?)",
+        r"([0-9][0-9.\s]*(?:,[0-9]{1,2})?)\s*EUR\b",
+    ):
+        for match in re.finditer(pattern, text or "", re.I):
+            amount = _parse_euro_amount(match.group(1))
+            if amount is not None and amount not in found:
+                found.append(amount)
+    return found
+
+def _structured_euro_prices(document):
+    found = []
+    metas = re.findall(r"<meta\b[^>]*>", document or "", re.I)
+    currency = ""
+    for tag in metas:
+        key = (_web_attr(tag, "property") or _web_attr(tag, "name") or "").lower()
+        if key in ("product:price:currency", "pricecurrency", "og:price:currency"):
+            currency = _web_attr(tag, "content").upper()
+    for tag in metas:
+        key = (_web_attr(tag, "property") or _web_attr(tag, "name") or "").lower()
+        if "price" not in key:
+            continue
+        tag_currency = (_web_attr(tag, "currency") or currency).upper()
+        if tag_currency and tag_currency != "EUR":
+            continue
+        amount = _parse_euro_amount(_web_attr(tag, "content"))
+        if amount is not None and amount not in found:
+            found.append(amount)
+    scripts = re.findall(r"<script\b[^>]*type=[\"']application/ld\+json[\"'][^>]*>([\s\S]*?)</script>", document or "", re.I)
+    def visit(value, depth=0):
+        if depth > 9:
+            return
+        if isinstance(value, list):
+            for child in value:
+                visit(child, depth + 1)
+        elif isinstance(value, dict):
+            offers = value.get("offers")
+            if offers is not None:
+                for offer in (offers if isinstance(offers, list) else [offers]):
+                    if not isinstance(offer, dict):
+                        continue
+                    offer_currency = str(offer.get("priceCurrency") or offer.get("price_currency") or "").upper()
+                    if offer_currency and offer_currency != "EUR":
+                        continue
+                    amount = _parse_euro_amount(offer.get("price") or offer.get("lowPrice"))
+                    if amount is not None and amount not in found:
+                        found.append(amount)
+            for child in value.values():
+                if isinstance(child, (dict, list)):
+                    visit(child, depth + 1)
+    for script in scripts:
+        try:
+            visit(json.loads(script))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return found
+
+_WEB_USED_HOSTS = ("marktplaats.nl", "ebay.nl", "ebay.de", "2dehands.be", "kleinanzeigen.de")
+_WEB_NEW_HOSTS = ("coolblue.nl", "bol.com", "mediamarkt.nl", "amazon.nl", "alternate.nl", "cameranu.nl", "kamera-express.nl", "expert.nl", "kieskeurig.nl")
+_WEB_REFURBISHED_HOSTS = ("backmarket.nl", "refurbed.nl", "rebuy.nl")
+_WEB_USED_WORDS = re.compile(r"\b(tweedehands|gebruikt|used|pre-owned|occasion|vraag\s*&\s*aanbod)\b", re.I)
+_WEB_NEW_WORDS = re.compile(r"\b(nieuw|new|sealed|geseald|ongeopend|nieuwprijs)\b", re.I)
+_WEB_REFURBISHED_WORDS = re.compile(r"\b(refurbished|reconditioned|renewed|gereviseerd|refurb)\b", re.I)
+_WEB_BAD_WORDS = re.compile(r"\b(case only|hoesje|oplaadcase alleen|charging case only|onderdelen|onderdeel|losse lens|lens only|battery only|accu only|charger only|lader alleen|defect|kapot|reparatie|parts only|for parts|empty box|lege doos)\b", re.I)
+
+def _web_condition(url, text):
+    parsed = urllib.parse.urlparse(url)
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    if any(host == item or host.endswith("." + item) for item in _WEB_REFURBISHED_HOSTS) or _WEB_REFURBISHED_WORDS.search(text):
+        return "refurbished"
+    if _WEB_NEW_WORDS.search(text):
+        return "new"
+    if any(host == item or host.endswith("." + item) for item in _WEB_NEW_HOSTS):
+        return "new"
+    if host == "tweakers.net" and "/aanbod/" in parsed.path.lower():
+        return "used"
+    if any(host == item or host.endswith("." + item) for item in _WEB_USED_HOSTS) or _WEB_USED_WORDS.search(text):
+        return "used"
+    return "unknown"
+
+def fetch_external_market_offer(row, q):
+    """Fetch a real result page and extract its visible or structured EUR price."""
+    url = row.get("url", "")
+    if not _safe_web_url(url):
+        return None
+    document, final_url = "", url
+    try:
+        request = urllib.request.Request(url, headers={
+            **HEADERS, "User-Agent": "Mozilla/5.0 (compatible; DealRadarMarketResearch/1.0)",
+            "Accept": "text/html,application/xhtml+xml",
+        })
+        with urllib.request.urlopen(request, timeout=5) as response:
+            final_url = response.geturl() if hasattr(response, "geturl") else url
+            if _safe_web_url(final_url):
+                document = response.read(850000).decode("utf-8", errors="replace")
+    except Exception:
+        pass
+    page_text = _web_strip_html(document)[:9000]
+    identity_text = " ".join((row.get("title", ""), row.get("snippet", ""), page_text[:3500]))
+    if _WEB_BAD_WORDS.search(identity_text) or not title_matches_query(q, identity_text):
+        return None
+    group = group_of(q, identity_text)
+    if (q.get("strict_group") or q.get("group_regex") or q.get("group_type") in ("model_required", "television")) and group == "unknown":
+        return None
+    condition = _web_condition(final_url, identity_text)
+    if condition not in ("used", "new"):
+        return None
+    structured = _structured_euro_prices(document)
+    visible = _visible_euro_prices(" ".join((row.get("title", ""), row.get("snippet", ""), page_text)))
+    price = structured[0] if structured else (visible[0] if visible else None)
+    if price is None:
+        return None
+    host = (urllib.parse.urlparse(final_url).hostname or "").lower().removeprefix("www.")
+    return {
+        "title": str(row.get("title") or host)[:220], "url": final_url, "domain": host,
+        "price_eur": round(float(price), 2), "condition": condition, "group": group,
+        "snippet": str(row.get("snippet") or "")[:500],
+    }
+
+def _readable_market_group(group):
+    return " ".join(re.findall(r"[a-z]+|[0-9]+", str(group or "").lower())).replace("gb", " gb").replace("tb", " tb")
+
+def _market_median(values):
+    return round(float(statistics.median(values)), 2) if values else None
+
+def _market_lower_quartile(values):
+    if not values:
+        return None
+    if len(values) < 4:
+        return round(float(min(values)), 2)
+    return round(float(statistics.quantiles(values, n=4, method="inclusive")[0]), 2)
+
+def get_web_market_reference(db, q, candidate_groups=None, cfg=None):
+    """Cache independent Dutch used/new observations; never calls Gemini Search Grounding."""
+    cfg = cfg or {}
+    settings = cfg.get("web_market_search", {})
     qkey = str(q.get("key") or "")
+    groups = sorted({str(group) for group in (candidate_groups or []) if group and group != "unknown"})
+    group_terms = [_readable_market_group(group) for group in groups[:8]]
+    anchors = [str(q.get("query") or q.get("label") or "").strip()]
+    anchors.extend(str(value).strip() for value in (q.get("search_variants") or [])[:4] if str(value).strip())
+    anchors = list(dict.fromkeys(value for value in anchors if value))
+    if not anchors:
+        return {"sources": [], "used_price_eur": None, "new_price_eur": None, "confidence": 0.0, "sample_count": 0, "rationale": ""}
+    target = " OR ".join('"' + value.replace('"', "")[:100] + '"' for value in anchors[:4])
+    if group_terms:
+        target += " OR " + " OR ".join('"' + value.replace('"', "")[:80] + '"' for value in group_terms[:6])
+    used_query = "(" + target + ") (tweedehands OR gebruikt OR occasion OR used) Nederland EUR"
+    new_query = "(" + target + ") (nieuw OR nieuwprijs OR kopen OR new) Nederland EUR"
     fingerprint_data = {
-        "query": q.get("query"), "label": q.get("label"),
-        "include_any": q.get("include_any", []),
-        "search_variants": q.get("search_variants", []),
-        "group_regex": q.get("group_regex"),
+        "provider": "duckduckgo-html-v1", "query": q.get("query"), "label": q.get("label"),
+        "include_any": q.get("include_any", []), "search_variants": q.get("search_variants", []),
+        "require_regex": q.get("require_regex"), "group_regex": q.get("group_regex"),
+        "exclude": q.get("exclude", []), "exclude_regex": q.get("exclude_regex", []),
+        "used_query": used_query, "new_query": new_query,
     }
     fingerprint = hashlib.sha256(json.dumps(fingerprint_data, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     now = int(time.time())
     cached = db.execute(
         "SELECT fingerprint, used_price_eur, new_price_eur, confidence, sample_count, rationale, sources_json, checked_at "
-        "FROM ai_market_references WHERE qkey=?",
-        (qkey,),
+        "FROM ai_market_references WHERE qkey=?", (qkey,),
     ).fetchone()
     if cached and cached[0] == fingerprint:
-        ttl = 86400 if (cached[1] or cached[2]) else 21600
+        cached_sources = cached[6] or "[]"
+        ttl = max(1, int(settings.get("cache_success_hours", 18))) * 3600 if cached_sources not in ("", "[]") else max(1, int(settings.get("cache_empty_hours", 2))) * 3600
         if now - int(cached[7]) < ttl:
             try:
                 return {
                     "used_price_eur": cached[1], "new_price_eur": cached[2],
                     "confidence": float(cached[3]), "sample_count": int(cached[4]),
-                    "rationale": cached[5] or "", "sources": json.loads(cached[6] or "[]"),
+                    "rationale": cached[5] or "", "sources": json.loads(cached_sources),
                 }
             except (TypeError, ValueError, json.JSONDecodeError):
                 pass
-
-    schema = {
-        "type": "object",
-        "properties": {
-            "used_price_eur": {"type": "number"},
-            "new_price_eur": {"type": "number"},
-            "confidence": {"type": "number"},
-            "sample_count": {"type": "integer"},
-            "rationale": {"type": "string"},
-        },
-        "required": ["used_price_eur", "new_price_eur", "confidence", "sample_count", "rationale"],
-    }
-    system = (
-        "You are a conservative Dutch product-market pricing analyst. Use Google Search grounding to research "
-        "the exact product model and current Netherlands/EU prices in EUR. Separate ordinary used/private-seller "
-        "prices from new retail prices; do not mix refurbished products into ordinary used prices. Preserve exact "
-        "generation, model code, storage, size and bundle. Ignore accessories, parts, damaged goods and unrelated "
-        "variants. Return realistic conservative asking-price estimates supported by current search evidence. "
-        "Never invent prices, observations, availability or sources. Return 0 for an estimate when evidence is weak. "
-        "sample_count means comparable price observations actually verified, not search-result count. Return JSON only."
-    )
-    user = json.dumps({
-        "target": {
-            "key": q.get("key"), "label": q.get("label"), "query": q.get("query"),
-            "search_variants": q.get("search_variants", []),
-            "include_any": q.get("include_any", []), "group_regex": q.get("group_regex"),
-            "exclude": q.get("exclude", []),
-        },
-        "market": "Netherlands", "currency": "EUR",
-        "task": "Estimate current ordinary used-market price and new-retail price separately.",
-    }, ensure_ascii=False)
-    model = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
-    endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + urllib.parse.quote(model, safe="") + ":generateContent"
-    payload = {
-        "systemInstruction": {"parts": [{"text": system}]},
-        "contents": [{"role": "user", "parts": [{"text": user}]}],
-        "tools": [{"google_search": {}}],
-        "generationConfig": {
-            "temperature": 0.1, "maxOutputTokens": 900,
-            "responseMimeType": "application/json",
-            "responseSchema": _structured_schema(schema),
-        },
-    }
-    try:
-        request = urllib.request.Request(
-            endpoint, data=json.dumps(payload).encode("utf-8"),
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"}, method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=18) as response:
-            data = json.load(response)
-        candidate = data.get("candidates", [{}])[0]
-        raw = "".join(part.get("text", "") for part in candidate.get("content", {}).get("parts", []))
-        parsed = json.loads(raw)
-        def valid_price(value):
+    rows, errors = [], []
+    per_condition = max(3, min(6, int(settings.get("results_per_condition", 3))))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(search_external_web, query) for query in (used_query, new_query)]
+        for future in as_completed(futures):
             try:
-                number = float(value)
-                return round(number, 2) if 10 <= number <= 50000 else None
-            except (TypeError, ValueError):
-                return None
-        used_price = valid_price(parsed.get("used_price_eur"))
-        new_price = valid_price(parsed.get("new_price_eur"))
-        confidence = max(0.0, min(1.0, float(parsed.get("confidence") or 0)))
-        sample_count = max(0, min(100, int(parsed.get("sample_count") or 0)))
-        sources = []
-        metadata = candidate.get("groundingMetadata") or {}
-        for chunk in metadata.get("groundingChunks", []):
-            web = chunk.get("web") or {}
-            url = str(web.get("uri") or "")
-            if url.startswith("https://") and url not in {x["url"] for x in sources}:
-                sources.append({"title": str(web.get("title") or "Google Search source")[:180], "url": url})
-        sources = sources[:8]
-        rationale = str(parsed.get("rationale") or "")[:700]
-    except Exception as exc:
-        log(f"[{qkey}] Gemini Google Search pricing unavailable: {type(exc).__name__}: {str(exc)[:120]}")
-        used_price, new_price, confidence, sample_count, rationale, sources = None, None, 0.0, 0, "", []
-
+                rows.extend(future.result()[:per_condition])
+            except Exception as exc:
+                errors.append(type(exc).__name__ + ": " + str(exc)[:100])
+    unique_rows = list({row["url"]: row for row in rows if row.get("url")}.values())[:12]
+    offers = []
+    workers = max(2, min(8, int(settings.get("page_fetch_workers", 8))))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(fetch_external_market_offer, row, q) for row in unique_rows]
+        for future in as_completed(futures):
+            try:
+                offer = future.result()
+                if offer and not any(existing["url"] == offer["url"] for existing in offers):
+                    offers.append(offer)
+            except Exception:
+                continue
+    offers.sort(key=lambda item: (item.get("condition") != "used", item.get("domain", ""), item.get("price_eur", 0)))
+    used = [item for item in offers if item.get("condition") == "used"]
+    new = [item for item in offers if item.get("condition") == "new"]
+    new_domains = {item.get("domain") for item in new if item.get("domain")}
+    confidence = 0.82 if len(used) >= 8 else (0.68 if len(used) >= 3 else (0.66 if len(new_domains) >= 2 else 0.0))
+    rationale = f"Внешний поиск: {len(used)} цен подержанных товаров и {len(new)} цен новых товаров из найденных страниц."
+    if errors and not offers:
+        log(f"[{qkey}] внешний поиск цен временно недоступен: {'; '.join(errors[:2])}")
     db.execute(
         "INSERT OR REPLACE INTO ai_market_references "
         "(qkey,fingerprint,used_price_eur,new_price_eur,confidence,sample_count,rationale,sources_json,checked_at) "
         "VALUES(?,?,?,?,?,?,?,?,?)",
-        (qkey, fingerprint, used_price, new_price, confidence, sample_count, rationale,
-         json.dumps(sources, ensure_ascii=False), now),
+        (qkey, fingerprint, _market_median([item["price_eur"] for item in used]),
+         _market_median([item["price_eur"] for item in new]), confidence, len(used),
+         rationale, json.dumps(offers, ensure_ascii=False), now),
     )
     db.commit()
-    if used_price or new_price:
-        log(f"[{qkey}] Gemini Google Search market reference: used={used_price}, new={new_price}, "
-            f"confidence={confidence:.0%}, samples={sample_count}, sources={len(sources)}")
+    if offers:
+        log(f"[{qkey}] внешний рынок: б/у={len(used)}, новые={len(new)}, ссылок={len(offers)}")
     return {
-        "used_price_eur": used_price, "new_price_eur": new_price,
-        "confidence": confidence, "sample_count": sample_count,
-        "rationale": rationale, "sources": sources,
+        "used_price_eur": _market_median([item["price_eur"] for item in used]),
+        "new_price_eur": _market_median([item["price_eur"] for item in new]),
+        "confidence": confidence, "sample_count": len(used), "rationale": rationale, "sources": offers,
     }
+
+def web_market_reference_for_group(web_data, group, q):
+    if not web_data or group == "unknown":
+        return {"used_prices": [], "new_prices": [], "new_sources": [], "sources": [], "confidence": 0.0, "new_domain_count": 0}
+    strict = bool(q.get("strict_group") or q.get("group_regex") or q.get("group_type") in ("model_required", "television"))
+    sources = [item for item in (web_data.get("sources") or []) if isinstance(item, dict)
+               and (item.get("group") == group if strict else item.get("group") in (group, "all"))]
+    used_sources = [item for item in sources if item.get("condition") == "used"
+                    and not str(item.get("domain") or "").endswith("marktplaats.nl")
+                    and isinstance(item.get("price_eur"), (int, float))]
+    new_sources = [item for item in sources if item.get("condition") == "new"
+                   and isinstance(item.get("price_eur"), (int, float))]
+    new_domains = {str(item.get("domain") or "") for item in new_sources if item.get("domain")}
+    return {
+        "used_prices": [float(item["price_eur"]) for item in used_sources],
+        "new_prices": [float(item["price_eur"]) for item in new_sources],
+        "new_sources": new_sources, "sources": sources,
+        "confidence": 0.82 if len(used_sources) >= 8 else (0.68 if len(used_sources) >= 3 else (0.66 if len(new_domains) >= 2 else 0.0)),
+        "new_domain_count": len(new_domains),
+        "rationale": web_data.get("rationale") or "Оценка по найденным внешним страницам.",
+    }
+
 
 def review_listings_with_ai(db, q, items, max_new=None):
     """Use cached AI decisions; only send new/changed listings to the model."""
@@ -1212,10 +1415,10 @@ def make_feed_deal(q, it, med, discount, flags, grp, status, market_samples, rea
 def run_once(cfg, db, dry=False):
     stored_version = db.execute("SELECT v FROM meta WHERE k='scanner_version'").fetchone()
     if not stored_version or stored_version[0] != SCANNER_DATA_VERSION:
-        db.execute("DELETE FROM listings")
+        # Rule revisions must never erase accumulated market observations.
         db.execute("INSERT OR REPLACE INTO meta(k,v) VALUES('scanner_version',?)", (SCANNER_DATA_VERSION,))
         db.commit()
-        log("версия правил изменилась — старая история сравнения очищена")
+        log("версия правил обновлена — история рыночных сравнений сохранена")
 
     now = int(time.time())
     window = now - cfg.get("market_days", 21) * 86400
@@ -1235,6 +1438,7 @@ def run_once(cfg, db, dry=False):
         "candidatePreliminary": 0, "retailProxyEvaluated": 0,
         "aiReviewed": 0, "aiRejected": 0, "aiRescued": 0,
         "aiSearchPlans": 0, "aiSearchVariants": 0,
+        "webSearchGroups": 0, "webPriceOffers": 0, "cachedCandidatesReevaluated": 0,
     }
     queries_by_key = {q["key"]: q for q in cfg["queries"]}
     feed_deals = {}
@@ -1288,10 +1492,9 @@ def run_once(cfg, db, dry=False):
                 metrics["aiSearchVariants"] += len(ai_variants)
             raw = fetch_query(cfg, search_q, pages)
         except Exception as exc:
-            log(f"[{qkey}] ошибка запроса: {exc}")
+            log(f"[{qkey}] ошибка запроса Marktplaats: {exc}; переоцениваю сохранённые объявления и веб-источники")
             fails += 1
-            time.sleep(random.uniform(2, 4))
-            continue
+            raw = []
         metrics["checked"] += len(raw)
         if q.get("key") == "rayban":
             log(f"[{qkey}] rows={len(raw)} variants={len(q.get('search_variants') or [q.get('query')])}")
@@ -1382,64 +1585,123 @@ def run_once(cfg, db, dry=False):
             candidates[listing_id] = (item, group, flags)
         db.commit()
 
-        # Google Search pricing is cached for 24 hours per exact scanner query.
-        # Marktplaats observations remain primary whenever enough local comparables exist.
-        web_reference = get_ai_market_reference(db, q)
+        # Revisit recent cached candidates if Marktplaats paging omits them or returns HTTP 403.
+        cached_cutoff = now - 24 * 3600
+        for cached_deal in list(feed_deals.values()):
+            cached_id = str(cached_deal.get("listing_id") or "")
+            if not cached_id or cached_id in candidates or cached_deal.get("category_key") != qkey:
+                continue
+            if cached_deal.get("status") != "candidate" or cached_deal.get("active") is False:
+                continue
+            detected = parse_listing_datetime(cached_deal.get("detected_at"))
+            if detected is None or detected.timestamp() < cached_cutoff:
+                continue
+            cached_title = str(cached_deal.get("title") or "")
+            cached_description = str(cached_deal.get("description") or "")
+            cached_text = cached_title + " " + cached_description
+            if not title_matches_query(q, cached_text if q.get("match_description") else cached_title):
+                continue
+            cached_price = cached_deal.get("price")
+            if not isinstance(cached_price, (int, float)) or cached_price <= 0:
+                continue
+            cached_item = {
+                "id": cached_id, "title": cached_title, "description": cached_description,
+                "text": cached_text, "price": float(cached_price),
+                "url": str(cached_deal.get("listing_url") or ""),
+                "city": str(cached_deal.get("city") or ""),
+                "dist_km": cached_deal.get("distance_km"),
+                "date": cached_deal.get("posted_at") or cached_deal.get("detected_at"),
+                "image_url": cached_deal.get("image_url"),
+            }
+            cached_flags = cached_deal.get("warning_flags") if isinstance(cached_deal.get("warning_flags"), list) else []
+            if risks(cached_item) is None:
+                continue
+            cached_group = str(cached_deal.get("model_group") or group_of(q, cached_text))
+            candidates[cached_id] = (cached_item, cached_group, cached_flags)
+            if isinstance(cached_deal.get("ai_review"), dict):
+                ai_decisions.setdefault(cached_id, cached_deal["ai_review"])
+            metrics["cachedCandidatesReevaluated"] += 1
+        db.commit()
+
+        # Search outside websites and cache actual new/used price observations.
+        candidate_groups = [group for _item, group, _flags in candidates.values()]
+        web_market_data = get_web_market_reference(db, q, candidate_groups, cfg)
+        if web_market_data.get("sources"):
+            metrics["webSearchGroups"] += 1
+            metrics["webPriceOffers"] += len(web_market_data["sources"])
 
         for listing_id, (item, group, flags) in candidates.items():
             metrics["candidates"] += 1
-            if group == "unknown":
-                sample_count, median_price, lower_quartile_price = 0, None, None
-            else:
-                sample_count, median_price, lower_quartile_price = market_stats(db, qkey, group, listing_id, window)
+            local_prices = [] if group == "unknown" else market_price_samples(db, qkey, group, listing_id, window)
+            sample_count = len(local_prices)
+            median_price = _market_median(local_prices)
+            lower_quartile_price = _market_lower_quartile(local_prices)
             strict_comparison = bool(q.get("strict_group") or q.get("group_regex")
                                      or q.get("group_type") in ("model_required", "television"))
             if group != "all" and not strict_comparison and sample_count < min_n:
-                category_count, category_median, category_lower_quartile = market_stats(db, qkey, None, listing_id, window)
-                if category_count >= min_n and category_median is not None:
-                    sample_count, median_price, lower_quartile_price = category_count, category_median, category_lower_quartile
+                category_prices = market_price_samples(db, qkey, None, listing_id, window)
+                if len(category_prices) >= min_n:
+                    local_prices = category_prices
+                    sample_count = len(local_prices)
+                    median_price = _market_median(local_prices)
+                    lower_quartile_price = _market_lower_quartile(local_prices)
+
+            web_reference = web_market_reference_for_group(web_market_data, group, q)
+            external_used_prices = list(web_reference.get("used_prices") or [])
+            external_new_prices = list(web_reference.get("new_prices") or [])
+            if group != "unknown" and external_used_prices:
+                combined_prices = local_prices + external_used_prices
+                sample_count = len(combined_prices)
+                median_price = _market_median(combined_prices)
+                lower_quartile_price = _market_lower_quartile(combined_prices)
+                reference_type = "web_used"
+            else:
+                reference_type = "marktplaats" if median_price is not None else "insufficient_data"
+
             status, discount, reason = "candidate", None, None
-            reference_type = "marktplaats" if median_price is not None else "insufficient_data"
             reference = None
             new_price = None
-            # Verified valuations use the lower quartile of exact matches, not the optimistic median.
-            valuation_price = (
-                lower_quartile_price
-                if sample_count >= min_n and lower_quartile_price is not None
-                else median_price
-            )
+            valuation_price = lower_quartile_price if sample_count >= min_n and lower_quartile_price is not None else median_price
+            market_source_rows = list(web_reference.get("sources") or [])
+            new_evidence_count = 0
+
             if (sample_count < candidate_min_n or median_price is None) and group != "unknown":
-                reference = find_retail_reference(q, group, retail_references, cfg)
-                if reference:
-                    new_price = float(reference["new_price_eur"])
+                static_reference = find_retail_reference(q, group, retail_references, cfg)
+                external_new_sources = list(web_reference.get("new_sources") or [])
+                external_new_domains = {str(source.get("domain") or "") for source in external_new_sources if source.get("domain")}
+                required_new_sources = max(2, int(cfg.get("web_market_search", {}).get("min_new_sources", 2)))
+                if len(external_new_domains) >= required_new_sources:
+                    new_price = _market_median(external_new_prices)
+                    new_evidence_count = len(external_new_domains)
                     valuation_price = new_price
                     reference_type = "new_retail"
-                    metrics["retailProxyEvaluated"] += 1
-                elif web_reference and web_reference.get("confidence", 0) >= 0.65:
-                    web_samples = int(web_reference.get("sample_count") or 0)
-                    if web_reference.get("used_price_eur") and web_samples >= candidate_min_n:
-                        valuation_price = float(web_reference["used_price_eur"])
-                        sample_count = max(sample_count, web_samples)
-                        reference_type = "ai_web_used"
-                        reference = {
-                            "source_url": (web_reference.get("sources") or [{}])[0].get("url", ""),
-                            "rationale": web_reference.get("rationale", ""),
-                            "grounded": True,
-                            "resale_factor": cfg.get("profitability", {}).get("market_resale_factor", 0.95),
-                        }
-                    elif web_reference.get("new_price_eur"):
-                        new_price = float(web_reference["new_price_eur"])
-                        valuation_price = new_price
-                        reference_type = "new_retail"
-                        reference = {
-                            "new_price_eur": new_price,
-                            "source_url": (web_reference.get("sources") or [{}])[0].get("url", ""),
-                            "checked_at": datetime.now(timezone.utc).isoformat(),
-                            "resale_factor": q.get("new_resale_factor", cfg.get("profitability", {}).get("new_resale_factor", 0.62)),
-                            "grounded": True,
-                            "rationale": web_reference.get("rationale", ""),
-                        }
-                        metrics["retailProxyEvaluated"] += 1
+                    reference = {
+                        "new_price_eur": new_price,
+                        "source_url": external_new_sources[0].get("url", ""),
+                        "checked_at": datetime.now(timezone.utc).isoformat(),
+                        "resale_factor": q.get("new_resale_factor", cfg.get("profitability", {}).get("new_resale_factor", 0.62)),
+                        "grounded": True,
+                        "evidence_count": new_evidence_count,
+                        "rationale": "Новая розничная цена сверена по независимым внешним магазинам.",
+                    }
+                    market_source_rows = external_new_sources
+                elif static_reference:
+                    new_price = float(static_reference["new_price_eur"])
+                    new_evidence_count = 1
+                    valuation_price = new_price
+                    reference_type = "new_retail"
+                    reference = {
+                        **static_reference, "grounded": True, "evidence_count": 1,
+                        "rationale": "Есть один сохранённый розничный источник; нужна независимая проверка.",
+                    }
+                    market_source_rows = [{
+                        "title": str(static_reference.get("product") or "Retail reference"),
+                        "url": str(static_reference.get("source_url") or ""),
+                        "domain": str(urllib.parse.urlparse(str(static_reference.get("source_url") or "")).hostname or ""),
+                        "price_eur": new_price,
+                        "condition": "new",
+                    }]
+
             if valuation_price is not None:
                 economics = calculate_resale_economics(q, item["price"], valuation_price, sample_count, reference_type, reference, cfg)
                 market_display_price = economics["expected_resale_price"] if reference_type == "new_retail" else valuation_price
@@ -1449,30 +1711,14 @@ def run_once(cfg, db, dry=False):
 
             model_year = television_model_year(item["text"]) if q.get("group_type") == "television" else None
             if reference_type == "new_retail":
-                if economics and economics["profitable"] and economics["estimated_profit"] >= 50:
+                enough_new_evidence = new_evidence_count >= max(2, int(cfg.get("web_market_search", {}).get("min_new_sources", 2)))
+                if enough_new_evidence and economics and economics["profitable"] and economics["estimated_profit"] >= 50:
                     status = "strong" if economics["profit_roi"] >= 0.50 and economics["estimated_profit"] >= max(50, economics["minimum_profit_required"] * 1.5) else "good"
                     metrics["strongDeals" if status == "strong" else "goodDeals"] += 1
-                    reason = "Оценка по актуальной цене нового товара с запасом на торг и расходы"
+                    reason = "Оценка по нескольким независимым розничным источникам с запасом на торг и расходы"
                 else:
                     metrics["reviewCandidates"] += 1
-                    reason = "Нет достаточной прибыли при консервативной оценке перепродажи от цены нового товара"
-            elif reference_type == "ai_web_used" and valuation_price is not None:
-                discount = 1 - item["price"] / valuation_price
-                deal_threshold = float(q.get("threshold", 0.25))
-                good_threshold = float(q.get("good_threshold", max(0.12, deal_threshold - 0.08)))
-                if sample_count >= min_n and economics and economics["profitable"] and economics["estimated_profit"] >= 50 and discount >= deal_threshold and economics["profit_roi"] >= max(0.30, float(q.get("strong_min_roi", 0.30))):
-                    status = "strong"
-                    metrics["strongDeals"] += 1
-                    reason = "Gemini Google Search: " + str((web_reference or {}).get("rationale") or "оценка по сопоставимым веб-источникам")
-                elif sample_count >= min_n and economics and economics["profitable"] and economics["estimated_profit"] >= 50 and discount >= good_threshold:
-                    status = "good"
-                    metrics["goodDeals"] += 1
-                    reason = "Gemini Google Search: " + str((web_reference or {}).get("rationale") or "оценка по сопоставимым веб-источникам")
-                else:
-                    status = "candidate"
-                    metrics["reviewCandidates"] += 1
-                    metrics["candidatePreliminary"] += 1
-                    reason = "Предварительная оценка Gemini Google Search: " + str((web_reference or {}).get("rationale") or "нужна дополнительная проверка")
+                    reason = "Нужно независимое подтверждение цены нового товара или дополнительные сопоставимые б/у предложения"
             elif sample_count >= min_n and median_price is not None:
                 discount = 1 - item["price"] / median_price
                 deal_threshold = float(q.get("threshold", 0.25))
@@ -1516,8 +1762,8 @@ def run_once(cfg, db, dry=False):
             feed_deals[listing_id] = make_feed_deal(
                 q, item, market_display_price, discount, flags, group, status, sample_count, reason,
                 economics=economics, reference_type=reference_type, new_price=new_price, model_year=model_year,
-                market_median_price=median_price if reference_type == "marktplaats" else None,
-                market_sources=(web_reference or {}).get("sources", []) if reference and reference.get("grounded") else []
+                market_median_price=median_price if reference_type in ("marktplaats", "web_used") else None,
+                market_sources=market_source_rows[:12]
             )
             if ai_decision:
                 feed_deals[listing_id]["ai_review"] = {
@@ -1538,6 +1784,9 @@ def run_once(cfg, db, dry=False):
     if fails == len(cfg["queries"]):
         log("все запросы к Marktplaats не удались — каталог не обновлён")
         return False
+    if fails == len(cfg["queries"]) and not feed_deals:
+        log("все запросы и внешние источники недоступны — каталог не перезаписывается")
+        return False
     max_age_hours = cfg.get("max_age_hours", 720)
     current_deals = []
     for deal in feed_deals.values():
@@ -1557,7 +1806,6 @@ def run_once(cfg, db, dry=False):
         -float(d.get("profit_roi") if d.get("profit_roi") is not None else -1),
         d.get("detected_at") or "",
     ))
-    fresh_deals = fresh_deals[:500]
     now_iso = datetime.now(timezone.utc).isoformat()
     changed = fresh_deals != feed_doc.get("deals", [])
     primary_rejected = sum(metrics[key] for key in (
@@ -1585,9 +1833,11 @@ def run_once(cfg, db, dry=False):
         f"повторов {metrics['duplicates']}, первично принято {metrics['accepted']}, "
         f"кандидатов {metrics['candidates']}, сильных {metrics['strongDeals']}, "
         f"хороших {metrics['goodDeals']}, на проверке {metrics['reviewCandidates']}, "
-        f"новых выгодных {metrics['newDeals']}, Gemini-планов {metrics['aiSearchPlans']}, "
-        f"доп. запросов {metrics['aiSearchVariants']}, ошибок запросов {fails}")
-    return fails < len(cfg["queries"])
+        f"новых выгодных {metrics['newDeals']}, внешних страниц {metrics['webPriceOffers']}, "
+        f"переоценено сохранённых кандидатов {metrics['cachedCandidatesReevaluated']}, "
+        f"Gemini-планов {metrics['aiSearchPlans']}, доп. запросов {metrics['aiSearchVariants']}, "
+        f"ошибок Marktplaats {fails}")
+    return True
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)

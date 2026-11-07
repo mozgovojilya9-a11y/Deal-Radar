@@ -7,7 +7,6 @@ export const dynamic = "force-dynamic";
 const FEED_URL = process.env.DEALS_FEED_URL
   || "https://raw.githubusercontent.com/mozgovojilya9-a11y/Deal-Radar/deals-data/data/deals.json";
 const MAX_FEED_AGE_HOURS = 720;
-const MAX_DEALS = 500;
 const REVALIDATE_SECONDS = 60;
 
 function isDeal(value: unknown): value is Deal {
@@ -118,7 +117,6 @@ export async function GET(request: NextRequest) {
       if (sort === "discount") return (b.discount ?? -1) - (a.discount ?? -1);
       return (b.estimated_profit ?? -1) - (a.estimated_profit ?? -1);
     });
-    deals = deals.slice(0, MAX_DEALS);
 
     return NextResponse.json({
       deals,

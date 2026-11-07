@@ -6,6 +6,7 @@ on:
     paths:
       - "bot.py"
       - "config.json"
+      - "tests/**"
       - ".github/workflows/deals.yml"
   schedule:
     - cron: "*/10 * * * *"
@@ -45,7 +46,9 @@ jobs:
             echo "Branch deals-data does not exist yet; it will be created by the first run."
             echo '{"updatedAt":null,"deals":[]}' > data/deals.json
           fi
-      - name: Scan Marktplaats and update the JSON feed (Gemini free tier, rule-based fallback)
+      - name: Run offline scanner tests
+        run: python -m unittest discover -s tests -v
+      - name: Scan Marktplaats and update the JSON feed (external web market research)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: gemini-3.5-flash-lite

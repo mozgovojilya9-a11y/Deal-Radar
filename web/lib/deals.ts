@@ -11,13 +11,13 @@ export type Deal = {
   expected_resale_price?: number | null;
   estimated_profit?: number | null;
   profit_roi?: number | null;
-  price_reference_type?: "marktplaats" | "new_retail" | "insufficient_data";
+  price_reference_type?: "marktplaats" | "web_used" | "new_retail" | "insufficient_data";
   new_price?: number | null;
   model_year?: number | null;
   status?: DealStatus;
   market_confidence?: "high" | "preliminary" | "retail_proxy" | "none";
   market_samples?: number;
-  market_sources?: Array<{ title: string; url: string }>;
+  market_sources?: Array<{ title: string; url: string; domain?: string; price_eur?: number; condition?: "used" | "new" | "refurbished" }>;
   evaluation_reason?: string | null;
   category_key: string;
   category_label: string;

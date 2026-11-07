@@ -51,7 +51,8 @@ class ScannerTests(unittest.TestCase):
     def run_scan(self, listings, dry=False):
         db = bot.open_db()
         try:
-            with mock.patch.object(bot, "fetch_query", return_value=listings):
+            with mock.patch.object(bot, "fetch_query", return_value=listings), \
+                 mock.patch.object(bot, "get_web_market_reference", return_value={"sources": [], "rationale": ""}):
                 return bot.run_once(CFG, db, dry)
         finally:
             db.close()
@@ -537,6 +538,67 @@ class ScannerTests(unittest.TestCase):
         deals = bot.load_feed()["deals"]
         self.assertEqual([deal["listing_id"] for deal in deals], ["old-900"])
 
+
+    def test_scanner_version_change_preserves_market_observation_history(self):
+        db = bot.open_db()
+        now = int(time.time())
+        db.execute("INSERT INTO listings VALUES(?,?,?,?,?,?,?)", ("historic", "ps5", "all", "PS5 console", 400, now, now))
+        db.execute("INSERT OR REPLACE INTO meta(k,v) VALUES('scanner_version','3')")
+        db.commit()
+        db.close()
+        self.assertTrue(self.run_scan([]))
+        db = bot.open_db()
+        try:
+            row = db.execute("SELECT price FROM listings WHERE id='historic'").fetchone()
+            self.assertEqual(row[0], 400)
+        finally:
+            db.close()
+
+    def test_feed_has_no_fixed_500_product_cap(self):
+        now = datetime.now(timezone.utc).isoformat()
+        feed = {
+            "valuationVersion": bot.FEED_SCHEMA_VERSION,
+            "scannerVersion": bot.SCANNER_DATA_VERSION,
+            "updatedAt": now,
+            "deals": [
+                {"listing_id": f"cached-{index}", "title": f"PS5 console {index}",
+                 "description": "", "price": 200 + index, "market_price": None, "discount": None,
+                 "estimated_profit": None, "profit_roi": None, "status": "candidate",
+                 "category_key": "ps5", "category_label": "PlayStation 5", "model_group": "all",
+                 "listing_url": f"https://www.marktplaats.nl/v/cached-{index}", "warning_flags": [],
+                 "posted_at": now, "detected_at": now, "active": True}
+                for index in range(525)
+            ],
+        }
+        os.makedirs(os.path.dirname(os.environ["DEAL_FEED"]), exist_ok=True)
+        with open(os.environ["DEAL_FEED"], "w", encoding="utf-8") as handle:
+            json.dump(feed, handle)
+        self.assertTrue(self.run_scan([]))
+        self.assertEqual(len(bot.load_feed()["deals"]), 525)
+
+    def test_external_used_market_sources_can_confirm_and_are_saved(self):
+        now = datetime.now(timezone.utc).isoformat()
+        target = listing("external-deal", 150, now, title="PS5 console")
+        sources = [
+            {"title": "PS5 used listing A", "url": "https://www.ebay.nl/item/a", "domain": "ebay.nl",
+             "price_eur": 350, "condition": "used", "group": "all"},
+            {"title": "PS5 used listing B", "url": "https://www.2dehands.be/item/b", "domain": "2dehands.be",
+             "price_eur": 380, "condition": "used", "group": "all"},
+            {"title": "PS5 used listing C", "url": "https://www.tweakers.net/aanbod/c", "domain": "tweakers.net",
+             "price_eur": 400, "condition": "used", "group": "all"},
+        ]
+        db = bot.open_db()
+        try:
+            with mock.patch.object(bot, "fetch_query", return_value=[target]), \
+                 mock.patch.object(bot, "get_web_market_reference", return_value={"sources": sources, "rationale": "three external used offers"}):
+                self.assertTrue(bot.run_once(CFG, db))
+        finally:
+            db.close()
+        result = next(item for item in bot.load_feed()["deals"] if item["listing_id"] == "external-deal")
+        self.assertEqual(result["status"], "strong")
+        self.assertEqual(result["price_reference_type"], "web_used")
+        self.assertEqual(len(result["market_sources"]), 3)
+        self.assertEqual({item["condition"] for item in result["market_sources"]}, {"used"})
 
 if __name__ == "__main__":
     unittest.main()

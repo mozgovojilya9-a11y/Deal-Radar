@@ -1318,5 +1318,13 @@
     "retail_proxy_min_roi": 0.35,
     "retail_reference_max_age_days": 45
   },
-  "nationwide_search": true
+  "nationwide_search": true,
+  "web_market_search": {
+    "enabled": true,
+    "results_per_condition": 3,
+    "page_fetch_workers": 8,
+    "cache_success_hours": 18,
+    "cache_empty_hours": 2,
+    "min_new_sources": 2
+  }
 }
