@@ -1840,6 +1840,7 @@
     "concurrency": 3,
     "budget_ms": 35000,
     "cache_hours": 24,
-    "timeout_seconds": 1200
+    "timeout_seconds": 1200,
+    "grounding": false
   }
 }

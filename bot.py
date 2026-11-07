@@ -1870,7 +1870,8 @@ def run_external_research(requests, cfg):
     concurrency = int(settings.get("concurrency", 3))
     budget_ms = int(settings.get("budget_ms", 35000))
     timeout = min(int(settings.get("timeout_seconds", 1200)), 120 + (len(requests) * budget_ms) // (1000 * concurrency) + 60)
-    env = {**os.environ, "MARKET_CLI_CONCURRENCY": str(concurrency), "MARKET_CLI_BUDGET_MS": str(budget_ms)}
+    env = {**os.environ, "MARKET_CLI_CONCURRENCY": str(concurrency), "MARKET_CLI_BUDGET_MS": str(budget_ms),
+           "MARKET_CLI_GROUNDING": "1" if settings.get("grounding") else "0"}
     try:
         completed = subprocess.run(
             [node, "--no-warnings", "--import", TS_REGISTER, MARKET_CLI],
