@@ -64,6 +64,19 @@ Optional: `DEALS_FEED_URL` can override the public raw GitHub URL to `data/deals
 
 No Supabase variables are needed.
 
+## Public website
+
+The marketing site lives in the same Next.js app, next to the Mini App:
+
+- `/` — the existing Mini App (unchanged; this is the URL BotFather opens).
+- `/nl/...` (default) and `/en/...` — the public website: home, how it works, features, categories, about, FAQ, contact, privacy and terms. Dutch and English texts live in `web/lib/site/dictionaries/`.
+- Live data (hero deals, scanner numbers, demo catalogue, category counts) comes from the same public `deals.json` feed as `/api/deals`; pages are regenerated at most every 5 minutes. Reserved, inactive and older-than-30-days listings are never shown.
+- Contact details and branding: `web/site-config.ts`. Empty fields are hidden on the site.
+- Contact form: `POST /api/contact` with server-side validation, honeypot, fill-time and link-spam checks, a per-instance rate limit (5/hour per IP) and delivery to Telegram (`CONTACT_TELEGRAM_CHAT_ID`) and/or email via Resend (`RESEND_API_KEY`, `CONTACT_FROM_EMAIL`). Without a configured channel it answers "unavailable" — it never pretends to send.
+- SEO: per-page titles and descriptions, canonical URLs, `hreflang` alternates, Open Graph/X cards with a generated image, `sitemap.xml`, `robots.txt` and schema.org data (WebSite, WebApplication, BreadcrumbList, FAQPage). Set `NEXT_PUBLIC_SITE_URL` once a custom domain is connected.
+
+Checks: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`.
+
 ## Telegram Mini App
 
 Use BotFather `/setmenubutton` to point the bot menu button at the Vercel Production URL. Telegram opens the Mini App; deal cards are shown inside the app, not sent as chat messages.
