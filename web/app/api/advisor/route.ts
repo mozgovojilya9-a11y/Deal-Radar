@@ -201,12 +201,16 @@ function pricesInText(value: string) {
 function structuredPagePrices(html: string): number[] {
   const found: number[] = [];
   const tags = html.match(/<meta\b[^>]*>/gi) || [];
+  const currencyTag = tags.find((tag) => {
+    const key = (htmlAttribute(tag, "property") || htmlAttribute(tag, "name") || "").toLowerCase();
+    return /(?:product:)?price:currency$|^pricecurrency$/.test(key);
+  });
+  const pageCurrency = currencyTag ? htmlAttribute(currencyTag, "content").trim().toUpperCase() : "";
   for (const tag of tags) {
     const key = (htmlAttribute(tag, "property") || htmlAttribute(tag, "name") || htmlAttribute(tag, "itemprop") || "").toLowerCase();
-    if (!/(?:product:)?price(?::amount)?$|^price$|^itemprop:price$/.test(key)) continue;
-    const currency = (htmlAttribute(tag, "content") || "").trim();
+    if (!/(?:product:price:amount|og:price:amount|^price$|^itemprop:price$|^price:amount$)/.test(key)) continue;
     const amount = parseEuro(htmlAttribute(tag, "content"));
-    if (amount !== null && (!currency || currency.toUpperCase() === "EUR")) found.push(amount);
+    if (amount !== null && (!pageCurrency || pageCurrency === "EUR")) found.push(amount);
   }
 
   const scripts = html.match(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) || [];
