@@ -1197,7 +1197,7 @@ def get_web_market_reference(db, q, candidate_groups=None, cfg=None):
     used_query = "(" + target + ") (tweedehands OR gebruikt OR occasion OR used) Nederland EUR"
     new_query = "(" + target + ") (nieuw OR nieuwprijs OR kopen OR new) Nederland EUR"
     fingerprint_data = {
-        "provider": "duckduckgo-html-v1", "query": q.get("query"), "label": q.get("label"),
+        "provider": "bing-rss-primary-ddg-html-fallback-v2", "query": q.get("query"), "label": q.get("label"),
         "include_any": q.get("include_any", []), "search_variants": q.get("search_variants", []),
         "require_regex": q.get("require_regex"), "group_regex": q.get("group_regex"),
         "exclude": q.get("exclude", []), "exclude_regex": q.get("exclude_regex", []),

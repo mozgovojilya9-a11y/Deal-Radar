@@ -1,5 +1,6 @@
 """Offline scanner tests: no network, no Telegram. Run: python -m unittest discover -s tests"""
 import json
+import hashlib
 import os
 import sys
 import tempfile
@@ -627,6 +628,48 @@ class ScannerTests(unittest.TestCase):
         results = bot.parse_bing_rss_results(xml)
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["url"], "https://www.ebay.nl/itm/123")
+
+    def test_bing_search_provider_invalidates_old_duckduckgo_empty_cache(self):
+        q = CFG["queries"][0]
+        anchors = [str(q.get("query") or q.get("label") or "").strip()]
+        anchors.extend(str(value).strip() for value in (q.get("search_variants") or [])[:4] if str(value).strip())
+        anchors = list(dict.fromkeys(value for value in anchors if value))
+        target = " OR ".join('"' + value.replace('"', "")[:100] + '"' for value in anchors[:4])
+        used_query = "(" + target + ") (tweedehands OR gebruikt OR occasion OR used) Nederland EUR"
+        new_query = "(" + target + ") (nieuw OR nieuwprijs OR kopen OR new) Nederland EUR"
+        old_fingerprint_data = {
+            "provider": "duckduckgo-html-v1",
+            "query": q.get("query"), "label": q.get("label"),
+            "include_any": q.get("include_any", []),
+            "search_variants": q.get("search_variants", []),
+            "require_regex": q.get("require_regex"), "group_regex": q.get("group_regex"),
+            "exclude": q.get("exclude", []), "exclude_regex": q.get("exclude_regex", []),
+            "used_query": used_query, "new_query": new_query,
+        }
+        old_fingerprint = hashlib.sha256(
+            json.dumps(old_fingerprint_data, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        db = bot.open_db()
+        try:
+            db.execute(
+                "INSERT OR REPLACE INTO ai_market_references "
+                "(qkey,fingerprint,used_price_eur,new_price_eur,confidence,sample_count,rationale,sources_json,checked_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (q["key"], old_fingerprint, None, None, 0.0, 0, "old DDG empty cache", "[]", int(time.time())),
+            )
+            db.commit()
+            with mock.patch.object(bot, "search_external_web", return_value=[]) as search:
+                bot.get_web_market_reference(
+                    db, q, [],
+                    {"web_market_search": {"cache_empty_hours": 2}},
+                )
+            self.assertEqual(search.call_count, 2)
+            cached = db.execute(
+                "SELECT fingerprint FROM ai_market_references WHERE qkey=?", (q["key"],)
+            ).fetchone()
+            self.assertNotEqual(cached[0], old_fingerprint)
+        finally:
+            db.close()
 
 if __name__ == "__main__":
     unittest.main()
