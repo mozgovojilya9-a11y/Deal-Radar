@@ -14,7 +14,7 @@ on:
 
 concurrency:
   group: deals
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 permissions:
   contents: write
