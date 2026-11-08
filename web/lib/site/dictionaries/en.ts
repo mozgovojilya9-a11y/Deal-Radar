@@ -300,7 +300,7 @@ export const en: Dictionary = {
       { key: "drones", title: "DJI & drones", models: "DJI Mini 2/3/4, Mavic 2/3, Air 2/3, Avata, Neo, FPV", note: "Propellers, batteries and spare parts are excluded." },
       { key: "bags", title: "Michael Kors & bags", models: "Michael Kors bags (Jet Set, Sloan, Mercer…) and backpacks, The North Face", note: "Wallets, belts and key rings are excluded." },
       { key: "microphones", title: "Microphones", models: "DJI Mic 2/Mini", note: "Stands, cables and shock mounts are excluded." },
-      { key: "electronics", title: "Electronics", models: "iPhone 12–16, Samsung Galaxy S23–S25, iPad, MacBook, Samsung T7–T9 & SanDisk Extreme SSD, Steam Deck, Nintendo Switch 2, Apple Watch, Sonos, Dyson", note: "Screens, batteries and other parts are not treated as devices." },
+      { key: "electronics", title: "Electronics", models: "iPhone 12–16, Samsung Galaxy S23–S25, iPad, MacBook, Samsung T7–T9 & SanDisk Extreme SSD, Steam Deck, Nintendo Switch 2, Apple Watch, JBL speakers, Dyson", note: "Screens, batteries and other parts are not treated as devices." },
     ],
   },
   demo: {

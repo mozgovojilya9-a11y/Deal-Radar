@@ -23,6 +23,7 @@ const GROUP_BY_RU: Record<string, GroupKey> = {
 /** The app's category labels are partly Russian; the website needs Dutch and English ones. */
 const LABEL_PATTERNS: Array<[RegExp, Record<Locale, (brand: string) => string>]> = [
   [/^Наушники (.+)$/, { nl: (b) => `${b}-koptelefoons`, en: (b) => `${b} headphones` }],
+  [/^Колонки (.+)$/, { nl: (b) => `${b}-speakers`, en: (b) => `${b} speakers` }],
   [/^Микрофоны (.+)$/, { nl: (b) => `${b}-microfoons`, en: (b) => `${b} microphones` }],
   [/^Камеры (.+)$/, { nl: (b) => `${b}-camera's`, en: (b) => `${b} cameras` }],
   [/^Объективы (.+)$/, { nl: (b) => `${b}-objectieven`, en: (b) => `${b} lenses` }],
@@ -71,7 +72,7 @@ export const FOCUS_KEYS: Record<string, string[]> = {
   drones: ["drones"],
   bags: ["bag-michael-kors", "backpack-michael-kors", "bag-northface"],
   microphones: ["microphone-dji"],
-  electronics: ["iphone-16", "iphone-15", "iphone-14", "iphone-13", "iphone-12", "galaxy-s", "ipad", "macbook", "ssd-samsung", "ssd-sandisk", "steam-deck", "switch", "apple-watch", "sonos", "dyson"],
+  electronics: ["iphone-16", "iphone-15", "iphone-14", "iphone-13", "iphone-12", "galaxy-s", "ipad", "macbook", "ssd-samsung", "ssd-sandisk", "steam-deck", "switch", "apple-watch", "speaker-jbl", "dyson"],
 };
 
 export const TOTAL_SEARCHES = CATEGORIES.length;

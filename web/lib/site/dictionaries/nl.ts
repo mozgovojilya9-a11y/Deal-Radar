@@ -298,7 +298,7 @@ export const nl = {
       { key: "drones", title: "DJI & drones", models: "DJI Mini 2/3/4, Mavic 2/3, Air 2/3, Avata, Neo, FPV", note: "Propellers, accu's en onderdelen vallen af." },
       { key: "bags", title: "Michael Kors & tassen", models: "Michael Kors-tassen (Jet Set, Sloan, Mercer…) en -rugzakken, The North Face", note: "Portemonnees, riemen en sleutelhangers vallen af." },
       { key: "microphones", title: "Microfoons", models: "DJI Mic 2/Mini", note: "Statieven, kabels en shockmounts vallen af." },
-      { key: "electronics", title: "Elektronica", models: "iPhone 12–16, Samsung Galaxy S23–S25, iPad, MacBook, Samsung T7–T9 & SanDisk Extreme SSD, Steam Deck, Nintendo Switch 2, Apple Watch, Sonos, Dyson", note: "Schermen, accu's en andere onderdelen gelden niet als apparaat." },
+      { key: "electronics", title: "Elektronica", models: "iPhone 12–16, Samsung Galaxy S23–S25, iPad, MacBook, Samsung T7–T9 & SanDisk Extreme SSD, Steam Deck, Nintendo Switch 2, Apple Watch, JBL-speakers, Dyson", note: "Schermen, accu's en andere onderdelen gelden niet als apparaat." },
     ],
   },
   demo: {

@@ -807,7 +807,7 @@ MULTI_ITEM_RE = re.compile(r"^\s*(?:[2-9]|1\d)\s*x\s|(?:^|\s)(?:[2-9]|1\d)\s*(?:
 
 ELECTRONICS_PREFIXES = ("iphone", "ps", "airpods", "headphones", "camera", "action-camera", "drones", "televisions",
                         "rayban", "microphone", "samsung", "macbook", "ipad", "switch", "xbox", "steam", "watch-apple",
-                        "pixel", "garmin", "lens", "gopro", "dji", "sonos", "kindle", "galaxy", "apple-watch", "dyson", "ssd")
+                        "pixel", "garmin", "lens", "gopro", "dji", "sonos", "kindle", "galaxy", "apple-watch", "dyson", "ssd", "speaker")
 ACCESSORY_TERMS = re.compile(
     r"(?<![a-z0-9])(hoesje|hoes|case|cover|sleeve|skin|sticker|screenprotector|screen protector|beschermglas|tempered glass|"
     r"standaard|houder|mount|oplader|charger|lader|kabel|cable|adapter|dock|laadstation|oplaadstation|oplaadcase|laadcase|"
@@ -2620,7 +2620,7 @@ def run_once(cfg, db, dry=False):
             model_year = television_model_year(item["text"]) if q.get("group_type") == "television" else None
             deal_threshold = float(q.get("threshold", 0.25))
             good_threshold = float(q.get("good_threshold", max(0.12, deal_threshold - 0.08)))
-            profitable = bool(economics and economics["profitable"] and economics["estimated_profit"] >= 50)
+            profitable = bool(economics and economics["profitable"] and economics["estimated_profit"] >= float(q.get("min_deal_profit", 50)))
             if reference_type == "external_used":
                 if profitable and confidence == "high" and discount is not None and discount >= deal_threshold \
                         and economics["profit_roi"] >= max(0.30, float(q.get("strong_min_roi", 0.30))):

@@ -101,3 +101,16 @@ for (const [listing, offer, expected] of storageCases) {
     assert.equal(matchProduct(offer, buildIdentity(listing)).level, expected);
   });
 }
+
+const speakerCases: Array<[string, string, MatchLevel]> = [
+  ["JBL Charge 5", "JBL Charge 5 Bluetooth Lautsprecher", "exact"],
+  ["JBL Charge 5", "JBL Charge 6", "variant"],
+  ["JBL Flip 6", "JBL Flip 6 Schwarz", "exact"],
+  ["JBL Flip 6", "JBL Xtreme 4", "variant"],
+  ["JBL PartyBox 310", "JBL PartyBox 110", "variant"],
+];
+for (const [listing, offer, expected] of speakerCases) {
+  test(`${listing} ⟶ ${offer} = ${expected}`, () => {
+    assert.equal(matchProduct(offer, buildIdentity(listing)).level, expected);
+  });
+}

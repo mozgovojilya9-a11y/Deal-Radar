@@ -129,6 +129,20 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(any("bieden" in flag for flag in feed["bid-deal"]["warning_flags"]))
         self.assertEqual(feed["bid-deal"]["market_value"], 400.0)
 
+    def small_profit_status(self, **limits):
+        self.external.set(used=[400] * 6)
+        self.scan([listing("small", 285)], cfg=dict(CFG, queries=[dict(CFG["queries"][0], min_roi=0.05, good_threshold=0.1, min_profit_eur=25, **limits)]))
+        deal = self.feed().get("small")
+        return deal["status"] if deal else None, (deal or {}).get("estimated_profit")
+
+    def test_default_profit_floor_keeps_small_profit_out_of_good(self):
+        self.assertNotIn(self.small_profit_status()[0], ("good", "strong"))
+
+    def test_category_profit_floor_allows_small_profit(self):
+        status, profit = self.small_profit_status(min_deal_profit=25)
+        self.assertEqual(status, "good")
+        self.assertLess(profit, 50)
+
     def rescan_with_rules(self, rules):
         self.external.set(used=[400] * 6)
         self.scan([listing("old-good", 200)])
