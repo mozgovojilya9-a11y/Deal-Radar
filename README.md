@@ -95,6 +95,46 @@ npm run build
 npm run dev
 ```
 
+## Deal Radar 2.0
+
+**Pipeline** (`bot.py`): 1) all categories fetched concurrently (3 workers, shared rate limiter ~3 req/s to Marktplaats,
+retry with back-off) → 2) de-duplication by listing id → 3) fast filters (model, accessory, price type, reserved,
+lots, date, risk) → 4) cheap pre-filter: listings far below current Marktplaats asking prices get the external price
+check first → 5) model/condition matching → 6) independent market value (shops, refurbishers, Vinted, Kleinanzeigen;
+24 h cache, history kept) → 7) profit after negotiation, fees and costs → 8) Best / Good / Watchlist / Rejected.
+Liveness/reserved re-checks run in parallel (4 workers). Every run is stored in `scan_runs`; the feed carries the
+processing funnel, run history, market price changes and a sample of rejected listings with reasons.
+
+Measured on the same 6 categories against live Marktplaats (external research off in both runs): **291 s → 107 s
+(−63 %)**, same number of listings (3216 / 3215; the listing-id sets differ only by live churn).
+
+**Categories:** Best deals (high confidence: ≥6 independent used offers from ≥2 sites), Good deals (confirmed profit,
+medium confidence or smaller margin), Watchlist (no independent value yet, too little data, bieden, wide price spread,
+or a price suspiciously far below market), Rejected (shown in Analytics with the reason).
+
+### Free services used (budget €0)
+
+| Service | Use | Free limit |
+|---|---|---|
+| GitHub Actions | scanner runs, feed branch | free for public repositories |
+| Vercel Hobby | Mini App + API | Hobby plan limits; cron on Hobby is daily only |
+| Marktplaats public search API | candidate listings | rate-limited by us to ~3 req/s |
+| Kleinanzeigen, Vinted, Refurbed, Coolblue, MediaMarkt, Alternate, beslist.nl | independent prices (public pages) | plain HTTP, no keys |
+| PDOK Locatieserver | geocoding | free Dutch government API |
+| Tavily (optional) | web search for the AI advisor | 1,000 searches/month, no card |
+| Gemini API (existing key) | advisor wording, optional Google search | free-tier quota |
+| cron-job.org (optional) | calls `/api/cron/scan` every 10 min | free |
+
+No paid APIs, databases or libraries are required. eBay, Back Market, Amazon and Tweakers block automated requests
+and are not scraped by circumventing protection.
+
+### Environment variables (Vercel, all optional except TELEGRAM_TOKEN)
+
+`TELEGRAM_TOKEN`, `GEMINI_API_KEY`, `TAVILY_API_KEY`, and for 10-minute scans: `CRON_SECRET` (≥16 random characters)
++ `GITHUB_DISPATCH_TOKEN` (fine-grained token, this repo, Actions: read & write). Then create a free cron job that
+calls `https://<app>/api/cron/scan?key=<CRON_SECRET>` every 10 minutes. No SQL migrations are needed: the scanner
+database (SQLite, cached by GitHub Actions) migrates itself additively.
+
 ## v6: independent market value and reserved listings
 
 **Marktplaats is the source of candidates, never of market value.** The scanner uses Marktplaats for the

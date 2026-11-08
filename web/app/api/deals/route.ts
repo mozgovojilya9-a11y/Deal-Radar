@@ -127,6 +127,8 @@ export async function GET(request: NextRequest) {
     const minDiscount = numberParam(params, "minDiscount", 0, 100);
     const minProfit = numberParam(params, "minProfit", -100_000, 1_000_000);
     const minRoi = numberParam(params, "minRoi", -100, 10_000);
+    const maxAgeDays = numberParam(params, "maxAgeDays", 1, 365);
+    const textQuery = (params.get("q") || "").trim().toLowerCase().slice(0, 80);
     const categories = new Set((params.get("categories") || params.get("category") || "").split(",").map((key) => key.trim()).filter((key) => /^[a-z0-9-]{1,64}$/i.test(key)));
     const condition = params.get("condition") === "new" || params.get("condition") === "used" ? params.get("condition") : "all";
     const exactOnly = params.get("exactOnly") === "1";
@@ -162,6 +164,12 @@ export async function GET(request: NextRequest) {
       if (categories.size && !categories.has(deal.category_key)) continue;
       if (condition === "new" && !isNewCondition(deal)) continue;
       if (condition === "used" && isNewCondition(deal)) continue;
+      if (maxAgeDays !== null) {
+        const published = listingTimestamp(deal.posted_at) || Date.parse(deal.first_detected_at || deal.detected_at);
+        if (Number.isFinite(published) && Date.now() - published > maxAgeDays * 86400000) continue;
+      }
+      // Brand / model words, e.g. "sony a7" or "airpods pro 2": every word must appear in the title.
+      if (textQuery && !textQuery.split(/\s+/).every((word) => (deal.title + " " + deal.category_label).toLowerCase().includes(word))) continue;
       if (exactOnly && (deal.match_level ? deal.match_level !== "exact" : !deal.model_group || deal.model_group === "unknown")) continue;
       deals.push(deal);
     }

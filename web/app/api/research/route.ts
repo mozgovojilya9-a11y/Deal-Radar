@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resaleEconomics, PROFITABILITY } from "@/lib/economics";
 import { researchMarket } from "@/lib/market-research";
+import { understandQuery } from "@/lib/query-understanding";
 import { rateAllowed, verifyInitData } from "@/lib/telegram-auth";
 
 export const runtime = "nodejs";
@@ -27,7 +28,10 @@ export async function POST(request: NextRequest) {
   if (!userId) return NextResponse.json({ error: "Откройте исследование внутри Telegram." }, { status: 401, headers: HEADERS });
   if (!rateAllowed("research:" + userId, 5)) return NextResponse.json({ error: "Лимит исследований: не более 5 запусков в минуту." }, { status: 429, headers: HEADERS });
 
-  const query = String(body.query || "").trim().replace(/\s+/g, " ");
+  const rawQuery = String(body.query || "").trim().replace(/\s+/g, " ");
+  // Russian product words, typos and spacing -> a clean model query.
+  const understood = understandQuery(rawQuery);
+  const query = understood.query;
   if (query.length < 3 || query.length > 120) return NextResponse.json({ error: "Укажите модель (от 3 до 120 символов)." }, { status: 400, headers: HEADERS });
   const includeUsed = body.includeUsed !== false;
   const includeNew = body.includeNew !== false;
@@ -45,6 +49,8 @@ export async function POST(request: NextRequest) {
       includeNew, includeUsed, includeRefurbished, maxPrice,
       location: postcode && radiusKm ? { postcode, distanceKm: radiusKm } : undefined,
       budgetMs: 45000,
+      // Up to 5 Marktplaats pages (500 listings) instead of the first 100.
+      marketplacePages: Number.isFinite(Number((body as { pages?: number }).pages)) ? Math.max(1, Math.min(10, Number((body as { pages?: number }).pages))) : 5,
     });
     // Market value: independent sources only. Marktplaats offers are the things you can buy.
     const valuation = research.valuation;
@@ -55,11 +61,15 @@ export async function POST(request: NextRequest) {
       .filter((offer) => (maxPrice === null || offer.price <= maxPrice) && (minPrice === null || offer.price >= minPrice))
       .map((offer) => {
         const economics = resaleBasis ? resaleEconomics(offer.price, resaleBasis, basisIsNew) : null;
-        const status = economics && valuation.confidence === "high" && economics.profit >= 50 && economics.roi >= PROFITABILITY.strong_min_roi ? "strong"
+        // Far below the independent market value: fakes, parts or scams are flagged, never "deals".
+        const suspicious = valuation.marketValue !== null && offer.price < valuation.marketValue * 0.4;
+        const status = suspicious ? "suspicious"
+          : economics && valuation.confidence === "high" && economics.profit >= 50 && economics.roi >= PROFITABILITY.strong_min_roi ? "strong"
           : economics && valuation.confidence !== "none" && economics.profit >= PROFITABILITY.min_profit_eur && economics.roi >= PROFITABILITY.min_roi ? "good" : "candidate";
-        return { ...offer, estimatedProfit: economics?.profit ?? null, profitRoi: economics?.roi ?? null, status };
+        return { ...offer, estimatedProfit: suspicious ? null : economics?.profit ?? null, profitRoi: suspicious ? null : economics?.roi ?? null, status,
+          warning: suspicious ? "Цена в " + (valuation.marketValue! / offer.price).toFixed(1) + " раза ниже рынка — вероятна подделка или мошенничество" : null };
       })
-      .sort((a, b) => (b.estimatedProfit ?? -Infinity) - (a.estimatedProfit ?? -Infinity));
+      .sort((a, b) => Number(a.status === "suspicious") - Number(b.status === "suspicious") || (b.estimatedProfit ?? -Infinity) - (a.estimatedProfit ?? -Infinity));
     const warnings = [
       ...(valuation.marketValue === null ? ["Рыночная стоимость не определена: " + valuation.reason + ". Цены Marktplaats как замена не используются."] : []),
       ...(research.providersUsed.length === 0 ? ["Все поисковые системы сейчас ограничили запросы; использованы Marktplaats, 2dehands и прямой поиск магазинов."] : []),
@@ -67,14 +77,14 @@ export async function POST(request: NextRequest) {
       "Цены объявлений — цены предложений, а не завершённых сделок.",
     ];
     return NextResponse.json({
-      query, identity: { searchName: research.identity.searchName, aliases: research.identity.aliases, modelCodes: research.identity.modelCodes },
+      query, originalQuery: rawQuery, corrections: understood.corrections, identity: { searchName: research.identity.searchName, aliases: research.identity.aliases, modelCodes: research.identity.modelCodes },
       checkedAt: research.checkedAt, durationMs: research.durationMs,
       location: postcode && radiusKm ? { postcode, radiusKm } : null,
       segments: research.segments,
       valuation,
       marketplace: research.marketplace.stats,
       resale: resaleBasis ? { basis: resaleBasis, basisLabel: basisIsNew ? "новая цена × " + PROFITABILITY.new_resale_factor : valuation.reason } : null,
-      listings: listings.slice(0, 30),
+      listings: listings.slice(0, 200),
       offers: research.offers.slice(0, 40),
       rejected: research.rejected, variantExamples: research.variantExamples,
       search: { queries: research.queries, providers: research.providersUsed, pagesFetched: research.pagesFetched, pagesWithPrices: research.pagesWithPrices,

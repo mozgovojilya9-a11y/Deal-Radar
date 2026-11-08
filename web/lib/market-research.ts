@@ -23,6 +23,7 @@ export type MarketOffer = {
   postedAt?: string | null;
   itemCondition?: string | null;
   priceType?: string | null;
+  imageUrl?: string | null;
 };
 
 export type SegmentStats = {
@@ -180,23 +181,37 @@ async function searchClassifieds(
   query: string,
   location: { postcode?: string | null; distanceKm?: number | null } | undefined,
   deadline: number,
+  pages = 1,
 ): Promise<MarktplaatsRow[]> {
-  const params = new URLSearchParams({ query, limit: "100", offset: "0", searchInTitleAndDescription: "true", sortBy: "SORT_INDEX", sortOrder: "DECREASING" });
-  if (host === "www.marktplaats.nl" && location?.postcode && location.distanceKm) {
-    params.set("postcode", location.postcode.replace(/\s/g, ""));
-    params.set("distanceMeters", String(Math.round(location.distanceKm * 1000)));
+  const rows: MarktplaatsRow[] = [];
+  // Page through results (100 per page) until the source runs out, the page limit or the time budget.
+  for (let page = 0; page < Math.max(1, pages); page += 1) {
+    if (deadline - Date.now() < 1500) break;
+    const params = new URLSearchParams({ query, limit: "100", offset: String(page * 100), searchInTitleAndDescription: "true", sortBy: "SORT_INDEX", sortOrder: "DECREASING" });
+    if (host === "www.marktplaats.nl" && location?.postcode && location.distanceKm) {
+      params.set("postcode", location.postcode.replace(/\s/g, ""));
+      params.set("distanceMeters", String(Math.round(location.distanceKm * 1000)));
+    }
+    const response = await fetch("https://" + host + "/lrp/api/search?" + params, {
+      headers: { "User-Agent": BROWSER_UA, Accept: "application/json", "Accept-Language": "nl-NL,nl;q=0.9" },
+      signal: AbortSignal.timeout(Math.max(1000, Math.min(9000, deadline - Date.now()))),
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      if (page > 0) break; // keep what was already collected
+      throw new Error(host + " HTTP " + response.status);
+    }
+    const data = await response.json() as { listings?: MarktplaatsRow[]; totalResultCount?: number };
+    const batch = Array.isArray(data.listings) ? data.listings : [];
+    rows.push(...batch);
+    if (batch.length < 100 || (typeof data.totalResultCount === "number" && rows.length >= data.totalResultCount)) break;
   }
-  const response = await fetch("https://" + host + "/lrp/api/search?" + params, {
-    headers: { "User-Agent": BROWSER_UA, Accept: "application/json", "Accept-Language": "nl-NL,nl;q=0.9" },
-    signal: AbortSignal.timeout(Math.max(1000, Math.min(9000, deadline - Date.now()))),
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error(host + " HTTP " + response.status);
-  const data = await response.json() as { listings?: MarktplaatsRow[] };
-  return Array.isArray(data.listings) ? data.listings : [];
+  return rows;
 }
 
 function classifiedOffer(row: MarktplaatsRow, host: string): Omit<MarketOffer, "id" | "match" | "matchReason" | "segment"> | null {
+  // A reserved ("Gereserveerd") listing is not an available offer.
+  if (row.reserved === true) return null;
   const priceInfo = (row.priceInfo || {}) as Record<string, unknown>;
   const cents = Number(priceInfo.priceCents);
   const priceType = String(priceInfo.priceType || "");
@@ -221,6 +236,7 @@ function classifiedOffer(row: MarktplaatsRow, host: string): Omit<MarketOffer, "
     postedAt: typeof row.date === "string" ? row.date : null,
     itemCondition: typeof condition === "string" ? condition : null,
     priceType,
+    imageUrl: Array.isArray(row.imageUrls) && typeof row.imageUrls[0] === "string" ? (String(row.imageUrls[0]).startsWith("//") ? "https:" + row.imageUrls[0] : String(row.imageUrls[0])) : null,
   };
 }
 
@@ -241,6 +257,8 @@ export type ResearchOptions = {
   referencePrice?: number | null;
   /** Also collect current Marktplaats/2dehands listings as context (default true). */
   includeMarketplace?: boolean;
+  /** Marktplaats result pages for buyable listings (100 per page). */
+  marketplacePages?: number;
   /** Skip the in-memory cache: a fresh valuation was requested. */
   fresh?: boolean;
   /** Use Google Search through the Gemini API when GEMINI_API_KEY is set (default true). */
@@ -434,7 +452,7 @@ export async function researchMarket(title: string, options: ResearchOptions = {
   if (includeUsed && options.includeMarketplace !== false) {
     const terms = [name, ...identity.aliases.filter((alias) => !/^[A-Z0-9]{4,}$/.test(alias))].slice(0, 2);
     for (const term of terms) {
-      classifiedTasks.push(searchClassifieds("www.marktplaats.nl", term, options.location, deadline)
+      classifiedTasks.push(searchClassifieds("www.marktplaats.nl", term, options.location, deadline, options.marketplacePages ?? 1)
         .then((rows) => {
           for (const row of rows) {
             const offer = classifiedOffer(row, "www.marktplaats.nl");

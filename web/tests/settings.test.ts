@@ -13,7 +13,7 @@ test("v1 settings migrate without the old hidden €800 cap", () => {
 test("query carries every setting to the server", () => {
   const params = settingsQuery({ ...DEFAULT_SETTINGS, location: { label: "Utrecht", city: "Utrecht", postcode: "3511KE", lat: 52.09, lon: 5.12, source: "manual" },
     radiusKm: 30, minPrice: 100, maxPrice: 2500, minDiscount: 20, minProfit: 50, minRoi: 25, categories: ["ps5", "macbook"], condition: "used", exactOnly: true }, "distance");
-  assert.equal(params.toString(), "sort=distance&lat=52.09&lon=5.12&radiusKm=30&minPrice=100&maxPrice=2500&minDiscount=20&minProfit=50&minRoi=25&categories=ps5%2Cmacbook&condition=used&exactOnly=1&priority=profit");
+  assert.equal(params.toString(), "sort=distance&lat=52.09&lon=5.12&radiusKm=30&minPrice=100&maxPrice=2500&minDiscount=20&minProfit=50&minRoi=25&categories=ps5%2Cmacbook&condition=used&exactOnly=1&priority=profit&maxAgeDays=30");
 });
 
 test("whole country means no radius parameter at all", () => {

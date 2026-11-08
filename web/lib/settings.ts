@@ -20,6 +20,10 @@ export type SearchSettings = {
   condition: "all" | "new" | "used";
   exactOnly: boolean;
   priority: "profit" | "distance";
+  /** Only listings published in the last N days (null = no limit). */
+  maxAgeDays: number | null;
+  /** Brand / model words that must appear in the title, e.g. "sony a7". */
+  textFilter: string;
 };
 
 export const SETTINGS_KEY = "deal-radar-settings";
@@ -46,6 +50,8 @@ export const DEFAULT_SETTINGS: SearchSettings = {
   condition: "all",
   exactOnly: false,
   priority: "profit",
+  maxAgeDays: 30,
+  textFilter: "",
 };
 
 const finite = (value: unknown, min: number, max: number): number | null =>
@@ -89,6 +95,8 @@ export function readSettings(raw: unknown): SearchSettings {
     condition: stored.condition === "new" || stored.condition === "used" ? stored.condition : "all",
     exactOnly: stored.exactOnly === true,
     priority: stored.priority === "distance" ? "distance" : "profit",
+    maxAgeDays: stored.maxAgeDays === null ? null : finite(stored.maxAgeDays, 1, 365) ?? 30,
+    textFilter: typeof stored.textFilter === "string" ? stored.textFilter.slice(0, 60) : "",
   };
 }
 
@@ -123,6 +131,8 @@ export function settingsQuery(settings: SearchSettings, sort: string): URLSearch
   if (settings.condition !== "all") params.set("condition", settings.condition);
   if (settings.exactOnly) params.set("exactOnly", "1");
   params.set("priority", settings.priority);
+  if (settings.maxAgeDays !== null) params.set("maxAgeDays", String(settings.maxAgeDays));
+  if (settings.textFilter.trim()) params.set("q", settings.textFilter.trim());
   return params;
 }
 
@@ -137,6 +147,8 @@ export function activeSettingsCount(settings: SearchSettings): number {
     settings.categories.length > 0,
     settings.condition !== "all",
     settings.exactOnly,
+    settings.maxAgeDays !== null && settings.maxAgeDays !== 30,
+    Boolean(settings.textFilter.trim()),
   ].filter(Boolean).length;
 }
 

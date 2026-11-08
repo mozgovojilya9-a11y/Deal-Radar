@@ -111,6 +111,15 @@ export type ScannerStats = {
   externalOfferDomains?: Record<string, number>;
   externalResearched?: number;
   externalValued?: number;
+  durationSeconds?: number;
+  listingsPerMinute?: number;
+  avgMsPerListing?: number;
+  fetchSeconds?: number;
+  retries?: number;
+  valued?: number;
+  externalQueued?: number;
+  rejectedReserved?: number;
+  reservedRemoved?: number;
 };
 
 export type CatalogCounts = {
@@ -121,10 +130,27 @@ export type CatalogCounts = {
   byStatus: Record<"strong" | "good" | "candidate", number>;
 };
 
+export type FunnelStage = { stage: string; passed: number; rejected: number; reasons: Record<string, number> };
+export type RunRecord = {
+  startedAt: string; finishedAt: string | null; durationSeconds: number; fetchSeconds: number | null;
+  received: number; unique: number; evaluated: number; valued: number; best: number; good: number; watchlist: number;
+  rejected: number; newListings: number; newDeals: number; errors: number; retries: number;
+  externalResearched: number; reservedRemoved: number; catalogSize: number; catalogProfit: number;
+};
+export type PriceChange = { key: string; value: number; previous: number; change: number; checkedAt: string; previousAt: string };
+export type RejectedDeal = {
+  listing_id: string; title: string; price: number; market_value: number | null; estimated_profit: number | null;
+  listing_url: string | null; category_label: string; category_key: string; reason: string; image_url?: string | null;
+};
+
 export type DealFeed = {
   valuationVersion?: number;
   updatedAt: string | null;
   scannedAt?: string | null;
   scannerStats?: ScannerStats | null;
   deals: Deal[];
+  funnel?: FunnelStage[];
+  runHistory?: RunRecord[];
+  priceChanges?: PriceChange[];
+  rejected?: RejectedDeal[];
 };

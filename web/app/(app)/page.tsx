@@ -6,13 +6,14 @@ import { CATEGORIES, CATEGORY_GROUPS, categoryLabel, groupOf } from "@/lib/categ
 import { normalizeText } from "@/lib/product-identity";
 import { activeSettingsCount, loadSettings, radiusLabel, saveSettings, settingsQuery, type SearchSettings, DEFAULT_SETTINGS } from "@/lib/settings";
 import { Analytics } from "./components/Analytics";
+import { Dashboard } from "./components/Dashboard";
 import { DealCard } from "./components/DealCard";
 import { DealDetail } from "./components/DealDetail";
 import { Research } from "./components/Research";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { Icon, ageLabel, euro, plural } from "./components/ui";
 
-type Tab = "home" | "explore" | "analytics" | "saved" | "profile";
+type Tab = "overview" | "home" | "explore" | "analytics" | "saved" | "profile";
 type Tier = "all" | "strong" | "good" | "candidate";
 type Sort = "profit" | "score" | "distance" | "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
@@ -41,7 +42,7 @@ export default function HomePage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [lastLoaded, setLastLoaded] = useState<number | null>(null);
-  const [tab, setTab] = useState<Tab>("home");
+  const [tab, setTab] = useState<Tab>("overview");
   const [tier, setTier] = useState<Tier>("all");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
@@ -51,7 +52,7 @@ export default function HomePage() {
   const [selected, setSelected] = useState<Deal | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profile, setProfile] = useState<TelegramProfile | null>(null);
-  const [exploreView, setExploreView] = useState<"categories" | "research">("categories");
+  const [exploreView, setExploreView] = useState<"categories" | "research">("research");
   const requestId = useRef(0);
 
   useEffect(() => {
@@ -173,7 +174,13 @@ export default function HomePage() {
           <Icon name="pin" size={16} />
           <span>{settings.location ? (settings.location.city || settings.location.label) + " · " + radiusLabel(settings.radiusKm) : "Вся страна"}</span>
         </button>
+        <button type="button" className="icon-button" onClick={() => setTab("profile")} aria-label="Настройки"><Icon name="sliders" size={18} /></button>
       </header>
+
+      {tab === "overview" ? (
+        <Dashboard deals={deals} stats={stats} scannedAt={scannedAt} saved={saved} onSave={toggleSaved} onOpen={setSelected}
+          onShowAll={(nextTier) => { setTier(nextTier); setTab("home"); window.scrollTo({ top: 0 }); }} />
+      ) : null}
 
       {tab === "home" ? (
         <section className="content-section" id="deals">
@@ -220,7 +227,7 @@ export default function HomePage() {
           ) : null}
 
           <div className="seg" role="tablist" aria-label="Тип предложений">
-            {([["all", "Все", visible.length], ["strong", "Лучшие", byTier.strong.length], ["good", "Хорошие", byTier.good.length], ["candidate", "На проверке", byTier.candidate.length]] as const).map(([key, label, count]) => (
+            {([["all", "Все", visible.length], ["strong", "Best", byTier.strong.length], ["good", "Good", byTier.good.length], ["candidate", "Watchlist", byTier.candidate.length]] as const).map(([key, label, count]) => (
               <button type="button" role="tab" aria-selected={tier === key} key={key} className={tier === key ? "on" : ""} onClick={() => setTier(key)}>{label}<b>{count}</b></button>
             ))}
           </div>
@@ -236,9 +243,9 @@ export default function HomePage() {
             </div>
           ) : shown ? (shown.length ? renderGrid(shown) : <p className="tier-empty">В этой группе сейчас пусто.</p>) : (
             <div className="deal-tiers">
-              {byTier.strong.length ? <section className="deal-tier strong-tier"><div className="tier-heading"><h3>Очень выгодно<span>{byTier.strong.length}</span></h3><p>Достаточно сравнений, прибыль после всех расходов</p></div>{renderGrid(byTier.strong)}</section> : null}
-              {byTier.good.length ? <section className="deal-tier good-tier"><div className="tier-heading"><h3>Хорошая цена<span>{byTier.good.length}</span></h3><p>Прибыль есть, запас меньше</p></div>{renderGrid(byTier.good)}</section> : null}
-              {byTier.candidate.length ? <section className="deal-tier review-tier"><div className="tier-heading"><h3>На проверке<span>{byTier.candidate.length}</span></h3><p>Модель распознана, сканер собирает цены и перепроверяет по очереди</p></div>{renderGrid(byTier.candidate)}</section> : null}
+              {byTier.strong.length ? <section className="deal-tier strong-tier"><div className="tier-heading"><h3>Best deals<span>{byTier.strong.length}</span></h3><p>Высокая уверенность: независимые цены с ≥2 площадок, прибыль после всех расходов</p></div>{renderGrid(byTier.strong)}</section> : null}
+              {byTier.good.length ? <section className="deal-tier good-tier"><div className="tier-heading"><h3>Good deals<span>{byTier.good.length}</span></h3><p>Подтверждённая прибыль, уверенность средняя или запас меньше</p></div>{renderGrid(byTier.good)}</section> : null}
+              {byTier.candidate.length ? <section className="deal-tier review-tier"><div className="tier-heading"><h3>Watchlist<span>{byTier.candidate.length}</span></h3><p>Модель распознана; ждёт независимой оценки рынка или не прошла порог прибыли</p></div>{renderGrid(byTier.candidate)}</section> : null}
             </div>
           )}
         </section>
@@ -248,9 +255,9 @@ export default function HomePage() {
         <section className="content-section v2-section">
           <div className="seg" role="tablist" aria-label="Раздел">
             <button type="button" role="tab" aria-selected={exploreView === "categories"} className={exploreView === "categories" ? "on" : ""} onClick={() => setExploreView("categories")}>Категории</button>
-            <button type="button" role="tab" aria-selected={exploreView === "research"} className={exploreView === "research" ? "on" : ""} onClick={() => setExploreView("research")}>Анализ модели</button>
+            <button type="button" role="tab" aria-selected={exploreView === "research"} className={exploreView === "research" ? "on" : ""} onClick={() => setExploreView("research")}>Поиск модели</button>
           </div>
-          {exploreView === "research" ? <Research settings={settings} /> : (
+          {exploreView === "research" ? <Research settings={settings} onOpen={setSelected} /> : (
             <>
               <div className="v2-head"><h2>Категории</h2><p>Количество — с учётом ваших фильтров. Нажмите, чтобы открыть находки.</p></div>
               <button type="button" className={"v2-all" + (!category ? " on" : "")} onClick={() => { setCategory(""); setTab("home"); }}><strong>Все находки</strong><span>{deals.length}</span></button>
@@ -315,11 +322,11 @@ export default function HomePage() {
       </footer>
 
       <nav className="bottom-nav" aria-label="Основная навигация">
-        <button className={tab === "home" ? "nav-active" : ""} onClick={() => setTab("home")}><Icon name="home" />Находки</button>
+        <button className={tab === "overview" ? "nav-active" : ""} onClick={() => setTab("overview")}><Icon name="home" />Обзор</button>
+        <button className={tab === "home" ? "nav-active" : ""} onClick={() => setTab("home")}><Icon name="spark" />Каталог</button>
         <button className={tab === "explore" ? "nav-active" : ""} onClick={() => setTab("explore")}><Icon name="search" />Поиск</button>
-        <button className={tab === "analytics" ? "nav-active" : ""} onClick={() => setTab("analytics")}><Icon name="chart" />Сканер</button>
-        <button className={tab === "saved" ? "nav-active" : ""} onClick={() => setTab("saved")}><Icon name="heart" />Избранное{saved.length ? <i>{saved.length}</i> : null}</button>
-        <button className={tab === "profile" ? "nav-active" : ""} onClick={() => setTab("profile")}><Icon name="sliders" />Настройки</button>
+        <button className={tab === "analytics" ? "nav-active" : ""} onClick={() => setTab("analytics")}><Icon name="chart" />Аналитика</button>
+        <button className={tab === "saved" || tab === "profile" ? "nav-active" : ""} onClick={() => setTab("saved")}><Icon name="heart" />Избранное{saved.length ? <i>{saved.length}</i> : null}</button>
       </nav>
 
       {selected ? <DealDetail key={selected.listing_id} deal={selected} saved={saved.includes(selected.listing_id)} onSave={() => toggleSaved(selected.listing_id)} onClose={closeDetail} /> : null}

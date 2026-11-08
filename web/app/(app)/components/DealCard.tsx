@@ -13,6 +13,7 @@ export function DealCard({ deal, saved, onSave, onOpen }: { deal: Deal; saved: b
   const candidate = status === "candidate";
   const discount = deal.discount == null ? null : Math.max(0, Math.round(Number(deal.discount) * 100));
   const distance = distanceOf(deal);
+  const confidence = deal.market_confidence === "high" ? "High" : deal.market_confidence === "preliminary" || deal.market_confidence === "retail_proxy" ? "Medium" : "Low";
   const evidence = deal.external_sources
     ? deal.external_sources + " незав. источн. · " + (CONFIDENCE_LABEL[deal.market_confidence || "none"] || "—")
     : "независимая оценка в очереди";
@@ -45,7 +46,10 @@ export function DealCard({ deal, saved, onSave, onOpen }: { deal: Deal; saved: b
             <strong>{euro(deal.estimated_profit)}{deal.profit_roi != null ? <em>ROI {Math.round(deal.profit_roi * 100)}%</em> : null}</strong>
           </div>
         ) : <p className="candidate-explanation">{deal.evaluation_reason || "Недостаточно сопоставимых цен."}</p>}
-        <div className="evidence-line" title="Сколько похожих объявлений использовано для оценки">{evidence}</div>
+        <div className="evidence-line" title="Независимые источники рыночной цены и уверенность оценки">
+          <span className={"confidence-badge c-" + confidence.toLowerCase()}>{confidence}</span>{evidence}
+          {deal.discount != null && deal.discount > 0 ? <span className="discount-text"> · −{Math.round(deal.discount * 100)}%</span> : null}
+        </div>
         <div className="card-footer">
           <span className="location">{deal.city || "Нидерланды"}{distance != null ? <b className="distance"> · {Math.round(distance)} км</b> : null}</span>
           <button className={"save-button" + (saved ? " active" : "")} onClick={onSave} aria-pressed={saved} aria-label={saved ? "Убрать из избранного" : "В избранное"}>{saved ? "♥" : "♡"}</button>

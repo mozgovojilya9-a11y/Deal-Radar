@@ -250,9 +250,9 @@ class LifecycleTests(unittest.TestCase):
 
     def test_published_deal_that_becomes_reserved_leaves_the_catalog(self):
         self.external.set(used=[400] * 6)
-        self.scan([listing("later", 150)])
+        self.scan([listing("later", 200)])
         self.assertEqual(self.feed()["later"]["status"], "strong")
-        self.scan([listing("later", 150, reserved=True)])
+        self.scan([listing("later", 200, reserved=True)])
         self.assertNotIn("later", self.feed())
         self.assertEqual(bot.load_feed()["scannerStats"]["reservedRemoved"], 1)
         db = bot.open_db()
@@ -277,7 +277,7 @@ class LifecycleTests(unittest.TestCase):
     def test_carried_deal_reserved_on_its_page_is_removed_on_recheck(self):
         start = 1_800_000_000
         self.external.set(used=[400] * 6)
-        self.scan([listing("held", 150)], at=start)
+        self.scan([listing("held", 200)], at=start)
         self.assertIn("held", self.feed())
         self.net.stop()
 
@@ -314,17 +314,17 @@ class LifecycleTests(unittest.TestCase):
     def test_stale_valuation_is_not_used_as_current_and_history_grows(self):
         start = 1_800_000_000
         self.external.set(used=[400] * 6)
-        self.scan([listing("s", 150)], at=start)
+        self.scan([listing("s", 200)], at=start)
         self.assertEqual(self.feed()["s"]["status"], "strong")
         # Two days later the research fails: the old value must not be presented as current.
         self.external.market = None
-        self.scan([listing("s", 150)], at=start + 48 * 3600)
+        self.scan([listing("s", 200)], at=start + 48 * 3600)
         deal = self.feed()["s"]
         self.assertEqual(deal["status"], "candidate")
         self.assertTrue(deal["market_stale"])
         self.assertIn("устарела", deal["evaluation_reason"])
         self.external.set(used=[410] * 6)
-        self.scan([listing("s", 150)], at=start + 49 * 3600)
+        self.scan([listing("s", 200)], at=start + 49 * 3600)
         db = bot.open_db()
         try:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM external_valuations").fetchone()[0], 2)
@@ -345,6 +345,51 @@ class LifecycleTests(unittest.TestCase):
         deal = self.feed()["old"]
         self.assertEqual(deal["price_reference_type"], "external_used")
         self.assertEqual(deal["market_value"], 400.0)
+
+    # ---- Analytics: funnel, run history, prioritised external research ----
+    def test_funnel_is_consistent_and_run_history_accumulates(self):
+        self.external.set(used=[400] * 6)
+        rows = [listing("ok", 150), listing("dup", 160), listing("dup", 160), listing("res", 150, reserved=True),
+                listing("acc", 120, title="Controller voor PS5")]
+        self.scan(rows, at=1_800_000_000)
+        feed = bot.load_feed()
+        stages = {stage["stage"]: stage for stage in feed["funnel"]}
+        self.assertEqual(stages["Получено объявлений"]["passed"], 5)
+        self.assertEqual(stages["Удалены дубликаты"]["rejected"], 1)
+        self.assertEqual(stages["Проверен статус"]["rejected"], 1)
+        self.assertEqual(stages["Проверена модель"]["reasons"].get("аксессуар"), 1)
+        passed = [stage["passed"] for stage in feed["funnel"][:6]]
+        self.assertEqual(passed, sorted(passed, reverse=True))  # a funnel never grows
+        self.assertEqual(len(feed["runHistory"]), 1)
+        self.scan(rows, at=1_800_000_000 + 900)
+        history = bot.load_feed()["runHistory"]
+        self.assertEqual(len(history), 2)
+        self.assertGreater(history[-1]["catalogSize"], 0)
+        self.assertGreaterEqual(bot.load_feed()["scannerStats"]["listingsPerMinute"], 0)
+
+    def test_external_research_prioritises_promising_models(self):
+        cfg = dict(CFG, external_market={"per_run": 1})
+        cfg["queries"] = [dict(CFG["queries"][0], key="ps5", group_regex=r"\b(slim|pro)\b", strict_group=True)]
+        context = [listing(f"c{i}", 500, title="PS5 Slim console") for i in range(4)] + \
+                  [listing(f"p{i}", 700, title="PS5 Pro console") for i in range(4)]
+        self.scan(context, cfg=cfg)  # builds Marktplaats context: slim ~500, pro ~700
+        self.external.calls.clear()
+        self.scan(context + [listing("cheap-slim", 300, title="PS5 Slim console")], cfg=cfg)
+        # Only one external check fits this run: it goes to the group with a listing far below context.
+        self.assertEqual(self.external.calls[-1], ["ps5|slim"])
+
+    def test_price_far_below_market_is_watchlist_not_a_deal(self):
+        self.external.set(used=[400] * 6)
+        self.scan([listing("too-cheap", 120), listing("fair", 220)])
+        feed = self.feed()
+        self.assertEqual(feed["too-cheap"]["status"], "candidate")
+        self.assertIn("подделка", feed["too-cheap"]["evaluation_reason"])
+        self.assertIn(feed["fair"]["status"], ("strong", "good"))
+
+    def test_model_group_comes_from_title_not_description(self):
+        q = {"key": "switch", "group_regex": r"\b(?:switch\s*2|oled|lite)\b", "strict_group": True, "group_type": "model_required"}
+        self.assertEqual(bot.model_group_for(q, "Nintendo Switch (2019) met accessoires", "Nintendo Switch (2019) geen switch 2"), "unknown")
+        self.assertEqual(bot.model_group_for(q, "Nintendo Switch 2 nieuw", "Nintendo Switch 2 nieuw"), "switch2")
 
     def test_feed_with_existing_deals_is_never_emptied_by_a_failed_scan(self):
         seed = [listing(f"s{i}", 400) for i in range(6)]

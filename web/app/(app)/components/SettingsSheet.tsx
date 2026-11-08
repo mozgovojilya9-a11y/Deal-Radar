@@ -222,6 +222,18 @@ export function SettingsSheet({ settings, onChange, onClose, resultCount, loadin
           </fieldset>
 
           <fieldset className="setting-block">
+            <legend>Период и модели</legend>
+            <span className="filter-label">Опубликовано за последние</span>
+            <div className="chip-row">{([1, 3, 7, 14, 30, null] as const).map((days) => (
+              <button type="button" key={String(days)} className={"discount-chip" + (settings.maxAgeDays === days ? " selected" : "")} onClick={() => set({ maxAgeDays: days })}>{days === null ? "Любой период" : days === 1 ? "24 часа" : days + " дней"}</button>
+            ))}</div>
+            <label className="inline-field">Бренд или модель (все слова в названии)
+              <input value={settings.textFilter} maxLength={60} placeholder="например: sony a7, airpods pro 2" onChange={(event) => set({ textFilter: event.target.value })} />
+            </label>
+            <p className="settings-note">Сканирование запускается по расписанию GitHub Actions каждые 10 минут; GitHub может запускать реже — время последнего запуска видно на «Обзоре».</p>
+          </fieldset>
+
+          <fieldset className="setting-block">
             <legend>Категории · {settings.categories.length ? "выбрано " + settings.categories.length : "все"}</legend>
             {CATEGORY_GROUPS.map((group) => (
               <div className="v2-pick" key={group}>

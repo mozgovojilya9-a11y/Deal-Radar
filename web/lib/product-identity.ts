@@ -356,6 +356,16 @@ export function matchProduct(candidate: string, identity: ProductIdentity): Matc
     }
     if (sizes.size && !sizes.has(identity.screenSize)) conflicts.push([...sizes][0] + "inch");
   }
+  // Apple silicon: "M3" and "M3 Pro"/"M3 Max" are different chips even though "Pro" is in the product name.
+  const chipOf = (value: string) => value.match(/\bm([1-9])(?![0-9])\s*(pro|max|ultra)?/)?.slice(1, 3).filter(Boolean).join(" ") || null;
+  const identityChip = chipOf(normalizeText(identity.raw));
+  const candidateChip = chipOf(normalized);
+  if (identityChip && candidateChip && identityChip !== candidateChip) conflicts.push("чип M" + candidateChip.toUpperCase());
+  // Memory (RAM) below 64 GB: 8 GB vs 16/18 GB is a different configuration and price.
+  const ramOf = (value: string) => [...value.matchAll(/\b(\d{1,2})gb\b/g)].map((m) => Number(m[1])).filter((gb) => gb >= 4 && gb <= 48);
+  const identityRam = ramOf(normalizeText(identity.raw));
+  const candidateRam = ramOf(normalized);
+  if (identityRam.length && candidateRam.length && !candidateRam.some((gb) => identityRam.includes(gb))) conflicts.push(candidateRam[0] + "GB RAM");
   const candidateEditions = [...tokens].filter((token) => EDITION_WORDS.has(token));
   for (const [left, right] of EXCLUSIVE_EDITIONS) {
     if ((identity.editions.includes(left) && tokens.has(right)) || (identity.editions.includes(right) && tokens.has(left))) {

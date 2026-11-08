@@ -104,6 +104,13 @@ def open_db():
         CREATE TABLE IF NOT EXISTS status_history(
             id TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, at INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS ix_status_history_id ON status_history(id, at);
+        -- One row per scanner run (performance and outcome history; never overwritten).
+        CREATE TABLE IF NOT EXISTS scan_runs(
+            started_at INTEGER PRIMARY KEY, finished_at INTEGER, duration_s REAL, fetch_s REAL,
+            received INTEGER, unique_listings INTEGER, evaluated INTEGER, valued INTEGER,
+            best INTEGER, good INTEGER, watchlist INTEGER, rejected INTEGER, new_listings INTEGER,
+            new_deals INTEGER, errors INTEGER, retries INTEGER, external_researched INTEGER,
+            reserved_removed INTEGER, catalog_size INTEGER, catalog_profit REAL);
     """)
     migrate_db(db)
     return db
@@ -218,6 +225,29 @@ def price_spread(prices):
     return round((q3 - q1) / median_value, 3) if median_value else None
 
 
+class RateLimiter:
+    """Thread-safe minimum interval between requests to one host (politeness without fixed sleeps)."""
+
+    def __init__(self, min_interval):
+        import threading
+        self.min_interval = float(min_interval)
+        self.lock = threading.Lock()
+        self.next_at = 0.0
+
+    def wait(self):
+        with self.lock:
+            now = time.monotonic()
+            slot = max(now, self.next_at)
+            self.next_at = slot + self.min_interval * random.uniform(0.85, 1.15)
+        delay = slot - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+
+
+MARKTPLAATS_LIMITER = RateLimiter(float(os.environ.get("MARKTPLAATS_MIN_INTERVAL", "0.35")))
+LIVENESS_LIMITER = RateLimiter(0.25)
+
+
 def fetch_marktplaats_v2(cfg, query, pages):
     """Fallback to the documented Marktplaats v2 search endpoint."""
     out = []
@@ -234,6 +264,7 @@ def fetch_marktplaats_v2(cfg, query, pages):
                 raise ValueError("Marktplaats API v2 needs a full six-character postcode for radius filtering")
             params["postCode"] = postcode
         req = urllib.request.Request("https://api.marktplaats.nl/v2/search?" + urllib.parse.urlencode(params), headers=HEADERS)
+        MARKTPLAATS_LIMITER.wait()
         with urllib.request.urlopen(req, timeout=25) as response:
             data = json.load(response)
         embedded = data.get("_embedded") or {}
@@ -241,7 +272,6 @@ def fetch_marktplaats_v2(cfg, query, pages):
         out.extend(items)
         if len(items) < 100:
             break
-        time.sleep(random.uniform(0.6, 1.2))
     return out
 
 
@@ -268,13 +298,13 @@ def fetch_query(cfg, q, pages):
             for page in range(term_pages):
                 params["offset"] = page * 100
                 req = urllib.request.Request(API + "?" + urllib.parse.urlencode(params), headers=HEADERS)
+                MARKTPLAATS_LIMITER.wait()
                 with urllib.request.urlopen(req, timeout=25) as response:
                     data = json.load(response)
                 items = data.get("listings") or []
                 result.extend(items)
                 if len(items) < 100:
                     break
-                time.sleep(random.uniform(0.6, 1.2))
             postcode = str(cfg.get("postcode") or "").strip().upper()
             valid_full_postcode = bool(re.fullmatch(r"\d{4}[A-Z]{2}", postcode))
             if not result and valid_full_postcode:
@@ -288,6 +318,7 @@ def fetch_query(cfg, q, pages):
                     for page in range(term_pages):
                         price_params["offset"] = page * 100
                         price_req = urllib.request.Request(API + "?" + urllib.parse.urlencode(price_params), headers=HEADERS)
+                        MARKTPLAATS_LIMITER.wait()
                         with urllib.request.urlopen(price_req, timeout=25) as response:
                             price_data = json.load(response)
                         price_items = price_data.get("listings") or []
@@ -313,8 +344,6 @@ def fetch_query(cfg, q, pages):
             if listing_id:
                 seen.add(listing_id)
             out.append(item)
-        if len(terms) > 1:
-            time.sleep(random.uniform(0.6, 1.2))
     return out
 
 def extract_image_url(l):
@@ -586,6 +615,14 @@ def television_model_year(text):
     if explicit:
         return int(explicit.group(1) or explicit.group(2))
     return None
+
+def model_group_for(q, title, text):
+    """Model group from the title first: descriptions often mention other models ("geen Switch 2")."""
+    group = group_of(q, title)
+    if group in ("unknown", "other") and q.get("match_description") and text and text != title:
+        group = group_of(q, text)
+    return group
+
 
 def group_of(q, text):
     """Build comparable product buckets instead of comparing unrelated items."""
@@ -1757,8 +1794,16 @@ def verify_listing_liveness(db, feed_deals, metrics, now, cfg, seen_in_search=No
         elif now - last_seen >= stale_after and now - last_verified >= 12 * 3600:
             queue.append((last_verified, listing_id, deal))
     queue.sort(key=lambda item: item[0])
-    for _verified, listing_id, deal in (priority + queue)[:max(limit, len(priority))]:
-        status = check_listing_status(deal.get("listing_url"))
+    batch = (priority + queue)[:max(limit, len(priority))]
+
+    def probe(url):
+        LIVENESS_LIMITER.wait()
+        return check_listing_status(url)
+
+    # Network checks in parallel; the results are written to SQLite sequentially below.
+    with ThreadPoolExecutor(max_workers=max(1, int(cfg.get("liveness_workers", 4)))) as pool:
+        statuses = list(pool.map(lambda row: probe(row[2].get("listing_url")), batch))
+    for (_verified, listing_id, deal), status in zip(batch, statuses):
         metrics["livenessChecked"] += 1
         if status is None:
             metrics["technicalErrors"] += 1
@@ -1778,7 +1823,6 @@ def verify_listing_liveness(db, feed_deals, metrics, now, cfg, seen_in_search=No
             db.execute("UPDATE listings SET reserved=1 WHERE id=?", (listing_id,))
             record_status_change(db, listing_id, "reserved", "страница объявления: isReserved=true / Gereserveerd", now)
             feed_deals.pop(listing_id, None)
-        time.sleep(random.uniform(0.3, 0.8))
     db.commit()
 
 
@@ -1926,8 +1970,14 @@ def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals, 
     for q, candidates, _ai in pending:
         for listing_id, (item, group, _flags) in candidates.items():
             key = external_key(q, group, item)
-            entry = groups.setdefault(key, {"q": q, "group": group, "members": [], "hot": False})
+            entry = groups.setdefault(key, {"q": q, "group": group, "members": [], "hot": False, "promising": False})
             entry["members"].append(item)
+            # Cheap pre-filter (no network): a listing well below the current Marktplaats asking
+            # prices is worth an external check first. Only orders the queue; never sets a value.
+            context_group = None if group in ("all", "other", "unknown") else group
+            context = market_price_samples(db, q["key"], context_group, listing_id, now - 21 * 86400) if group != "unknown" else []
+            if len(context) >= 3 and float(item["price"]) <= statistics.median(context) * 0.85:
+                entry["promising"] = True
             if str((previous_deals.get(listing_id) or {}).get("status")) in ("strong", "good"):
                 entry["hot"] = True
     results, due = {}, []
@@ -1939,7 +1989,7 @@ def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals, 
             continue
         if latest:
             results[key] = {**latest, "stale": True}
-        due.append((0 if entry["hot"] else 1, -len(entry["members"]), latest["checked_at"] if latest else 0, key, entry))
+        due.append((0 if entry["hot"] else 1 if entry["promising"] else 2, -len(entry["members"]), latest["checked_at"] if latest else 0, key, entry))
     due.sort(key=lambda row: row[:3])
     requests = []
     for _hot, _count, _checked, key, entry in due[:per_run]:
@@ -1983,6 +2033,83 @@ def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals, 
                         metrics["externalValued"] += 1
             db.commit()
     return results
+
+
+def build_funnel(metrics, catalog_new):
+    """Processing funnel of this run: how many listings passed each stage and why the rest did not."""
+    basic = {key: metrics.get(key, 0) for key in ("rejectedTitle", "rejectedAccessory", "aiRejected", "rejectedOldModel",
+                                                  "rejectedPriceRange", "rejectedPriceType", "rejectedInvalid",
+                                                  "rejectedExternalLink", "rejectedDistance")}
+    labels = {"rejectedTitle": "другая модель / название", "rejectedAccessory": "аксессуар", "aiRejected": "AI: не тот товар",
+              "rejectedOldModel": "устаревшая модель", "rejectedPriceRange": "ниже порога категории",
+              "rejectedPriceType": "bieden / тип цены", "rejectedInvalid": "некорректные, лоты", "rejectedExternalLink": "ссылка на внешний сайт",
+              "rejectedDistance": "вне радиуса"}
+    unique = metrics.get("unique", 0)
+    status_ok = unique - metrics.get("rejectedReserved", 0)
+    model_ok = metrics.get("accepted", 0)
+    fresh_ok = max(0, model_ok - metrics.get("rejectedAge", 0) - metrics.get("rejectedDateUnknown", 0) - metrics.get("rejectedRisk", 0))
+    valued = metrics.get("valued", 0)
+    profitable = metrics.get("strongDeals", 0) + metrics.get("goodDeals", 0)
+    return [
+        {"stage": "Получено объявлений", "passed": metrics.get("checked", 0), "rejected": 0, "reasons": {}},
+        {"stage": "Удалены дубликаты", "passed": unique, "rejected": metrics.get("duplicates", 0), "reasons": {"дубликаты": metrics.get("duplicates", 0)}},
+        {"stage": "Проверен статус", "passed": status_ok, "rejected": metrics.get("rejectedReserved", 0), "reasons": {"зарезервировано": metrics.get("rejectedReserved", 0)}},
+        {"stage": "Проверена модель", "passed": model_ok, "rejected": max(0, status_ok - model_ok),
+         "reasons": {labels[key]: value for key, value in basic.items() if value}},
+        {"stage": "Дата и риски", "passed": fresh_ok, "rejected": max(0, model_ok - fresh_ok),
+         "reasons": {k: v for k, v in {"старше периода": metrics.get("rejectedAge", 0) + metrics.get("rejectedDateUnknown", 0), "дефект / подделка": metrics.get("rejectedRisk", 0)}.items() if v}},
+        {"stage": "Проверена рыночная цена", "passed": min(valued, fresh_ok), "rejected": max(0, fresh_ok - valued),
+         "reasons": {"нет независимых цен (в очереди / недостаточно)": max(0, fresh_ok - valued)}},
+        {"stage": "Рассчитана прибыль", "passed": profitable, "rejected": max(0, min(valued, fresh_ok) - profitable),
+         "reasons": {k: v for k, v in {"нет прибыли": metrics.get("rejectedProfit", 0), "скидка ниже порога": metrics.get("rejectedDiscount", 0),
+                                       "мало данных / bieden / разброс → watchlist": max(0, min(valued, fresh_ok) - profitable - metrics.get("rejectedProfit", 0) - metrics.get("rejectedDiscount", 0))}.items() if v}},
+        {"stage": "Добавлено в каталог (новые выгодные)", "passed": catalog_new, "rejected": 0, "reasons": {}},
+    ]
+
+
+def market_price_changes(db, limit=20):
+    """Latest vs previous independent market value per model (history of external valuations)."""
+    rows = db.execute(
+        "SELECT key, checked_at, market_value FROM external_valuations WHERE market_value IS NOT NULL ORDER BY key, checked_at DESC").fetchall()
+    latest = {}
+    for key, checked_at, value in rows:
+        latest.setdefault(key, []).append((checked_at, value))
+    changes = []
+    for key, values in latest.items():
+        if len(values) >= 2 and values[1][1]:
+            (now_at, now_value), (before_at, before_value) = values[0], values[1]
+            changes.append({"key": key, "value": now_value, "previous": before_value,
+                            "change": round((now_value - before_value) / before_value, 4),
+                            "checkedAt": datetime.fromtimestamp(now_at, timezone.utc).isoformat(),
+                            "previousAt": datetime.fromtimestamp(before_at, timezone.utc).isoformat()})
+    changes.sort(key=lambda row: -abs(row["change"]))
+    return changes[:limit]
+
+
+def record_run(db, started, finished, metrics, fails, catalog):
+    best = sum(1 for deal in catalog if deal.get("status") == "strong")
+    good = sum(1 for deal in catalog if deal.get("status") == "good")
+    db.execute(
+        "INSERT OR REPLACE INTO scan_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (int(started), int(finished), round(finished - started, 1), metrics.get("fetchSeconds"), metrics.get("checked"),
+         metrics.get("unique"), metrics.get("evaluated"), metrics.get("valued"), best, good,
+         sum(1 for deal in catalog if deal.get("status") == "candidate"),
+         metrics.get("rejectedTotal", 0), metrics.get("newListings"), metrics.get("newDeals"),
+         int(fails) + int(metrics.get("technicalErrors", 0)), metrics.get("retries"), metrics.get("externalResearched"),
+         metrics.get("reservedRemoved"), len(catalog),
+         round(sum(float(deal.get("estimated_profit") or 0) for deal in catalog if deal.get("status") in ("strong", "good")), 2)),
+    )
+    db.commit()
+    columns = ["startedAt", "finishedAt", "durationSeconds", "fetchSeconds", "received", "unique", "evaluated", "valued",
+               "best", "good", "watchlist", "rejected", "newListings", "newDeals", "errors", "retries", "externalResearched",
+               "reservedRemoved", "catalogSize", "catalogProfit"]
+    history = []
+    for row in db.execute("SELECT * FROM scan_runs ORDER BY started_at DESC LIMIT 400"):
+        entry = dict(zip(columns, row))
+        entry["startedAt"] = datetime.fromtimestamp(entry["startedAt"], timezone.utc).isoformat()
+        entry["finishedAt"] = datetime.fromtimestamp(entry["finishedAt"], timezone.utc).isoformat() if entry["finishedAt"] else None
+        history.append(entry)
+    return list(reversed(history))
 
 
 def record_evaluation(db, listing_id, qkey, status, reason, now, seen, has_market=True):
@@ -2069,9 +2196,12 @@ def run_once(cfg, db, dry=False):
         "rejectedAccessory": 0, "newListings": 0, "evaluated": 0, "awaitingRecheck": 0,
         "promoted": 0, "demoted": 0, "verifiedInactive": 0, "livenessChecked": 0,
         "technicalErrors": 0, "minBidCandidates": 0, "rejectedSpread": 0, "geocoded": 0,
-        "rejectedReserved": 0, "reservedRemoved": 0, "externalResearched": 0, "externalCached": 0,
+        "rejectedReserved": 0, "reservedRemoved": 0, "retries": 0, "fetchSeconds": 0, "externalResearched": 0, "externalCached": 0,
         "externalFailed": 0, "externalQueued": 0, "externalValued": 0, "externalGroundedOffers": 0,
+        "valued": 0,
     }
+    run_started = time.time()
+    rejected_sample = []
     search_issues = []
     source_health = {}
     offer_domains = {}
@@ -2128,33 +2258,55 @@ def run_once(cfg, db, dry=False):
     db.commit()
     consecutive_failures = 0
     pending_evaluations = []
+    # Stage 1 (network-bound): fetch all categories concurrently. A shared rate limiter keeps the
+    # request rate to Marktplaats polite; DB work stays sequential in this thread (SQLite).
+    fetch_plan = []
     for q in ordered_queries:
-        qkey = q["key"]
-        existing = db.execute("SELECT COUNT(*) FROM listings WHERE qkey=?", (qkey,)).fetchone()[0]
+        existing = db.execute("SELECT COUNT(*) FROM listings WHERE qkey=?", (q["key"],)).fetchone()[0]
         pages = cfg.get("seed_pages", 5) if existing == 0 else cfg.get("pages", 2)
+        search_q = dict(q)
         try:
-            search_q = dict(q)
             ai_variants = get_ai_search_variants(db, q)
-            if ai_variants:
-                search_q["ai_search_variants"] = ai_variants
-                metrics["aiSearchPlans"] += 1
-                metrics["aiSearchVariants"] += len(ai_variants)
-            try:
-                raw = fetch_query(cfg, search_q, pages)
-            except Exception as first_error:
-                if not re.search(r"\b(403|429|503)\b|timed out|reset", str(first_error)):
-                    raise
-                # Rate limit: back off and retry once instead of losing the whole category.
-                pause = min(120, 30 * (consecutive_failures + 1))
-                log(f"[{qkey}] Marktplaats ограничил запросы ({first_error}); пауза {pause} с и повтор")
-                time.sleep(pause)
-                raw = fetch_query(cfg, search_q, pages)
-            consecutive_failures = 0
         except Exception as exc:
-            log(f"[{qkey}] ошибка запроса Marktplaats: {exc}; переоцениваю сохранённые объявления и веб-источники")
+            log(f"[{q['key']}] AI-варианты поиска недоступны: {type(exc).__name__}")
+            ai_variants = []
+        if ai_variants:
+            search_q["ai_search_variants"] = ai_variants
+            metrics["aiSearchPlans"] += 1
+            metrics["aiSearchVariants"] += len(ai_variants)
+        fetch_plan.append((q, search_q, pages))
+
+    def fetch_with_retry(search_q, pages):
+        try:
+            return fetch_query(cfg, search_q, pages), 0
+        except Exception as first_error:
+            if not re.search(r"\b(403|429|503)\b|timed out|reset", str(first_error)):
+                raise
+            # Rate limit or transient network error: back off and retry once.
+            log(f"[{search_q['key']}] Marktplaats ограничил запросы ({first_error}); пауза и повтор")
+            time.sleep(float(cfg.get("rate_limit_backoff_seconds", 30)))
+            return fetch_query(cfg, search_q, pages), 1
+
+    fetch_started = time.monotonic()
+    fetched = {}
+    workers = max(1, int(cfg.get("fetch_workers", 3)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(fetch_with_retry, search_q, pages): q["key"] for q, search_q, pages in fetch_plan}
+        for future in as_completed(futures):
+            try:
+                rows, retries = future.result()
+                fetched[futures[future]] = (rows, None)
+                metrics["retries"] += retries
+            except Exception as exc:
+                fetched[futures[future]] = ([], exc)
+    metrics["fetchSeconds"] = round(time.monotonic() - fetch_started, 1)
+
+    for q, _search_q, _pages in fetch_plan:
+        qkey = q["key"]
+        raw, fetch_error = fetched.get(qkey, ([], None))
+        if fetch_error is not None:
+            log(f"[{qkey}] ошибка запроса Marktplaats: {fetch_error}; переоцениваю сохранённые объявления и веб-источники")
             fails += 1
-            consecutive_failures += 1
-            raw = []
         metrics["checked"] += len(raw)
         if q.get("key") == "rayban":
             log(f"[{qkey}] rows={len(raw)} variants={len(q.get('search_variants') or [q.get('query')])}")
@@ -2243,7 +2395,7 @@ def run_once(cfg, db, dry=False):
                 metrics["rejectedRisk"] += 1
                 feed_deals.pop(listing_id, None)
                 continue
-            group = group_of(q, item["text"])
+            group = model_group_for(q, item["title"], item["text"])
             # A confirmed product variant remains visible as a candidate but is never
             # mixed into the market median of a different configuration.
             if ai_confident and ai_decision["same_product"] and not ai_decision["comparable"]:
@@ -2311,7 +2463,7 @@ def run_once(cfg, db, dry=False):
             if risks(cached_item) is None:
                 feed_deals.pop(cached_id, None)
                 continue
-            cached_group = str(cached_deal.get("model_group") or group_of(q, cached_text))
+            cached_group = model_group_for(q, cached_title, cached_text)
             candidates[cached_id] = (cached_item, cached_group, cached_flags)
             if isinstance(cached_deal.get("ai_review"), dict):
                 ai_decisions.setdefault(cached_id, cached_deal["ai_review"])
@@ -2323,7 +2475,6 @@ def run_once(cfg, db, dry=False):
         db.commit()
 
         pending_evaluations.append((q, candidates, ai_decisions))
-        time.sleep(random.uniform(2, 4))
 
     # Phase 2: independent market value for every model group (shops, refurbishers and used
     # platforms outside Marktplaats). Phase 3: evaluate every candidate against that value.
@@ -2372,6 +2523,7 @@ def run_once(cfg, db, dry=False):
             economics = None
             market_display_price = None
             if valuation_price is not None:
+                metrics["valued"] += 1
                 economics = calculate_resale_economics(q, item["price"], valuation_price, sample_count, reference_type, reference, cfg)
                 market_display_price = market_value if reference_type == "external_used" else economics["expected_resale_price"]
                 discount = 1 - item["price"] / market_display_price if market_display_price else None
@@ -2395,6 +2547,14 @@ def run_once(cfg, db, dry=False):
                         metrics["demoted"] += 1
                     record_evaluation(db, listing_id, qkey, "rejected",
                                       "Нет прибыли относительно независимой рыночной цены", now, listing_id in seen_in_search)
+                    if len(rejected_sample) < 150:
+                        rejected_sample.append({
+                            "listing_id": listing_id, "title": item["title"][:160], "price": item["price"],
+                            "market_value": market_value, "estimated_profit": economics["estimated_profit"] if economics else None,
+                            "listing_url": item.get("url"), "category_label": q["label"], "category_key": qkey,
+                            "reason": "Нет прибыли после расходов относительно рыночной цены €%.0f" % market_value if market_value else "Нет прибыли",
+                            "image_url": item.get("image_url"),
+                        })
                     feed_deals.pop(listing_id, None)
                     continue
                 else:
@@ -2430,6 +2590,14 @@ def run_once(cfg, db, dry=False):
                 metrics["rejectedSpread"] += 1
                 status = "candidate"
                 reason = f"Большой разброс независимых цен ({spread:.0%} от медианы) — оценка ненадёжна"
+            # Far below the independent market value: typical of fakes, parts or scams — never a deal.
+            if status in ("strong", "good") and market_value and item["price"] < float(market_value) * float(cfg.get("suspicious_price_ratio", 0.4)):
+                metrics["strongDeals" if status == "strong" else "goodDeals"] -= 1
+                metrics["reviewCandidates"] += 1
+                metrics["suspiciousPrice"] = metrics.get("suspiciousPrice", 0) + 1
+                status = "candidate"
+                reason = (f"Цена в {float(market_value) / item['price']:.1f} раза ниже рынка (€{market_value:.0f}) — "
+                          "возможна подделка, деталь или мошенничество; проверьте перед покупкой")
             if item.get("ptype") == "MIN_BID":
                 if status == "candidate":
                     metrics["reviewCandidates"] -= 1
@@ -2561,7 +2729,19 @@ def run_once(cfg, db, dry=False):
     rejected_total = primary_rejected + sum(metrics[key] for key in (
         "rejectedAge", "rejectedDateUnknown", "rejectedRisk", "rejectedDiscount", "rejectedProfit"
     ))
+    finished = time.time()
+    duration = max(0.1, finished - run_started)
+    metrics["durationSeconds"] = round(duration, 1)
+    metrics["listingsPerMinute"] = round(metrics.get("unique", 0) / duration * 60, 1)
+    metrics["avgMsPerListing"] = round(duration * 1000 / max(1, metrics.get("unique", 0)), 1)
+    funnel = build_funnel({**metrics, "rejectedTotal": rejected_total}, metrics.get("newDeals", 0))
+    metrics["rejectedTotal"] = rejected_total
+    run_history = [] if dry else record_run(db, run_started, finished, metrics, fails, fresh_deals)
     feed_doc = {
+        "funnel": funnel,
+        "runHistory": run_history,
+        "priceChanges": market_price_changes(db),
+        "rejected": rejected_sample,
         "valuationVersion": FEED_SCHEMA_VERSION,
         "scannerVersion": SCANNER_DATA_VERSION,
         "updatedAt": now_iso if changed or not feed_doc.get("updatedAt") or not compatible_feed else feed_doc["updatedAt"],
