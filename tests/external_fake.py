@@ -51,6 +51,7 @@ class FakeExternalMarket:
     def __init__(self):
         self.market = None
         self.calls = []
+        self.used_domains = ("kleinanzeigen.de", "backmarket.nl")
 
     def set(self, used=(), new=()):
         self.market = {"used": list(used), "new": list(new)}
@@ -59,4 +60,4 @@ class FakeExternalMarket:
         self.calls.append([request["key"] for request in requests])
         if self.market is None:
             return []
-        return [external_result(request["key"], self.market["used"], self.market["new"]) for request in requests]
+        return [external_result(request["key"], self.market["used"], self.market["new"], used_domains=self.used_domains) for request in requests]

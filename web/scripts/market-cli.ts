@@ -32,6 +32,7 @@ await Promise.all(Array.from({ length: concurrency }, async () => {
         hint: request.hint || null,
         referencePrice: request.referencePrice ?? null,
         includeMarketplace: false,
+        skipBlockedRetail: true,
         // Gemini Google Search quota is small: the scanner leaves it to interactive questions unless enabled.
         grounding: process.env.MARKET_CLI_GROUNDING === "1",
         fresh: true,

@@ -77,7 +77,7 @@ export type MarketResearch = {
 const BROWSER_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
 const OFFICIAL = /(?:^|\.)(?:apple\.com|samsung\.com|sony\.(?:nl|com|eu)|playstation\.com|meta\.com|ray-ban\.com|dji\.com|gopro\.com|bose\.(?:nl|com)|jbl\.com|sennheiser\.com|nintendo\.com|xbox\.com|microsoft\.com|garmin\.com|canon\.(?:nl|com)|nikon\.(?:nl|com)|fujifilm\.com|lg\.com|philips\.nl|dyson\.nl|google\.com|lenovo\.com|dell\.com|hp\.com|shure\.com|rode\.com|beatsbydre\.com|casio\.com|tissotwatch\.com|michaelkors\.(?:nl|eu|com)|fjallraven\.com|thenorthface\.(?:nl|com)|osprey\.com|deuter\.com|eastpak\.com|diesel\.com|hugoboss\.com|tommy\.com)$/;
-const USED_DOMAINS = /(?:^|\.)(?:marktplaats\.nl|2dehands\.be|vinted\.nl|ebay\.[a-z.]+|vinted\.[a-z.]+|kleinanzeigen\.de|tweakers\.net|budgetgaming\.nl|gameshoptwente\.nl|catawiki\.[a-z]+|vintedgo\.com)$/;
+const USED_DOMAINS = /(?:^|\.)(?:marktplaats\.nl|2dehands\.be|vinted\.nl|willhaben\.at|subito\.it|ebay\.[a-z.]+|vinted\.[a-z.]+|kleinanzeigen\.de|tweakers\.net|budgetgaming\.nl|gameshoptwente\.nl|catawiki\.[a-z]+|vintedgo\.com)$/;
 const REFURB_DOMAINS = /(?:^|\.)(?:backmarket\.[a-z.]+|refurbed\.[a-z.]+|swappie\.com|forzarefurbished\.nl|rebuy\.[a-z.]+|leapp\.nl|renewd\.com|mobilezwaar\.nl|refurbishedstore\.nl|ireparatie\.nl|thephonelab\.nl)$/;
 const NEW_RETAIL = /(?:^|\.)(?:alternate\.nl|coolblue\.(?:nl|be)|bol\.com|mediamarkt\.(?:nl|be)|amazon\.(?:nl|de|com\.be)|alternate\.(?:nl|be)|bcc\.nl|expert\.nl|ep\.nl|wehkamp\.nl|kamera-express\.nl|cameranu\.nl|fotokonijnenberg\.nl|belsimpel\.nl|megekko\.nl|azerty\.nl|informatique\.nl|paradigit\.nl|intertoys\.nl|gamemania\.nl|nedgame\.nl|koopmanoptics\.com|pearle\.nl|hansanders\.nl|specsavers\.nl|baumsport\.nl|supersales\.nl|kieskeurig\.nl|beslist\.nl|bax-shop\.nl|thomann\.(?:de|nl)|mobiel\.nl|gsmpunt\.nl|dreamland\.be|vandenborre\.be|krefel\.be|fnac\.(?:be|nl)|hifi\.nl|hificorner\.nl|zalando\.nl|debijenkorf\.nl|otto\.nl|sunglasshut\.com|optiek\.nl)$/;
 const SKIP_PAGES = /(?:^|\.)(?:marktplaats\.nl|2dehands\.be)$/;
@@ -257,6 +257,8 @@ export type ResearchOptions = {
   referencePrice?: number | null;
   /** Also collect current Marktplaats/2dehands listings as context (default true). */
   includeMarketplace?: boolean;
+  /** Scanner only: skip shops that never answer its servers. */
+  skipBlockedRetail?: boolean;
   /** Marktplaats result pages for buyable listings (100 per page). */
   marketplacePages?: number;
   /** Skip the in-memory cache: a fresh valuation was requested. */
@@ -391,6 +393,56 @@ async function fetchVinted(name: string, deadline: number) {
   return rows;
 }
 
+type ClassifiedRow = { title: string; description: string; offer: Omit<MarketOffer, "id" | "match" | "matchReason" | "segment"> };
+
+function nextData(html: string): unknown {
+  const raw = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/)?.[1];
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+/** Willhaben.at search page: private and shop listings in euro from the page's own data. */
+export function parseWillhaben(html: string): ClassifiedRow[] {
+  const data = nextData(html) as { props?: { pageProps?: { searchResult?: { advertSummaryList?: { advertSummary?: Array<{ description?: string; attributes?: { attribute?: Array<{ name: string; values: string[] }> } }> } } } } } | null;
+  const rows: ClassifiedRow[] = [];
+  for (const ad of data?.props?.pageProps?.searchResult?.advertSummaryList?.advertSummary || []) {
+    const attribute = (name: string) => ad.attributes?.attribute?.find((item) => item.name === name)?.values?.[0] || "";
+    const title = attribute("HEADING") || ad.description || "";
+    const price = Number(attribute("PRICE"));
+    const path = attribute("SEO_URL");
+    if (!title || !path || !Number.isFinite(price) || price < 5) continue;
+    rows.push({ title, description: attribute("BODY_DYN"), offer: { title: title.slice(0, 220), price, url: "https://www.willhaben.at/iad/" + path.replace(/^\//, ""), domain: "willhaben.at", method: "text", official: false, availability: "in_stock", priceType: "FIXED" } });
+  }
+  return rows;
+}
+
+/** Subito.it search page: "in vendita" listings only; "cerco" (wanted) ads are skipped. */
+export function parseSubito(html: string): ClassifiedRow[] {
+  type Ad = { kind?: string; subject?: string; body?: string; type?: { key?: string }; urls?: { default?: string }; features?: Record<string, { values?: Array<{ key?: string }> }> };
+  const data = nextData(html) as { props?: { pageProps?: { initialState?: { items?: { originalList?: Ad[]; list?: Array<Ad & { item?: Ad }> } } } } } | null;
+  const items = data?.props?.pageProps?.initialState?.items;
+  const ads = items?.originalList?.length ? items.originalList : (items?.list || []).map((row) => row.item || row);
+  const rows: ClassifiedRow[] = [];
+  for (const ad of ads) {
+    const price = Number(ad.features?.["/price"]?.values?.[0]?.key);
+    if (ad.kind !== "AdItem" || ad.type?.key !== "s" || !ad.subject || !ad.urls?.default || !Number.isFinite(price) || price < 5) continue;
+    rows.push({ title: ad.subject, description: ad.body || "", offer: { title: ad.subject.slice(0, 220), price, url: ad.urls.default, domain: "subito.it", method: "text", official: false, availability: "in_stock", priceType: "FIXED" } });
+  }
+  return rows;
+}
+
+async function fetchWillhaben(name: string, deadline: number) {
+  const page = await fetchPage("https://www.willhaben.at/iad/kaufen-und-verkaufen/marktplatz?keyword=" + encodeURIComponent(name), deadline);
+  if (!page) throw new Error("страница недоступна");
+  return parseWillhaben(page.html);
+}
+
+async function fetchSubito(name: string, deadline: number) {
+  const page = await fetchPage("https://www.subito.it/annunci-italia/vendita/usato/?q=" + encodeURIComponent(name), deadline);
+  if (!page) throw new Error("страница недоступна");
+  return parseSubito(page.html);
+}
+
 /** Alternate.nl: Dutch electronics shop (search result cards with name and price). */
 async function fetchAlternate(name: string, deadline: number) {
   const page = await fetchPage("https://www.alternate.nl/listing.xhtml?q=" + encodeURIComponent(name), deadline);
@@ -517,9 +569,12 @@ export async function researchMarket(title: string, options: ResearchOptions = {
   const directPages: string[] = [];
   if (includeNew) {
     directPages.push("https://www.coolblue.nl/zoeken?query=" + encodeURIComponent(name));
-    directPages.push("https://www.mediamarkt.nl/nl/search.html?query=" + encodeURIComponent(name));
-    // beslist.nl aggregates many Dutch shops (JSON-LD ItemList of Products with prices).
-    directPages.push("https://www.beslist.nl/products/r/" + encodeURIComponent(name.toLowerCase()).replace(/%20/g, "+") + "/");
+    // These two answered 0 of 120 requests from the scanner's servers: not worth its time budget.
+    if (!options.skipBlockedRetail) {
+      directPages.push("https://www.mediamarkt.nl/nl/search.html?query=" + encodeURIComponent(name));
+      // beslist.nl aggregates many Dutch shops (JSON-LD ItemList of Products with prices).
+      directPages.push("https://www.beslist.nl/products/r/" + encodeURIComponent(name.toLowerCase()).replace(/%20/g, "+") + "/");
+    }
   }
   const directTasks: Promise<void>[] = [];
   const sourceHealth: MarketResearch["sourceHealth"] = {};
@@ -551,6 +606,14 @@ export async function researchMarket(title: string, options: ResearchOptions = {
       healthy("Kleinanzeigen", rows.length);
       for (const row of rows) accept(row.offer, "used", row.title, row.description);
     }).catch(sourceErrors("Kleinanzeigen")));
+  }
+  if (includeUsed) {
+    for (const [label, fetcher] of [["Willhaben", fetchWillhaben], ["Subito", fetchSubito]] as const) {
+      directTasks.push(fetcher(name, deadline).then((rows) => {
+        healthy(label, rows.length);
+        for (const row of rows) accept(row.offer, "used", row.title, row.description);
+      }).catch(sourceErrors(label)));
+    }
   }
   if (includeRefurbished) {
     directTasks.push(fetchRefurbed(name, deadline).then((rows) => {

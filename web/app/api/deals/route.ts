@@ -96,6 +96,13 @@ function isNewCondition(deal: Deal): boolean {
   return /^nieuw$/i.test(String(deal.item_condition || "").trim());
 }
 
+/** A list row without the heavy fields a card does not show. */
+function cardOnly(deal: Deal): Record<string, unknown> {
+  const card: Record<string, unknown> = { ...deal };
+  for (const field of ["description", "market_sources", "ai_review", "valuation_reason", "evaluated_at", "last_seen_at", "next_check_at", "market_checked_at"]) delete card[field];
+  return card;
+}
+
 /**
  * Catalogue API. All user settings are applied here, on the server:
  * location + radius (haversine on listing coordinates), price range, discount, profit, ROI,
@@ -118,7 +125,7 @@ export async function GET(request: NextRequest) {
       // Confirmed profit, plus listings the radar could not price yet. A candidate that has a market
       // value was judged not worth buying and stays hidden, unless the user saved it.
       ? feed.deals.filter(isDeal).filter((deal) => deal.active !== false && deal.reserved !== true && isRecent(deal)
-        && (deal.status === "strong" || deal.status === "good" || (deal.status === "candidate" && (deal.market_value == null || params.has("ids")))))
+        && (deal.status === "strong" || deal.status === "good" || (deal.status === "candidate" && (deal.market_value == null || deal.needs_confirmation === true || params.has("ids")))))
       : [];
 
     const lat = parseCoordinate(params.get("lat"), -90, 90);
@@ -198,8 +205,10 @@ export async function GET(request: NextRequest) {
     }
     const counts: CatalogCounts = { feed: all.length, matched: deals.length, unknownLocation, outsideRadius, byStatus };
 
+    // The list needs no descriptions or source lists; a card loads them by id when opened.
+    const compact = params.get("compact") === "1" && !params.has("ids");
     return NextResponse.json({
-      deals,
+      deals: compact ? deals.map(cardOnly) : deals,
       count: deals.length,
       catalogCount: all.length,
       counts,

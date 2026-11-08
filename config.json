@@ -1105,6 +1105,14 @@
   "liveness_checks_per_run": 120,
   "liveness_after_hours": 36,
   "geocode_per_run": 400,
+  "single_source_min_offers": 5,
+  "single_source_max_spread": 0.5,
+  "notifications": {
+    "enabled": true,
+    "min_profit_eur": 0,
+    "max_per_run": 8,
+    "categories": []
+  },
   "external_market": {
     "per_run": 60,
     "concurrency": 3,

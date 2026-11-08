@@ -9,6 +9,11 @@ export type Deal = {
   market_median_price?: number | null;
   discount: number | null;
   expected_resale_price?: number | null;
+  /** Highest price that still clears the category profit floor. */
+  max_offer_price?: number | null;
+  opening_offer_price?: number | null;
+  /** Priced by one website only: shown as waiting until a second one confirms it. */
+  needs_confirmation?: boolean;
   estimated_profit?: number | null;
   profit_roi?: number | null;
   price_reference_type?: "external_used" | "marktplaats" | "web_used" | "new_retail" | "insufficient_data";

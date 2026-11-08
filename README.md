@@ -213,3 +213,14 @@ Profit estimates reserve 5% against the observed Marktplaats median, 4% for buye
 ## Редактирование дизайна
 
 Визуальная тема находится в `web/design/index.html`. Редактируй CSS внутри тега `<style>`: цвета, шрифты, размеры, отступы, карточки, кнопки, адаптивность и анимации. Next.js автоматически подключает эти стили из файла. Логика API, Telegram, сканера и расчётов остаётся отдельно. Структура интерактивных React-компонентов и обработчики событий находятся в `web/app/page.tsx`; при изменении структуры функциональных блоков обновляй соответствующую React-разметку, сохраняя существующие CSS-классы.
+
+## Telegram notifications
+
+The scanner sends new Best and Good deals to Telegram once, and again only if a deal is upgraded.
+Without these two GitHub repository secrets it simply does not send anything:
+
+- `TELEGRAM_TOKEN`: the bot token.
+- `TELEGRAM_CHAT_ID`: your chat id, shown in the app under the settings icon.
+
+`notifications` in `config.json` sets the minimum profit, the categories and the limit per run.
+The first run sends one confirmation message instead of the whole catalog.

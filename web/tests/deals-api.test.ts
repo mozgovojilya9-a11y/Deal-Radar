@@ -45,3 +45,10 @@ test("priced unprofitable listings are hidden, unpriced ones stay visible, a sav
   assert.ok(!(await call("")).deals.some((d: { listing_id: string }) => d.listing_id === "watch"));
   assert.deepEqual((await call("ids=watch")).deals.map((d: { listing_id: string }) => d.listing_id), ["watch"]);
 });
+
+test("the compact list drops heavy fields, opening by id still returns them", async () => {
+  const row = (await call("compact=1")).deals[0];
+  assert.equal("description" in row, false);
+  assert.equal("market_sources" in row, false);
+  assert.equal("description" in (await call("compact=1&ids=ams")).deals[0], true);
+});

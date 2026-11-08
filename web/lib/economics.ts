@@ -48,3 +48,11 @@ export function resaleEconomics(askingPrice: number, resaleBasis: number, basisI
     roi: invested > 0 ? Math.round((profit / invested) * 10000) / 10000 : -1,
   };
 }
+
+/** Highest price that still clears the profit and ROI floors, and a first offer, both rounded down to €5. */
+export function offerLimits(askingPrice: number, netSale: number, minProfit = 50, minRoi: number = PROFITABILITY.min_roi): { maxOffer: number | null; openingOffer: number | null } {
+  const limit = Math.min(netSale - minProfit, netSale / (1 + minRoi)) - PROFITABILITY.extra_cost_eur;
+  if (limit < 5) return { maxOffer: null, openingOffer: null };
+  const maxOffer = Math.floor(limit / 5) * 5;
+  return { maxOffer, openingOffer: Math.min(maxOffer, Math.floor((askingPrice * 0.9) / 5) * 5) };
+}

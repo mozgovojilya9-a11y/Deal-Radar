@@ -129,6 +129,30 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(any("bieden" in flag for flag in feed["bid-deal"]["warning_flags"]))
         self.assertEqual(feed["bid-deal"]["market_value"], 400.0)
 
+    def test_thin_evidence_from_one_website_is_held_back(self):
+        self.external.used_domains = ("kleinanzeigen.de",)
+        self.external.set(used=[400] * 3)
+        self.scan([listing("thin", 200)])
+        deal = self.feed()["thin"]
+        self.assertEqual(deal["status"], "candidate")
+        self.assertTrue(deal["needs_confirmation"])
+
+    def test_solid_sample_from_one_website_can_still_be_good(self):
+        self.external.used_domains = ("kleinanzeigen.de",)
+        self.external.set(used=[400] * 6)
+        self.scan([listing("solid", 200)])
+        deal = self.feed()["solid"]
+        self.assertEqual(deal["status"], "good")
+        self.assertFalse(deal["needs_confirmation"])
+
+    def test_good_deal_tells_how_far_to_negotiate(self):
+        self.external.set(used=[400] * 6)
+        self.scan([listing("offer", 250)])
+        deal = self.feed()["offer"]
+        self.assertGreaterEqual(deal["max_offer_price"], 250)
+        self.assertEqual(deal["max_offer_price"] % 5, 0)
+        self.assertLessEqual(deal["opening_offer_price"], 225)
+
     def small_profit_status(self, **limits):
         self.external.set(used=[400] * 6)
         self.scan([listing("small", 285)], cfg=dict(CFG, queries=[dict(CFG["queries"][0], min_roi=0.05, good_threshold=0.1, min_profit_eur=25, **limits)]))

@@ -3,6 +3,7 @@
 # Gemini free-tier integration is configured through GEMINI_API_KEY; no paid API is used.
 import argparse
 import json
+import math
 import os
 import hashlib
 import html as html_lib
@@ -29,7 +30,7 @@ RETAIL_PATH = os.environ.get("DEAL_RETAIL_PRICES", os.path.join(HERE, "retail_pr
 API = "https://www.marktplaats.nl/lrp/api/search"
 SCANNER_DATA_VERSION = "4"
 # Raise when valuation rules change: Good/Strong deals decided under older rules are re-checked at once.
-VALUATION_RULES = 2
+VALUATION_RULES = 3
 FEED_SCHEMA_VERSION = 2
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
@@ -66,6 +67,7 @@ def open_db():
             first_seen INTEGER, last_seen INTEGER);
         CREATE INDEX IF NOT EXISTS ix_q ON listings(qkey, grp, last_seen);
         CREATE TABLE IF NOT EXISTS sent(id TEXT PRIMARY KEY, ts INTEGER);
+        CREATE TABLE IF NOT EXISTS notified(id TEXT PRIMARY KEY, status TEXT, ts INTEGER);
         CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
         CREATE TABLE IF NOT EXISTS ai_reviews(
             id TEXT NOT NULL, qkey TEXT NOT NULL, fingerprint TEXT NOT NULL,
@@ -1743,7 +1745,13 @@ def calculate_resale_economics(q, asking_price, reference_price, sample_count, r
     if retail_proxy:
         min_profit = max(min_profit, float(rules.get("retail_proxy_min_profit_eur", 70)))
         min_roi = max(min_roi, float(rules.get("retail_proxy_min_roi", 0.35)))
+    # The most one can pay and still clear this category's profit and ROI floors.
+    deal_floor = max(min_profit, float(q.get("min_deal_profit", 50)))
+    offer_limit = min(net_sale - deal_floor, net_sale / (1 + min_roi)) - refurb
+    max_offer = math.floor(offer_limit / 5) * 5 if offer_limit >= 5 else None
     return {
+        "max_offer_price": max_offer,
+        "opening_offer_price": min(max_offer, math.floor(float(asking_price) * 0.9 / 5) * 5) if max_offer else None,
         "expected_resale_price": round(expected_resale, 2),
         "estimated_profit": round(profit, 2),
         "profit_roi": round(roi, 4),
@@ -2122,6 +2130,91 @@ def revalue_for_listings(pending, externals, metrics):
     return result
 
 
+TELEGRAM_LIMIT_SECONDS = 1.2
+STATUS_RANK = {"good": 1, "strong": 2}
+
+
+def send_telegram(token, chat_id, text, button=None):
+    """Sends one HTML message; the bot token is never written to the log."""
+    payload = {"chat_id": chat_id, "text": text[:4000], "parse_mode": "HTML", "disable_web_page_preview": False}
+    if button:
+        payload["reply_markup"] = {"inline_keyboard": [[{"text": button[0], "url": button[1]}]]}
+    request = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage",
+                                     data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return 200 <= response.status < 300
+    except urllib.error.HTTPError as exc:
+        log(f"Telegram отклонил сообщение: HTTP {exc.code}")
+    except (urllib.error.URLError, OSError) as exc:
+        log(f"Telegram недоступен: {type(exc).__name__}")
+    return False
+
+
+def euro_text(value):
+    return "€" + f"{float(value):,.0f}".replace(",", ".")
+
+
+def deal_message(deal, upgraded=False):
+    """Telegram card for one deal: what it is, why it pays, and how far to go when negotiating."""
+    head = {"strong": "🔥 Best deal", "good": "✅ Good deal"}[deal["status"]] + (" · повышен" if upgraded else "")
+    lines = [f"<b>{head}</b> · {html_lib.escape(str(deal.get('category_label') or ''))}", html_lib.escape(str(deal.get("title") or "")), "",
+             f"Цена: <b>{euro_text(deal['price'])}</b> · рынок ≈ {euro_text(deal['market_value'])}" if deal.get("market_value") else f"Цена: <b>{euro_text(deal['price'])}</b>",
+             f"Прибыль после расходов: <b>{euro_text(deal['estimated_profit'])}</b> (ROI {round(float(deal.get('profit_roi') or 0) * 100)}%)"]
+    if deal.get("max_offer_price"):
+        lines.append(f"Торг: начни с {euro_text(deal['opening_offer_price'])}, максимум {euro_text(deal['max_offer_price'])}")
+    place = " · ".join(str(item) for item in (deal.get("city"), f"{round(deal['distance_km'])} км" if isinstance(deal.get("distance_km"), (int, float)) and deal["distance_km"] >= 0 else None) if item)
+    if place:
+        lines.append(html_lib.escape(place))
+    return "\n".join(lines)
+
+
+def notify_new_deals(db, deals, cfg, now):
+    """Telegram alerts for confirmed deals; each listing once, and again only when it is upgraded.
+
+    A deal is recorded as notified only after Telegram accepted it, so a failed send is retried next run.
+    """
+    settings = cfg.get("notifications") or {}
+    token, chat_id = os.environ.get("TELEGRAM_TOKEN", "").strip(), os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if not settings.get("enabled") or not token or not chat_id:
+        return
+    categories = set(settings.get("categories") or [])
+    wanted = [deal for deal in deals
+              if deal.get("status") in STATUS_RANK and deal.get("active") is not False and not deal.get("reserved")
+              and deal.get("valuation_rules") == VALUATION_RULES and deal.get("estimated_profit") is not None
+              and str(deal.get("listing_url") or "").startswith("https://")
+              and float(deal["estimated_profit"]) >= float(settings.get("min_profit_eur", 0))
+              and (not categories or deal.get("category_key") in categories)]
+    known = dict(db.execute("SELECT id, status FROM notified").fetchall())
+    remember = lambda deal: db.execute("INSERT OR REPLACE INTO notified VALUES(?,?,?)", (deal["listing_id"], deal["status"], now))
+    if not known:
+        # First run: the whole current catalog is not news. Confirm the channel works instead of flooding it.
+        if send_telegram(token, chat_id, f"🔔 <b>Уведомления Deal Radar включены</b>\nСейчас в каталоге выгодных: {len(wanted)}. Дальше пришлю только новые."):
+            for deal in wanted:
+                remember(deal)
+            if not wanted:
+                db.execute("INSERT OR REPLACE INTO notified VALUES('__enabled__','system',?)", (now,))
+            db.commit()
+        return
+    fresh = [deal for deal in wanted if STATUS_RANK[deal["status"]] > STATUS_RANK.get(known.get(deal["listing_id"]), 0)]
+    fresh.sort(key=lambda deal: (-STATUS_RANK[deal["status"]], -float(deal["estimated_profit"])))
+    limit = int(settings.get("max_per_run", 8))
+    for index, deal in enumerate(fresh[:limit]):
+        if index:
+            time.sleep(TELEGRAM_LIMIT_SECONDS)
+        if not send_telegram(token, chat_id, deal_message(deal, deal["listing_id"] in known), ("Открыть на Marktplaats", deal["listing_url"])):
+            db.commit()
+            return
+        remember(deal)
+    overflow = fresh[limit:]
+    if overflow:
+        time.sleep(TELEGRAM_LIMIT_SECONDS)
+        if send_telegram(token, chat_id, f"Ещё новых выгодных предложений: {len(overflow)}. Они в каталоге Deal Radar."):
+            for deal in overflow:
+                remember(deal)
+    db.commit()
+
+
 def build_funnel(metrics, catalog_new):
     """Processing funnel of this run: how many listings passed each stage and why the rest did not."""
     basic = {key: metrics.get(key, 0) for key in ("rejectedTitle", "rejectedAccessory", "aiRejected", "rejectedOldModel",
@@ -2237,6 +2330,8 @@ def make_feed_deal(q, it, med, discount, flags, grp, status, market_samples, rea
         "market_median_price": round(float(market_median_price), 2) if market_median_price is not None else None,
         "discount": round(float(discount), 4) if discount is not None else None,
         "expected_resale_price": economics.get("expected_resale_price"),
+        "max_offer_price": economics.get("max_offer_price"),
+        "opening_offer_price": economics.get("opening_offer_price"),
         "estimated_profit": economics.get("estimated_profit"),
         "profit_roi": economics.get("profit_roi"),
         "price_reference_type": reference_type,
@@ -2679,6 +2774,18 @@ def run_once(cfg, db, dry=False):
                 metrics["rejectedSpread"] += 1
                 status = "candidate"
                 reason = f"Большой разброс независимых цен ({spread:.0%} от медианы) — оценка ненадёжна"
+            # One website's asking prices are thin evidence: it needs a solid, consistent sample.
+            needs_confirmation = False
+            used_domains = {offer.get("domain") for offer in offers if offer.get("segment") == "used"}
+            if status in ("strong", "good") and reference_type == "external_used" and len(used_domains) < 2 \
+                    and (used_count < int(cfg.get("single_source_min_offers", 5))
+                         or spread is None or spread > float(cfg.get("single_source_max_spread", 0.5))):
+                metrics["strongDeals" if status == "strong" else "goodDeals"] -= 1
+                metrics["reviewCandidates"] += 1
+                metrics["singleSourceHeld"] = metrics.get("singleSourceHeld", 0) + 1
+                status = "candidate"
+                needs_confirmation = True
+                reason = "Цены только с одной площадки и их мало — нужна вторая площадка, чтобы подтвердить выгоду"
             # Far below the independent market value: typical of fakes, parts or scams — never a deal.
             if status in ("strong", "good") and market_value and item["price"] < float(market_value) * float(cfg.get("suspicious_price_ratio", 0.4)):
                 metrics["strongDeals" if status == "strong" else "goodDeals"] -= 1
@@ -2756,6 +2863,7 @@ def run_once(cfg, db, dry=False):
                 "market_checked_at": checked_iso,
                 "market_stale": stale,
                 "valuation_rules": VALUATION_RULES,
+                "needs_confirmation": needs_confirmation,
                 "valuation_reason": valuation.get("reason") or None,
                 "market_confidence": ("high" if confidence == "high" else "preliminary" if confidence == "medium" else "none")
                     if reference_type == "external_used" else ("retail_proxy" if reference_type == "new_retail" else "none"),
@@ -2848,6 +2956,7 @@ def run_once(cfg, db, dry=False):
     else:
         save_feed(feed_doc)
         log(f"каталог сохранён: {len(fresh_deals)} предложений" + (" (есть изменения)" if changed else ""))
+        notify_new_deals(db, fresh_deals, cfg, now)
     log(f"готово: результатов {metrics['checked']}, уникальных {metrics['unique']}, "
         f"повторов {metrics['duplicates']}, первично принято {metrics['accepted']}, "
         f"кандидатов {metrics['candidates']}, сильных {metrics['strongDeals']}, "

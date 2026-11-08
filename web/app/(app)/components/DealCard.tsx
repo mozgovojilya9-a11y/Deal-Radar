@@ -8,7 +8,7 @@ export function distanceOf(deal: Deal): number | null {
   return deal.distance_km != null && deal.distance_km >= 0 ? deal.distance_km : null;
 }
 
-export function DealCard({ deal, saved, onSave, onOpen }: { deal: Deal; saved: boolean; onSave: () => void; onOpen: () => void }) {
+export function DealCard({ deal, saved, isNew, onSave, onOpen }: { deal: Deal; saved: boolean; isNew?: boolean; onSave: () => void; onOpen: () => void }) {
   const status = deal.status || "candidate";
   const candidate = status === "candidate";
   const discount = deal.discount == null ? null : Math.max(0, Math.round(Number(deal.discount) * 100));
@@ -28,7 +28,7 @@ export function DealCard({ deal, saved, onSave, onOpen }: { deal: Deal; saved: b
           <span className={"discount-pill" + (candidate ? " candidate-pill" : status === "good" ? " good-pill" : "")}>
             {discount === null ? "Проверка" : (candidate ? "≈ −" : "−") + discount + "%"}
           </span>
-          {deal.status_changed && !candidate ? <span className="fresh-pill">повышен</span> : null}
+          {isNew ? <span className="fresh-pill">новое</span> : deal.status_changed && !candidate ? <span className="fresh-pill">повышен</span> : null}
         </div>
       </button>
       <div className="deal-content">
@@ -46,6 +46,7 @@ export function DealCard({ deal, saved, onSave, onOpen }: { deal: Deal; saved: b
             <strong>{euro(deal.estimated_profit)}{deal.profit_roi != null ? <em>ROI {Math.round(deal.profit_roi * 100)}%</em> : null}</strong>
           </div>
         ) : <p className="candidate-explanation">{deal.evaluation_reason || "Недостаточно сопоставимых цен."}</p>}
+        {!candidate && deal.max_offer_price ? <p className="offer-line">Торг: начни с {euro(deal.opening_offer_price)}, максимум {euro(deal.max_offer_price)}</p> : null}
         <div className="evidence-line" title="Независимые источники рыночной цены и уверенность оценки">
           <span className={"confidence-badge c-" + confidence.toLowerCase()}>{confidence}</span>{evidence}
           {deal.discount != null && deal.discount > 0 ? <span className="discount-text"> · −{Math.round(deal.discount * 100)}%</span> : null}

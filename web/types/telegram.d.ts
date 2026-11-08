@@ -16,6 +16,12 @@ declare global {
         expand: () => void;
         setHeaderColor?: (color: string) => void;
         setBackgroundColor?: (color: string) => void;
+        BackButton?: {
+          show: () => void;
+          hide: () => void;
+          onClick: (callback: () => void) => void;
+          offClick: (callback: () => void) => void;
+        };
         HapticFeedback?: {
           impactOccurred: (style: "light" | "medium" | "heavy") => void;
           notificationOccurred: (type: "error" | "success" | "warning") => void;

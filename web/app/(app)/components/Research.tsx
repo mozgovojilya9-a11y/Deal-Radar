@@ -7,7 +7,7 @@ import type { SearchSettings } from "@/lib/settings";
 import { radiusLabel } from "@/lib/settings";
 import { euro, pct } from "./ui";
 
-type Offer = { id: number; title: string; price: number; url: string; domain: string; segment: "new" | "used" | "refurbished"; city?: string; distanceKm?: number | null; itemCondition?: string | null; official?: boolean; estimatedProfit?: number | null; profitRoi?: number | null; status?: string; imageUrl?: string | null; postedAt?: string | null; warning?: string | null };
+type Offer = { id: number; title: string; price: number; url: string; domain: string; segment: "new" | "used" | "refurbished"; city?: string; distanceKm?: number | null; itemCondition?: string | null; official?: boolean; estimatedProfit?: number | null; profitRoi?: number | null; maxOffer?: number | null; openingOffer?: number | null; status?: string; imageUrl?: string | null; postedAt?: string | null; warning?: string | null };
 type Result = {
   query: string; originalQuery?: string; corrections?: string[]; checkedAt: string; durationMs: number;
   identity: { searchName: string; aliases: string[]; modelCodes: string[] };
@@ -34,7 +34,7 @@ function toDeal(item: Offer, result: Result): Deal {
   return {
     listing_id: "search-" + (item.url.match(/m\d{6,}/)?.[0] || item.id), title: item.title, description: null, price: item.price,
     market_price: value, market_value: value, discount: value ? 1 - item.price / value : null, estimated_profit: item.estimatedProfit ?? null,
-    profit_roi: item.profitRoi ?? null, price_reference_type: value ? "external_used" : "insufficient_data",
+    profit_roi: item.profitRoi ?? null, max_offer_price: item.maxOffer ?? null, opening_offer_price: item.openingOffer ?? null, price_reference_type: value ? "external_used" : "insufficient_data",
     market_confidence: result.valuation.confidence === "high" ? "high" : result.valuation.confidence === "medium" ? "preliminary" : "none",
     market_samples: result.segments.used.count, new_price: result.valuation.newValue, used_price: result.valuation.usedValue,
     refurbished_price: result.valuation.refurbishedValue, external_sources: result.valuation.sourceCount, market_checked_at: result.checkedAt,
@@ -138,6 +138,7 @@ export function Research({ settings, onOpen }: { settings: SearchSettings; onOpe
                     <span className={item.estimatedProfit != null && item.estimatedProfit >= 0 ? "profit-plus" : "profit-minus"}>{item.estimatedProfit == null ? "прибыль —" : (item.estimatedProfit >= 0 ? "+" : "") + euro(item.estimatedProfit) + " · " + pct(item.profitRoi)}</span>
                     {value ? <span>−{Math.max(0, Math.round((1 - item.price / value) * 100))}%</span> : null}
                   </div>
+                  {item.maxOffer ? <p className="offer-line">Торг: начни с {euro(item.openingOffer)}, максимум {euro(item.maxOffer)}</p> : null}
                   <div className="search-result-actions">
                     <span className={"confidence-badge c-" + confidence.toLowerCase()}>{confidence}</span>
                     {item.warning ? <span className="status-warn">⚠ {item.warning}</span> : <span className="status-ok">Активно</span>}

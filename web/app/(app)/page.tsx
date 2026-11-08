@@ -5,10 +5,12 @@ import type { CatalogCounts, Deal, ScannerStats } from "@/lib/deals";
 import { CATEGORIES, CATEGORY_GROUPS, categoryLabel, groupOf } from "@/lib/categories";
 import { normalizeText } from "@/lib/product-identity";
 import { activeSettingsCount, loadSettings, radiusLabel, saveSettings, settingsQuery, type SearchSettings, DEFAULT_SETTINGS } from "@/lib/settings";
+import { addPurchase, loadPurchases, savePurchases, type Purchase } from "@/lib/purchases";
 import { Analytics } from "./components/Analytics";
 import { Dashboard } from "./components/Dashboard";
-import { DealCard } from "./components/DealCard";
 import { DealDetail } from "./components/DealDetail";
+import { DealGrid } from "./components/DealGrid";
+import { Purchases } from "./components/Purchases";
 import { Research } from "./components/Research";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { Icon, ageLabel, euro, plural } from "./components/ui";
@@ -20,6 +22,9 @@ type TelegramProfile = { id: number; firstName: string; lastName: string; userna
 
 const FAVORITES_KEY = "deal-radar-favorites";
 const REFRESH_MS = 120_000;
+const HIDDEN_KEY = "deal-radar-hidden";
+const SEEN_KEY = "deal-radar-seen-deals";
+const SORT_KEY = "deal-radar-sort";
 const SORTS: Array<[Sort, string]> = [["profit", "По прибыли"], ["score", "Лучшее сочетание"], ["distance", "Ближе ко мне"], ["discount", "По скидке"], ["newest", "Сначала новые"], ["price", "Сначала дешевле"]];
 
 function matchesText(deal: Deal, query: string): boolean {
@@ -50,6 +55,11 @@ export default function HomePage() {
   const [savedDeals, setSavedDeals] = useState<Deal[]>([]);
   const [savedLoading, setSavedLoading] = useState(false);
   const [selected, setSelected] = useState<Deal | null>(null);
+  const [hidden, setHidden] = useState<string[]>([]);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [savedView, setSavedView] = useState<"saved" | "bought">("saved");
+  const [newIds, setNewIds] = useState<Set<string>>(new Set());
+  const [copiedId, setCopiedId] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profile, setProfile] = useState<TelegramProfile | null>(null);
   const [exploreView, setExploreView] = useState<"categories" | "research">("research");
@@ -58,7 +68,14 @@ export default function HomePage() {
   useEffect(() => {
     const stored = loadSettings();
     setSettings(stored);
-    setSort(stored.priority === "distance" && stored.location ? "distance" : "profit");
+    let storedSort: string | null = null;
+    try { storedSort = localStorage.getItem(SORT_KEY); } catch { /* storage unavailable */ }
+    setSort(SORTS.some(([key]) => key === storedSort) && (storedSort !== "distance" || stored.location) ? storedSort as Sort : stored.priority === "distance" && stored.location ? "distance" : "profit");
+    setPurchases(loadPurchases());
+    try {
+      const stored_hidden = JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]");
+      setHidden(Array.isArray(stored_hidden) ? stored_hidden.filter((id): id is string => typeof id === "string") : []);
+    } catch { setHidden([]); }
     try {
       const favorites = JSON.parse(localStorage.getItem(FAVORITES_KEY) || "[]");
       setSaved(Array.isArray(favorites) ? favorites.filter((id): id is string => typeof id === "string") : []);
@@ -83,7 +100,7 @@ export default function HomePage() {
     const id = ++requestId.current;
     if (silent) setRefreshing(true); else setLoading(true);
     try {
-      const response = await fetch("/api/deals?" + query, { cache: "no-store" });
+      const response = await fetch("/api/deals?compact=1&" + query, { cache: "no-store" });
       const data = await response.json();
       if (id !== requestId.current) return;
       if (!response.ok) throw new Error(data.error || "Не удалось загрузить каталог");
@@ -140,10 +157,49 @@ export default function HomePage() {
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred("light");
   }
 
-  const visible = useMemo(() => deals.filter((deal) => {
+  const shownDeals = useMemo(() => { const skip = new Set(hidden); return deals.filter((deal) => !skip.has(deal.listing_id)); }, [deals, hidden]);
+  const profitableIds = useMemo(() => deals.filter((deal) => deal.status !== "candidate").map((deal) => deal.listing_id), [deals]);
+
+  // "New" means: a profitable listing this device has not been shown yet. The very first visit marks nothing.
+  useEffect(() => {
+    if (!lastLoaded) return;
+    let seen: string[] | null = null;
+    try { const raw = localStorage.getItem(SEEN_KEY); seen = raw ? JSON.parse(raw) : null; } catch { seen = null; }
+    if (!Array.isArray(seen)) {
+      try { localStorage.setItem(SEEN_KEY, JSON.stringify(profitableIds)); } catch { /* storage unavailable */ }
+      return;
+    }
+    const known = new Set(seen);
+    setNewIds(new Set(profitableIds.filter((id) => !known.has(id))));
+  }, [profitableIds, lastLoaded]);
+
+  const previousTab = useRef<Tab>("overview");
+  useEffect(() => {
+    if (previousTab.current === "home" && tab !== "home") {
+      try {
+        const stored = JSON.parse(localStorage.getItem(SEEN_KEY) || "[]");
+        localStorage.setItem(SEEN_KEY, JSON.stringify([...new Set([...(Array.isArray(stored) ? stored : []), ...profitableIds])].slice(-3000)));
+      } catch { /* storage unavailable */ }
+      setNewIds(new Set());
+    }
+    previousTab.current = tab;
+  }, [tab, profitableIds]);
+
+  // Telegram's own back arrow closes an open listing or filter sheet.
+  useEffect(() => {
+    const button = window.Telegram?.WebApp?.BackButton;
+    if (!button) return;
+    if (!selected && !settingsOpen) { button.hide(); return; }
+    const close = () => { if (selected) setSelected(null); else setSettingsOpen(false); };
+    button.show();
+    button.onClick(close);
+    return () => button.offClick(close);
+  }, [selected, settingsOpen]);
+
+  const visible = useMemo(() => shownDeals.filter((deal) => {
     if (category.startsWith("group:") ? groupOf(deal.category_key) !== category.slice(6) : category && deal.category_key !== category) return false;
     return !search.trim() || matchesText(deal, search);
-  }), [deals, category, search]);
+  }), [shownDeals, category, search]);
   const byTier = useMemo(() => ({
     strong: visible.filter((deal) => deal.status === "strong"),
     good: visible.filter((deal) => deal.status === "good"),
@@ -151,9 +207,9 @@ export default function HomePage() {
   }), [visible]);
   const groupCounts = useMemo(() => {
     const result: Record<string, number> = {};
-    for (const deal of deals) if (deal.status !== "candidate") result[deal.category_key] = (result[deal.category_key] || 0) + 1;
+    for (const deal of shownDeals) if (deal.status !== "candidate") result[deal.category_key] = (result[deal.category_key] || 0) + 1;
     return result;
-  }, [deals]);
+  }, [shownDeals]);
 
   const activeCount = activeSettingsCount(settings);
   const scanAgeHours = scannedAt ? (Date.now() - new Date(scannedAt).getTime()) / 3_600_000 : null;
@@ -165,11 +221,34 @@ export default function HomePage() {
   };
   const shown = tier === "all" ? null : byTier[tier];
 
-  const renderGrid = (list: Deal[]) => (
-    <div className="deal-grid">{list.map((deal) => (
-      <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => toggleSaved(deal.listing_id)} onOpen={() => setSelected(deal)} />
-    ))}</div>
-  );
+  const listKey = [tier, category, search, sort].join("|");
+  const renderGrid = (list: Deal[]) => <DealGrid deals={list} savedIds={saved} newIds={newIds} resetKey={listKey} onSave={toggleSaved} onOpen={setSelected} />;
+
+  function changeHidden(next: string[]) {
+    setHidden(next);
+    try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+  }
+
+  function changePurchases(next: Purchase[]) {
+    setPurchases(next);
+    savePurchases(next);
+  }
+
+  function changeSort(next: Sort) {
+    setSort(next);
+    try { localStorage.setItem(SORT_KEY, next); } catch { /* storage unavailable */ }
+  }
+
+  function recordPurchase(deal: Deal, paid: number) {
+    const expectedProfit = deal.estimated_profit != null ? Math.round((deal.estimated_profit + deal.price - paid) * 100) / 100 : null;
+    changePurchases(addPurchase(purchases, { id: deal.listing_id, title: deal.title, url: deal.listing_url, paid, expectedProfit, boughtAt: new Date().toISOString(), soldFor: null }));
+    window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred("success");
+  }
+
+  function copyTelegramId() {
+    if (!profile?.id) return;
+    void navigator.clipboard?.writeText(String(profile.id)).then(() => setCopiedId(true)).catch(() => undefined);
+  }
 
   return (
     <main className="app-shell">
@@ -183,7 +262,7 @@ export default function HomePage() {
       </header>
 
       {tab === "overview" ? (
-        <Dashboard deals={deals} stats={stats} scannedAt={scannedAt} saved={saved} onSave={toggleSaved} onOpen={setSelected}
+        <Dashboard deals={shownDeals} stats={stats} scannedAt={scannedAt} saved={saved} onSave={toggleSaved} onOpen={setSelected}
           onShowAll={(nextTier) => { setTier(nextTier); openTab("home"); }} />
       ) : null}
 
@@ -209,7 +288,7 @@ export default function HomePage() {
           <div className="toolbar">
             <label className="search-box"><span aria-hidden="true">⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Модель, например «ps5 slim»" aria-label="Поиск по находкам" />{search ? <button type="button" className="clear-input" onClick={() => setSearch("")} aria-label="Очистить">×</button> : null}</label>
             <label className="sort-select"><span>Сортировка</span>
-              <select value={sort} onChange={(event) => setSort(event.target.value as Sort)}>
+              <select value={sort} onChange={(event) => changeSort(event.target.value as Sort)}>
                 {SORTS.map(([key, label]) => <option key={key} value={key} disabled={key === "distance" && !settings.location}>{label}{key === "distance" && !settings.location ? " (укажите локацию)" : ""}</option>)}
               </select>
             </label>
@@ -287,7 +366,11 @@ export default function HomePage() {
 
       {tab === "saved" ? (
         <section className="content-section v2-section">
-          <div className="v2-head"><h2>Избранное<span className="heading-count">{saved.length}</span></h2><p>Показываются всегда, независимо от фильтров.</p></div>
+          <div className="seg" role="tablist" aria-label="Мои объявления">
+            <button type="button" role="tab" aria-selected={savedView === "saved"} className={savedView === "saved" ? "on" : ""} onClick={() => setSavedView("saved")}>Избранное<b>{saved.length}</b></button>
+            <button type="button" role="tab" aria-selected={savedView === "bought"} className={savedView === "bought" ? "on" : ""} onClick={() => setSavedView("bought")}>Мои покупки<b>{purchases.length}</b></button>
+          </div>
+          {savedView === "bought" ? <Purchases rows={purchases} onChange={changePurchases} /> : <>
           {saved.length && !savedLoading && savedDeals.length < saved.length ? (
             <p className="v2-note"><span>{saved.length - savedDeals.length} {plural(saved.length - savedDeals.length, "объявление", "объявления", "объявлений")} больше нет в каталоге — вероятно, проданы или сняты.</span>
               <button type="button" onClick={() => { const alive = new Set(savedDeals.map((deal) => deal.listing_id)); const next = saved.filter((id) => alive.has(id)); setSaved(next); try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(next)); } catch { /* ignore */ } }}>Убрать их</button></p>
@@ -295,6 +378,7 @@ export default function HomePage() {
           {savedLoading && !savedDeals.length ? <div className="deal-grid">{Array.from({ length: 3 }).map((_, index) => <div className="skeleton-card" key={index}><div /><span /><span /></div>)}</div>
             : savedDeals.length ? renderGrid(savedDeals)
               : <div className="state-panel"><div className="state-icon">♡</div><h3>Пока пусто</h3><p>Нажмите ♡ на карточке, чтобы сохранить объявление.</p><button className="secondary-button" onClick={() => setTab("home")}>К находкам</button></div>}
+          </>}
         </section>
       ) : null}
 
@@ -317,6 +401,12 @@ export default function HomePage() {
             </ul>
           </div>
           <button type="button" className="v2-row" onClick={() => setTab("saved")}><span>Избранное</span><b>{saved.length || "пусто"}</b></button>
+          {hidden.length ? <button type="button" className="v2-row" onClick={() => changeHidden([])}><span>Скрытые объявления</span><b>вернуть {hidden.length}</b></button> : null}
+          <div className="v2-card">
+            <div className="v2-card-head"><h3>Уведомления в Telegram</h3></div>
+            <p className="v2-hint">Новые Best и Good придут в чат с ботом, если в GitHub добавлены секреты TELEGRAM_TOKEN и TELEGRAM_CHAT_ID.</p>
+            {profile?.id ? <button type="button" className="v2-row" onClick={copyTelegramId}><span>Ваш Telegram ID: {profile.id}</span><b>{copiedId ? "скопирован" : "скопировать"}</b></button> : null}
+          </div>
           <p className="v2-hint">Избранное и настройки хранятся на этом устройстве. Переписка с AI не сохраняется нигде.</p>
         </section>
       ) : null}
@@ -328,13 +418,13 @@ export default function HomePage() {
 
       <nav className="bottom-nav" aria-label="Основная навигация">
         <button className={tab === "overview" ? "nav-active" : ""} onClick={() => openTab("overview")}><Icon name="home" />Обзор</button>
-        <button className={tab === "home" ? "nav-active" : ""} onClick={() => openTab("home")}><Icon name="spark" />Каталог</button>
+        <button className={tab === "home" ? "nav-active" : ""} onClick={() => openTab("home")}><Icon name="spark" />Каталог{newIds.size ? <i>{newIds.size}</i> : null}</button>
         <button className={tab === "explore" ? "nav-active" : ""} onClick={() => openTab("explore")}><Icon name="search" />Поиск</button>
         <button className={tab === "analytics" ? "nav-active" : ""} onClick={() => openTab("analytics")}><Icon name="chart" />Аналитика</button>
         <button className={tab === "saved" || tab === "profile" ? "nav-active" : ""} onClick={() => openTab("saved")}><Icon name="heart" />Избранное{saved.length ? <i>{saved.length}</i> : null}</button>
       </nav>
 
-      {selected ? <DealDetail key={selected.listing_id} deal={selected} saved={saved.includes(selected.listing_id)} onSave={() => toggleSaved(selected.listing_id)} onClose={closeDetail} /> : null}
+      {selected ? <DealDetail key={selected.listing_id} deal={selected} saved={saved.includes(selected.listing_id)} bought={purchases.some((row) => row.id === selected.listing_id)} onSave={() => toggleSaved(selected.listing_id)} onClose={closeDetail} onHide={() => { if (!hidden.includes(selected.listing_id)) changeHidden([...hidden, selected.listing_id]); }} onBuy={recordPurchase} /> : null}
       {settingsOpen ? <SettingsSheet settings={settings} onChange={updateSettings} onClose={() => setSettingsOpen(false)} resultCount={counts?.matched ?? deals.length} loading={loading || refreshing} /> : null}
     </main>
   );

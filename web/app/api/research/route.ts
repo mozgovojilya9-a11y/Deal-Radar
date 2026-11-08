@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resaleEconomics, PROFITABILITY } from "@/lib/economics";
+import { offerLimits, resaleEconomics, PROFITABILITY } from "@/lib/economics";
 import { researchMarket } from "@/lib/market-research";
 import { understandQuery } from "@/lib/query-understanding";
 import { rateAllowed, verifyInitData } from "@/lib/telegram-auth";
@@ -66,7 +66,8 @@ export async function POST(request: NextRequest) {
         const status = suspicious ? "suspicious"
           : economics && valuation.confidence === "high" && economics.profit >= 50 && economics.roi >= PROFITABILITY.strong_min_roi ? "strong"
           : economics && valuation.confidence !== "none" && economics.profit >= PROFITABILITY.min_profit_eur && economics.roi >= PROFITABILITY.min_roi ? "good" : "candidate";
-        return { ...offer, estimatedProfit: suspicious ? null : economics?.profit ?? null, profitRoi: suspicious ? null : economics?.roi ?? null, status,
+        const limits = economics && !suspicious && (status === "strong" || status === "good") ? offerLimits(offer.price, economics.netSale) : null;
+        return { ...offer, maxOffer: limits?.maxOffer ?? null, openingOffer: limits?.openingOffer ?? null, estimatedProfit: suspicious ? null : economics?.profit ?? null, profitRoi: suspicious ? null : economics?.roi ?? null, status,
           warning: suspicious ? "Цена в " + (valuation.marketValue! / offer.price).toFixed(1) + " раза ниже рынка — вероятна подделка или мошенничество" : null };
       })
       .sort((a, b) => Number(a.status === "suspicious") - Number(b.status === "suspicious") || (b.estimatedProfit ?? -Infinity) - (a.estimatedProfit ?? -Infinity));
