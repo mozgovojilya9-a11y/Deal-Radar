@@ -15,7 +15,7 @@ export function Dashboard({ deals, stats, scannedAt, saved, onSave, onOpen, onSh
   saved: string[];
   onSave: (id: string) => void;
   onOpen: (deal: Deal) => void;
-  onShowAll: (tier: "strong" | "good" | "all") => void;
+  onShowAll: (tier: "strong" | "good" | "candidate" | "all") => void;
 }) {
   const [runs, setRuns] = useState<RunRecord[]>([]);
   useEffect(() => {
@@ -23,6 +23,7 @@ export function Dashboard({ deals, stats, scannedAt, saved, onSave, onOpen, onSh
   }, []);
   const best = deals.filter((deal) => deal.status === "strong");
   const good = deals.filter((deal) => deal.status === "good");
+  const waiting = deals.filter((deal) => deal.status === "candidate");
   const profit = [...best, ...good].reduce((sum, deal) => sum + (Number(deal.estimated_profit) || 0), 0);
   const latest = [...best, ...good].sort((a, b) => Date.parse(b.first_detected_at || b.detected_at) - Date.parse(a.first_detected_at || a.detected_at)).slice(0, 6);
   const ageHours = scannedAt ? (Date.now() - Date.parse(scannedAt)) / 3_600_000 : null;
@@ -45,7 +46,7 @@ export function Dashboard({ deals, stats, scannedAt, saved, onSave, onOpen, onSh
       <div className="dash-kpis">
         <button type="button" className="kpi best" onClick={() => onShowAll("strong")}><span>Best deals</span><strong>{fmt(best.length)}</strong></button>
         <button type="button" className="kpi good" onClick={() => onShowAll("good")}><span>Good deals</span><strong>{fmt(good.length)}</strong></button>
-        <div className="kpi"><span>Ждут оценки рынка</span><strong>{fmt(stats?.externalQueued)}</strong></div>
+        <button type="button" className="kpi watch" onClick={() => onShowAll("candidate")}><span>Ждут оценки</span><strong>{fmt(waiting.length)}</strong></button>
         <div className="kpi"><span>Проверено за запуск</span><strong>{fmt(stats?.unique)}</strong></div>
       </div>
       <div className="analytics-card-block">

@@ -14,7 +14,7 @@ import { SettingsSheet } from "./components/SettingsSheet";
 import { Icon, ageLabel, euro, plural } from "./components/ui";
 
 type Tab = "overview" | "home" | "explore" | "analytics" | "saved" | "profile";
-type Tier = "all" | "strong" | "good";
+type Tier = "all" | "strong" | "good" | "candidate";
 type Sort = "profit" | "score" | "distance" | "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
 
@@ -147,10 +147,11 @@ export default function HomePage() {
   const byTier = useMemo(() => ({
     strong: visible.filter((deal) => deal.status === "strong"),
     good: visible.filter((deal) => deal.status === "good"),
+    candidate: visible.filter((deal) => deal.status === "candidate"),
   }), [visible]);
   const groupCounts = useMemo(() => {
     const result: Record<string, number> = {};
-    for (const deal of deals) result[deal.category_key] = (result[deal.category_key] || 0) + 1;
+    for (const deal of deals) if (deal.status !== "candidate") result[deal.category_key] = (result[deal.category_key] || 0) + 1;
     return result;
   }, [deals]);
 
@@ -190,7 +191,7 @@ export default function HomePage() {
         <section className="content-section" id="deals">
           <div className="section-heading">
             <div>
-              <h2>Находки<span className="heading-count">{visible.length.toLocaleString("ru-RU")}</span></h2>
+              <h2>Находки<span className="heading-count">{(byTier.strong.length + byTier.good.length).toLocaleString("ru-RU")}</span></h2>
               <p>
                 {counts && counts.matched < counts.feed ? "из " + counts.feed.toLocaleString("ru-RU") + " в каталоге · " : ""}
                 {scannedAt ? "сканирование " + ageLabel(scannedAt) : "ожидаем данные"}
@@ -231,7 +232,7 @@ export default function HomePage() {
           ) : null}
 
           <div className="seg" role="tablist" aria-label="Тип предложений">
-            {([["all", "Все", visible.length], ["strong", "Best", byTier.strong.length], ["good", "Good", byTier.good.length]] as const).map(([key, label, count]) => (
+            {([["all", "Выгодные", byTier.strong.length + byTier.good.length], ["strong", "Best", byTier.strong.length], ["good", "Good", byTier.good.length], ["candidate", "Ждут оценки", byTier.candidate.length]] as const).map(([key, label, count]) => (
               <button type="button" role="tab" aria-selected={tier === key} key={key} className={tier === key ? "on" : ""} onClick={() => setTier(key)}>{label}<b>{count}</b></button>
             ))}
           </div>
@@ -249,6 +250,7 @@ export default function HomePage() {
             <div className="deal-tiers">
               {byTier.strong.length ? <section className="deal-tier strong-tier"><div className="tier-heading"><h3>Best deals<span>{byTier.strong.length}</span></h3><p>Высокая уверенность: независимые цены с ≥2 площадок, прибыль после всех расходов</p></div>{renderGrid(byTier.strong)}</section> : null}
               {byTier.good.length ? <section className="deal-tier good-tier"><div className="tier-heading"><h3>Good deals<span>{byTier.good.length}</span></h3><p>Подтверждённая прибыль, уверенность средняя или запас меньше</p></div>{renderGrid(byTier.good)}</section> : null}
+              {!byTier.strong.length && !byTier.good.length ? <p className="tier-empty">Подтверждённо выгодных предложений сейчас нет. Объявления без рыночной цены — во вкладке «Ждут оценки».</p> : null}
             </div>
           )}
         </section>

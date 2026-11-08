@@ -115,9 +115,10 @@ export async function GET(request: NextRequest) {
 
     const all = valuationReady && Array.isArray(feed.deals)
       // Reserved ("Gereserveerd"), removed or inactive listings are never offered as available deals.
-      // The catalog shows confirmed profit only; a listing the user saved can still be opened by id.
+      // Confirmed profit, plus listings the radar could not price yet. A candidate that has a market
+      // value was judged not worth buying and stays hidden, unless the user saved it.
       ? feed.deals.filter(isDeal).filter((deal) => deal.active !== false && deal.reserved !== true && isRecent(deal)
-        && (deal.status === "strong" || deal.status === "good" || (deal.status === "candidate" && params.has("ids"))))
+        && (deal.status === "strong" || deal.status === "good" || (deal.status === "candidate" && (deal.market_value == null || params.has("ids")))))
       : [];
 
     const lat = parseCoordinate(params.get("lat"), -90, 90);

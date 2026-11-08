@@ -1776,10 +1776,10 @@
   "liveness_after_hours": 36,
   "geocode_per_run": 400,
   "external_market": {
-    "per_run": 40,
+    "per_run": 120,
     "concurrency": 3,
     "budget_ms": 35000,
-    "cache_hours": 24,
+    "cache_hours": 72,
     "timeout_seconds": 1200,
     "grounding": false
   }
