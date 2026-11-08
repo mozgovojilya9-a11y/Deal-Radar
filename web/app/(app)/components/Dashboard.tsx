@@ -15,7 +15,7 @@ export function Dashboard({ deals, stats, scannedAt, saved, onSave, onOpen, onSh
   saved: string[];
   onSave: (id: string) => void;
   onOpen: (deal: Deal) => void;
-  onShowAll: (tier: "strong" | "good" | "candidate" | "all") => void;
+  onShowAll: (tier: "strong" | "good" | "all") => void;
 }) {
   const [runs, setRuns] = useState<RunRecord[]>([]);
   useEffect(() => {
@@ -23,7 +23,6 @@ export function Dashboard({ deals, stats, scannedAt, saved, onSave, onOpen, onSh
   }, []);
   const best = deals.filter((deal) => deal.status === "strong");
   const good = deals.filter((deal) => deal.status === "good");
-  const watch = deals.filter((deal) => deal.status === "candidate");
   const profit = [...best, ...good].reduce((sum, deal) => sum + (Number(deal.estimated_profit) || 0), 0);
   const latest = [...best, ...good].sort((a, b) => Date.parse(b.first_detected_at || b.detected_at) - Date.parse(a.first_detected_at || a.detected_at)).slice(0, 6);
   const ageHours = scannedAt ? (Date.now() - Date.parse(scannedAt)) / 3_600_000 : null;
@@ -46,7 +45,7 @@ export function Dashboard({ deals, stats, scannedAt, saved, onSave, onOpen, onSh
       <div className="dash-kpis">
         <button type="button" className="kpi best" onClick={() => onShowAll("strong")}><span>Best deals</span><strong>{fmt(best.length)}</strong></button>
         <button type="button" className="kpi good" onClick={() => onShowAll("good")}><span>Good deals</span><strong>{fmt(good.length)}</strong></button>
-        <button type="button" className="kpi watch" onClick={() => onShowAll("candidate")}><span>Watchlist</span><strong>{fmt(watch.length)}</strong></button>
+        <div className="kpi"><span>Ждут оценки рынка</span><strong>{fmt(stats?.externalQueued)}</strong></div>
         <div className="kpi"><span>Проверено за запуск</span><strong>{fmt(stats?.unique)}</strong></div>
       </div>
       <div className="analytics-card-block">
@@ -56,7 +55,7 @@ export function Dashboard({ deals, stats, scannedAt, saved, onSave, onOpen, onSh
       <div className="block-head"><h3>Последние выгодные находки</h3><button type="button" className="link-button" onClick={() => onShowAll("all")}>Весь каталог →</button></div>
       {latest.length ? (
         <div className="deal-grid">{latest.map((deal) => <DealCard key={deal.listing_id} deal={deal} saved={saved.includes(deal.listing_id)} onSave={() => onSave(deal.listing_id)} onOpen={() => onOpen(deal)} />)}</div>
-      ) : <p className="chart-empty">Сейчас нет предложений с подтверждённой прибылью. Watchlist: {fmt(watch.length)} — они ждут независимой оценки рынка.</p>}
+      ) : <p className="chart-empty">Сейчас нет предложений с подтверждённой прибылью. Радар показывает только то, что выгодно по независимым ценам.</p>}
     </section>
   );
 }

@@ -74,7 +74,7 @@ export function Analytics({ stats, counts, scannedAt }: { stats: ScannerStats | 
             <Tile label="В очереди" value={fmt((stats?.awaitingRecheck ?? 0) + (stats?.externalQueued ?? 0))} hint="переоценка и внешний поиск цен" />
             <Tile label="Best deals" value={fmt(data.overview.best)} tone="green" />
             <Tile label="Good deals" value={fmt(data.overview.good)} />
-            <Tile label="Watchlist" value={fmt(data.overview.watchlist)} hint="нужны данные или наблюдение" />
+            <Tile label="На проверке" value={fmt(data.overview.watchlist)} hint="скрыты из каталога, пока нет подтверждённой прибыли" />
             <Tile label="Отклонено" value={fmt(stats?.rejectedTotal)} hint={"зарезервировано " + fmt(stats?.rejectedReserved)} />
             <Tile label="Ошибки" value={fmt(stats?.technicalErrors ?? stats?.failedQueries)} hint={"повторов " + fmt(stats?.retries)} tone={(stats?.technicalErrors ?? 0) ? "warn" : ""} />
           </div>

@@ -50,8 +50,12 @@ class ScannerTests(unittest.TestCase):
         self.external = FakeExternalMarket()
         self.external_patch = mock.patch.object(bot, "run_external_research", self.external)
         self.external_patch.start()
+        # Matching of offers to one listing has its own tests (real Node run); here titles are placeholders.
+        self.revalue_patch = mock.patch.object(bot, "revalue_for_listings", lambda *_: {})
+        self.revalue_patch.start()
 
     def tearDown(self):
+        self.revalue_patch.stop()
         self.external_patch.stop()
         self.sleep.stop()
         self.net.stop()

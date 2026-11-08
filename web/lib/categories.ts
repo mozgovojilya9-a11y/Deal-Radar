@@ -15,6 +15,8 @@ export const CATEGORIES: Category[] = [
   { key: "ipad", label: "iPad", group: "Телефоны и планшеты" },
   { key: "macbook", label: "MacBook Air / Pro", group: "Компьютеры" },
   { key: "steam-deck", label: "Steam Deck", group: "Компьютеры" },
+  { key: "ssd-samsung", label: "SSD Samsung T7–T9", group: "Компьютеры" },
+  { key: "ssd-sandisk", label: "SSD SanDisk Extreme", group: "Компьютеры" },
   { key: "ps5", label: "PlayStation 5", group: "Игровые консоли" },
   { key: "ps4", label: "PlayStation 4", group: "Игровые консоли" },
   { key: "switch", label: "Nintendo Switch", group: "Игровые консоли" },
@@ -51,11 +53,7 @@ export const CATEGORIES: Category[] = [
   { key: "watch-tommy", label: "Tommy Hilfiger", group: "Обычные часы" },
   { key: "bag-michael-kors", label: "Сумки Michael Kors", group: "Сумки и рюкзаки" },
   { key: "backpack-michael-kors", label: "Рюкзаки Michael Kors", group: "Сумки и рюкзаки" },
-  { key: "bag-fjallraven", label: "Fjällräven", group: "Сумки и рюкзаки" },
   { key: "bag-northface", label: "The North Face", group: "Сумки и рюкзаки" },
-  { key: "bag-osprey", label: "Osprey", group: "Сумки и рюкзаки" },
-  { key: "bag-deuter", label: "Deuter", group: "Сумки и рюкзаки" },
-  { key: "bag-eastpak", label: "Eastpak", group: "Сумки и рюкзаки" },
   { key: "rayban", label: "Ray-Ban Meta", group: "Очки" },
 ];
 

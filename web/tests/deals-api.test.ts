@@ -10,7 +10,7 @@ const deal = (id: string, price: number, lat: number, lon: number, extra: Record
   latitude: lat, longitude: lon, model_group: "slim", ...extra,
 });
 const feed = { valuationVersion: 2, updatedAt: now, scannedAt: now, deals: [
-  deal("ams", 300, 52.37, 4.9), deal("utr", 1200, 52.09, 5.12, { item_condition: "Nieuw" }), deal("gro", 4500, 53.22, 6.57, { status: "candidate", estimated_profit: null, profit_roi: null }),
+  deal("ams", 300, 52.37, 4.9), deal("utr", 1200, 52.09, 5.12, { item_condition: "Nieuw" }), deal("gro", 4500, 53.22, 6.57), deal("watch", 200, 52.1, 5.1, { status: "candidate", estimated_profit: null, profit_roi: null }),
   deal("noloc", 200, 0, 0, { latitude: null, longitude: null, category_key: "macbook" }),
 ] };
 globalThis.fetch = (async () => new Response(JSON.stringify(feed), { status: 200 })) as typeof fetch;
@@ -33,9 +33,14 @@ test("no hidden price cap and user price range is applied", async () => {
 });
 
 test("profit, ROI, category, condition and favourites filters", async () => {
-  assert.equal((await call("minProfit=50")).deals.length, 3);
+  assert.equal((await call("minProfit=50")).deals.length, 4);
   assert.equal((await call("minRoi=40")).deals.length, 0);
   assert.deepEqual((await call("categories=macbook")).deals.map((d: { listing_id: string }) => d.listing_id), ["noloc"]);
   assert.deepEqual((await call("condition=new")).deals.map((d: { listing_id: string }) => d.listing_id), ["utr"]);
   assert.deepEqual((await call("ids=gro&maxPrice=10")).deals.map((d: { listing_id: string }) => d.listing_id), ["gro"]);
+});
+
+test("the catalog holds only confirmed profit, a saved listing still opens by id", async () => {
+  assert.ok(!(await call("")).deals.some((d: { listing_id: string }) => d.listing_id === "watch"));
+  assert.deepEqual((await call("ids=watch")).deals.map((d: { listing_id: string }) => d.listing_id), ["watch"]);
 });

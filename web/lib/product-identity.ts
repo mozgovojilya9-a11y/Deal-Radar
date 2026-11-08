@@ -40,13 +40,13 @@ const BRANDS = [
   "jbl", "beats", "marshall", "bang olufsen", "sonos", "shure", "rode", "audio technica", "garmin", "fitbit",
   "rayban", "meta", "michael kors", "fjallraven", "north face", "osprey", "deuter", "eastpak", "casio", "tissot",
   "diesel", "hugo boss", "boss", "tommy hilfiger", "dyson", "lenovo", "dell", "hp", "asus", "acer", "msi",
-  "razer", "logitech", "steam", "valve", "kitchenaid", "delonghi", "nespresso", "philips hue", "bosch", "miele",
+  "razer", "logitech", "sandisk", "steam", "valve", "kitchenaid", "delonghi", "nespresso", "philips hue", "bosch", "miele",
   "sigma", "tamron", "sennheiser", "airpods", "macbook", "ipad", "iphone",
 ];
 
 const EDITION_WORDS = new Set([
   "pro", "max", "mini", "plus", "ultra", "lite", "slim", "digital", "disc", "se", "air", "fe", "oled", "neo",
-  "studio", "go", "edge", "fold", "flip", "xl", "classic", "sport", "active", "kids",
+  "studio", "go", "edge", "fold", "flip", "xl", "classic", "sport", "active", "kids", "shield", "touch",
 ]);
 /** Pairs that are mutually exclusive configurations. */
 const EXCLUSIVE_EDITIONS: Array<[string, string]> = [["digital", "disc"], ["wifi", "cellular"], ["wifi", "5g"]];
@@ -59,7 +59,7 @@ const ACCESSORY_WORDS = [
   "vervangende", "replacement", "reserve", "onderdeel", "onderdelen", "parts", "batterij", "accu", "battery",
   "lens cap", "lensdop", "filter", "strap", "bandje", "band", "armband", "draagtas", "tas voor", "etui",
   "pouch", "doos", "box only", "lege doos", "empty box", "remote", "afstandsbediening", "koffer", "decal",
-  "faceplate", "cooling", "ventilator", "ssd", "geheugenkaart", "sd kaart", "oplaadcase", "laadcase",
+  "faceplate", "cooling", "ventilator", "geheugenkaart", "sd kaart", "oplaadcase", "laadcase",
   "charging case", "losse", "los", "linker", "rechter", "left earbud", "right earbud", "oordopje", "links",
   "rechts", "enkele", "single", "conversion kit", "housing", "onderwaterbehuizing", "underwater", "cage",
   "battery grip", "batterijgrip", "batteriegriff", "grip", "rig", "gimbal",
@@ -87,6 +87,7 @@ const NOISE_WORDS = new Set([
   "only", "alleen", "bijna", "zeer", "super", "koopje", "ophalen", "nu", "voor", "for", "edition", "versie",
   "model", "uitvoering", "stuk", "stuks", "incl", "inclusief", "excl", "originele", "amper", "weinig", "gebruikt",
   "smartbril", "smart", "glasses", "bril", "zonnebril", "gepolariseerd", "polarized", "lenses", "glazen",
+  "goede", "clicks", "body", "camera", "systeemcamera", "horloge",
 ]);
 
 export function normalizeText(value: string): string {
@@ -104,6 +105,8 @@ export function normalizeText(value: string): string {
     .replace(/\b(?:gen(?:eration|eratie)?\.?)\s*(\d)\b/g, "gen $1")
     .replace(/\bmark\s*(ii|iii|iv|v|vi)\b/g, (_, roman: string) => "mark " + ({ ii: 2, iii: 3, iv: 4, v: 5, vi: 6 } as Record<string, number>)[roman])
     .replace(/\bm\s*k\s*(\d)\b/g, "mark $1")
+    // "EOS R6 II" / "A7 III" name the generation without the word "Mark".
+    .replace(/\b([a-z]{1,3}\d{1,4})\s*(ii|iii|iv)\b/g, (_, model: string, roman: string) => model + " mark " + ({ ii: 2, iii: 3, iv: 4 } as Record<string, number>)[roman])
     .replace(/(\d)\s*(?:gb|gig)\b/g, "$1gb")
     .replace(/(\d)\s*tb\b/g, "$1tb")
     .replace(/(\d{2})[.,]\d\s*(?:inch|inches|in|"|”|''|-inch)(?=[\s)\]]|$)/g, "$1inch")
@@ -157,6 +160,7 @@ export function buildIdentity(title: string, hint?: string | null): ProductIdent
   const raw = String(title || "").slice(0, 200);
   const cleanWords = raw
     .replace(/[|•·–—!?*]/g, " ")
+    .replace(/\b\d{1,3}(?:[.,]\d{3})*\s*(?:clicks?|kliks?|ausl(?:ö|oe?)sungen)\b/gi, " ")
     .replace(/\b\d{1,3}\s?%\s*(?:batterij\w*|accu\w*|battery\w*|bc)?|\b(?:batterij\w*|accu\w*|battery\w*)\s*:?\s*\d{1,3}\s?%/gi, " ")
     .replace(/\b(midnight|starlight|space\s*gr[ae]y|spacegrijs|spacegrey|sterrenlicht|middernacht|titanium\s+\w+|natural|zilver|silver|goud|gold|roze|rose|paars|purple|blauw|blue|groen|green|grijs|grey|gray|zwart|black|wit|white)\b/gi, " ")
     .replace(/\([^)]*\b(?:nieuw|new|zgan|garantie|bon)\b[^)]*\)/gi, " ")
@@ -249,6 +253,18 @@ function codeCore(code: string): string {
   return code.replace(/^[a-z]{1,3}(?=\d)/, "");
 }
 
+/** A core made of digits only ("H1000" -> "1000") says nothing: B1000 and H1000 share it. */
+function coreIsDistinctive(code: string): boolean {
+  const core = codeCore(code);
+  return core.length >= 5 && /[a-z]/.test(core);
+}
+
+/** Series + model pairs written as GPR-H1000: both halves identify the product. */
+function seriesCodes(value: string): Array<[string, string]> {
+  return [...value.normalize("NFKD").toLowerCase().matchAll(/\b([a-z]{2,4})-?([a-z]\d{3,5})(?![0-9])/g)]
+    .map((match) => [match[1], match[2]] as [string, string]);
+}
+
 /** Substring match in the space-less text that does not run into more digits ("pro2" must not match "pro2026"). */
 function joinedHas(joined: string, token: string): boolean {
   if (token.length < 4) return false;
@@ -320,12 +336,18 @@ export function matchProduct(candidate: string, identity: ProductIdentity): Matc
     || hasCritical(token, tokens, joined)).length;
   const coreRatio = core.length ? coreHits / core.length : 0;
 
+  // GPR-H1000, GBD-H1000 and GPR-B1000 are different watches although they share half of the code.
+  for (const [series, model] of seriesCodes(identity.raw)) {
+    const other = seriesCodes(text).find(([otherSeries, otherModel]) => (otherSeries === series) !== (otherModel === model));
+    if (other) return { level: "variant", score: 0.5, reason: "другая модель: " + other.join("-").toUpperCase() };
+  }
+
   // Article / model codes: decisive in both directions.
   if (identity.modelCodes.length) {
     const candidateCodes = extractModelCodes(text);
     const exactCode = identity.modelCodes.find((code) => joinedHas(joined, code)
-      || (codeCore(code).length >= 5 && joinedHas(joined, codeCore(code)))
-      || (codeCore(code).length >= 5 && candidateCodes.some((other) => codeCore(other).startsWith(codeCore(code)))));
+      || (coreIsDistinctive(code) && joinedHas(joined, codeCore(code)))
+      || (coreIsDistinctive(code) && candidateCodes.some((other) => codeCore(other).startsWith(codeCore(code)))));
     if (exactCode) return { level: "exact", score: 0.98, reason: "совпадает артикул " + exactCode.toUpperCase() };
     const shape = (code: string) => codeCore(code).replace(/\d/g, "#");
     const sibling = candidateCodes.find((other) => identity.modelCodes.some((code) =>
@@ -340,6 +362,21 @@ export function matchProduct(candidate: string, identity: ProductIdentity): Matc
     if (found.values.length) {
       conflicts.push(...found.values);
       familyConflict ||= found.family;
+    }
+  }
+  // The offer names a generation the listing does not: "Switch" is not "Switch 2", "R6" is not "R6 Mark II".
+  const identityTokens = new Set([...tokensWithCompounds(normalizeText(identity.raw)), ...identity.criticalTokens]);
+  const identityNumbers = (prefix: string) => [...identityTokens].some((token) => new RegExp("^" + prefix + "\\d{1,4}$").test(token));
+  for (const token of tokens) {
+    const generation = token.match(/^([a-z]+)(\d{1,2})$/);
+    if (!generation || identityNumbers(generation[1])) continue;
+    // "AirPods Pro 2" and "AirPods Pro (2nd generation)" name the same generation.
+    if (generation[1] === "gen" && [...identityTokens].some((other) => new RegExp("^[a-z]+" + generation[2] + "$").test(other))) continue;
+    if (FAMILY_WORDS.has(generation[1]) && identityTokens.has(generation[1])) {
+      conflicts.push(token);
+      familyConflict = true;
+    } else if ((generation[1] === "mark" || generation[1] === "gen") && Number(generation[2]) > 1) {
+      conflicts.push(token);
     }
   }
   const missingCritical = identity.criticalTokens.filter((token) => !hasCritical(token, tokens, joined));
@@ -363,7 +400,8 @@ export function matchProduct(candidate: string, identity: ProductIdentity): Matc
   if (identityChip && candidateChip && identityChip !== candidateChip) conflicts.push("чип M" + candidateChip.toUpperCase());
   // Memory (RAM) below 64 GB: 8 GB vs 16/18 GB is a different configuration and price.
   const ramOf = (value: string) => [...value.matchAll(/\b(\d{1,2})gb\b/g)].map((m) => Number(m[1])).filter((gb) => gb >= 4 && gb <= 48);
-  const identityRam = ramOf(normalizeText(identity.raw));
+  // The hint counts too: the scanner adds RAM it read from the listing's description.
+  const identityRam = ramOf(identity.capacities.join(" "));
   const candidateRam = ramOf(normalized);
   if (identityRam.length && candidateRam.length && !candidateRam.some((gb) => identityRam.includes(gb))) conflicts.push(candidateRam[0] + "GB RAM");
   const candidateEditions = [...tokens].filter((token) => EDITION_WORDS.has(token));

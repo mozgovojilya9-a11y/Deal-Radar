@@ -315,6 +315,19 @@ export function computeValuation(offers: MarketOffer[], segments: Record<Segment
   };
 }
 
+/**
+ * Valuation of one listing from offers found for its model group: only offers that are the exact
+ * same product as this listing count, re-checked with the current matcher (also for stored offers).
+ */
+export function revalueForListing(title: string, hint: string | null, offers: MarketOffer[], checkedAt: string): { valuation: MarketValuation; offers: MarketOffer[]; removed: number } {
+  const identity = buildIdentity(title, hint);
+  const exact = offers.filter((offer) => matchProduct(offer.title, identity).level === "exact");
+  const bySegment = (segment: Segment) => dropOutliers(exact.filter((offer) => offer.segment === segment)).kept;
+  const kept = (["used", "new", "refurbished"] as Segment[]).flatMap(bySegment);
+  const segments = { used: stats(bySegment("used")), new: stats(bySegment("new")), refurbished: stats(bySegment("refurbished")) } as Record<Segment, SegmentStats>;
+  return { valuation: computeValuation(kept, segments, checkedAt), offers: kept, removed: offers.length - kept.length };
+}
+
 const KLEINANZEIGEN_ARTICLE = /<article\b[^>]*data-adid="(\d+)"[^>]*data-href="([^"]+)"[^>]*>([\s\S]*?)<\/article>/gi;
 
 /** Kleinanzeigen.de: independent used market (Germany). Parses the public search result cards. */

@@ -14,7 +14,7 @@ import { SettingsSheet } from "./components/SettingsSheet";
 import { Icon, ageLabel, euro, plural } from "./components/ui";
 
 type Tab = "overview" | "home" | "explore" | "analytics" | "saved" | "profile";
-type Tier = "all" | "strong" | "good" | "candidate";
+type Tier = "all" | "strong" | "good";
 type Sort = "profit" | "score" | "distance" | "discount" | "newest" | "price";
 type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
 
@@ -147,7 +147,6 @@ export default function HomePage() {
   const byTier = useMemo(() => ({
     strong: visible.filter((deal) => deal.status === "strong"),
     good: visible.filter((deal) => deal.status === "good"),
-    candidate: visible.filter((deal) => deal.status === "candidate"),
   }), [visible]);
   const groupCounts = useMemo(() => {
     const result: Record<string, number> = {};
@@ -158,6 +157,11 @@ export default function HomePage() {
   const activeCount = activeSettingsCount(settings);
   const scanAgeHours = scannedAt ? (Date.now() - new Date(scannedAt).getTime()) / 3_600_000 : null;
   const closeDetail = useCallback(() => setSelected(null), []);
+  /** Bottom menu: open the section and return to its top, also when it is already open. */
+  const openTab = (next: Tab) => {
+    window.scrollTo({ top: 0, behavior: next === tab ? "smooth" : "auto" });
+    setTab(next);
+  };
   const shown = tier === "all" ? null : byTier[tier];
 
   const renderGrid = (list: Deal[]) => (
@@ -179,7 +183,7 @@ export default function HomePage() {
 
       {tab === "overview" ? (
         <Dashboard deals={deals} stats={stats} scannedAt={scannedAt} saved={saved} onSave={toggleSaved} onOpen={setSelected}
-          onShowAll={(nextTier) => { setTier(nextTier); setTab("home"); window.scrollTo({ top: 0 }); }} />
+          onShowAll={(nextTier) => { setTier(nextTier); openTab("home"); }} />
       ) : null}
 
       {tab === "home" ? (
@@ -227,7 +231,7 @@ export default function HomePage() {
           ) : null}
 
           <div className="seg" role="tablist" aria-label="Тип предложений">
-            {([["all", "Все", visible.length], ["strong", "Best", byTier.strong.length], ["good", "Good", byTier.good.length], ["candidate", "Watchlist", byTier.candidate.length]] as const).map(([key, label, count]) => (
+            {([["all", "Все", visible.length], ["strong", "Best", byTier.strong.length], ["good", "Good", byTier.good.length]] as const).map(([key, label, count]) => (
               <button type="button" role="tab" aria-selected={tier === key} key={key} className={tier === key ? "on" : ""} onClick={() => setTier(key)}>{label}<b>{count}</b></button>
             ))}
           </div>
@@ -238,14 +242,13 @@ export default function HomePage() {
             <div className="deal-grid">{Array.from({ length: 6 }).map((_, index) => <div className="skeleton-card" key={index}><div /><span /><span /><span /></div>)}</div>
           ) : !visible.length ? (
             <div className="state-panel"><div className="state-icon">⌁</div><h3>Ничего не подходит</h3>
-              <p>{counts?.feed ? "В каталоге " + counts.feed.toLocaleString("ru-RU") + " объявлений, но они не проходят текущие фильтры." : "Сканер ещё не опубликовал объявления."}</p>
+              <p>{counts?.feed ? "В каталоге " + counts.feed.toLocaleString("ru-RU") + " выгодных предложений, но они не проходят текущие фильтры." : "Подтверждённо выгодных предложений сейчас нет. Здесь появятся только те, где прибыль подтверждена независимыми ценами."}</p>
               {activeCount || category || search ? <button className="secondary-button" onClick={() => { setSearch(""); setCategory(""); updateSettings({ ...DEFAULT_SETTINGS, location: settings.location }); }}>Сбросить фильтры</button> : null}
             </div>
           ) : shown ? (shown.length ? renderGrid(shown) : <p className="tier-empty">В этой группе сейчас пусто.</p>) : (
             <div className="deal-tiers">
               {byTier.strong.length ? <section className="deal-tier strong-tier"><div className="tier-heading"><h3>Best deals<span>{byTier.strong.length}</span></h3><p>Высокая уверенность: независимые цены с ≥2 площадок, прибыль после всех расходов</p></div>{renderGrid(byTier.strong)}</section> : null}
               {byTier.good.length ? <section className="deal-tier good-tier"><div className="tier-heading"><h3>Good deals<span>{byTier.good.length}</span></h3><p>Подтверждённая прибыль, уверенность средняя или запас меньше</p></div>{renderGrid(byTier.good)}</section> : null}
-              {byTier.candidate.length ? <section className="deal-tier review-tier"><div className="tier-heading"><h3>Watchlist<span>{byTier.candidate.length}</span></h3><p>Модель распознана; ждёт независимой оценки рынка или не прошла порог прибыли</p></div>{renderGrid(byTier.candidate)}</section> : null}
             </div>
           )}
         </section>
@@ -322,11 +325,11 @@ export default function HomePage() {
       </footer>
 
       <nav className="bottom-nav" aria-label="Основная навигация">
-        <button className={tab === "overview" ? "nav-active" : ""} onClick={() => setTab("overview")}><Icon name="home" />Обзор</button>
-        <button className={tab === "home" ? "nav-active" : ""} onClick={() => setTab("home")}><Icon name="spark" />Каталог</button>
-        <button className={tab === "explore" ? "nav-active" : ""} onClick={() => setTab("explore")}><Icon name="search" />Поиск</button>
-        <button className={tab === "analytics" ? "nav-active" : ""} onClick={() => setTab("analytics")}><Icon name="chart" />Аналитика</button>
-        <button className={tab === "saved" || tab === "profile" ? "nav-active" : ""} onClick={() => setTab("saved")}><Icon name="heart" />Избранное{saved.length ? <i>{saved.length}</i> : null}</button>
+        <button className={tab === "overview" ? "nav-active" : ""} onClick={() => openTab("overview")}><Icon name="home" />Обзор</button>
+        <button className={tab === "home" ? "nav-active" : ""} onClick={() => openTab("home")}><Icon name="spark" />Каталог</button>
+        <button className={tab === "explore" ? "nav-active" : ""} onClick={() => openTab("explore")}><Icon name="search" />Поиск</button>
+        <button className={tab === "analytics" ? "nav-active" : ""} onClick={() => openTab("analytics")}><Icon name="chart" />Аналитика</button>
+        <button className={tab === "saved" || tab === "profile" ? "nav-active" : ""} onClick={() => openTab("saved")}><Icon name="heart" />Избранное{saved.length ? <i>{saved.length}</i> : null}</button>
       </nav>
 
       {selected ? <DealDetail key={selected.listing_id} deal={selected} saved={saved.includes(selected.listing_id)} onSave={() => toggleSaved(selected.listing_id)} onClose={closeDetail} /> : null}

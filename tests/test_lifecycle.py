@@ -49,8 +49,12 @@ class LifecycleTests(unittest.TestCase):
         self.external = FakeExternalMarket()
         self.external_patch = mock.patch.object(bot, "run_external_research", self.external)
         self.external_patch.start()
+        # Matching of offers to one listing has its own tests (real Node run); here titles are placeholders.
+        self.revalue_patch = mock.patch.object(bot, "revalue_for_listings", lambda *_: {})
+        self.revalue_patch.start()
 
     def tearDown(self):
+        self.revalue_patch.stop()
         self.external_patch.stop()
         self.net.stop()
         self.sleep.stop()
@@ -119,10 +123,33 @@ class LifecycleTests(unittest.TestCase):
         bids = [listing(f"bid{i}", 50, price_type="MIN_BID") for i in range(3)]
         self.scan(bids + [listing("bid-deal", 200, price_type="MIN_BID")])
         feed = self.feed()
-        self.assertEqual(feed["bid-deal"]["status"], "good")
+        self.assertEqual(feed["bid-deal"]["status"], "candidate")
+        self.assertIsNone(feed["bid-deal"]["estimated_profit"])
         self.assertEqual(feed["bid-deal"]["price_type"], "MIN_BID")
         self.assertTrue(any("bieden" in flag for flag in feed["bid-deal"]["warning_flags"]))
         self.assertEqual(feed["bid-deal"]["market_value"], 400.0)
+
+    def rescan_with_rules(self, rules):
+        self.external.set(used=[400] * 6)
+        self.scan([listing("old-good", 200)])
+        self.assertIn(self.feed()["old-good"]["status"], ("strong", "good"))
+        with open(bot.FEED_PATH, encoding="utf8") as handle:
+            doc = json.load(handle)
+        for deal in doc["deals"]:
+            if rules is None:
+                deal.pop("valuation_rules", None)
+            else:
+                deal["valuation_rules"] = rules
+        with open(bot.FEED_PATH, "w", encoding="utf8") as handle:
+            json.dump(doc, handle)
+        self.scan([])
+        return bot.load_feed()["scannerStats"]["cachedCandidatesReevaluated"]
+
+    def test_good_deal_from_older_rules_is_rechecked_before_its_schedule(self):
+        self.assertEqual(self.rescan_with_rules(None), 1)
+
+    def test_good_deal_under_current_rules_waits_for_its_schedule(self):
+        self.assertEqual(self.rescan_with_rules(bot.VALUATION_RULES), 0)
 
     def test_min_bid_without_confirmed_profit_is_not_kept_as_candidate(self):
         self.scan([listing("lonely-bid", 300, price_type="MIN_BID")])

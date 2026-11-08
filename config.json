@@ -359,26 +359,6 @@
       "strict_group": true
     },
     {
-      "key": "bag-fjallraven",
-      "label": "Рюкзак Fjällräven",
-      "query": "fjallraven kanken rugzak",
-      "include_any": [
-        "fjällräven",
-        "fjallraven",
-        "kånken",
-        "kanken"
-      ],
-      "exclude": [
-        "portemonnee",
-        "hoesje"
-      ],
-      "min_price": 25,
-      "threshold": 0.3,
-      "group_regex": "\\b(re-?kanken|laptop ?\\d{2}|mini|no\\.? ?2|big)\\b",
-      "min_profit_eur": 35,
-      "strict_group": true
-    },
-    {
       "key": "bag-northface",
       "label": "Рюкзак The North Face",
       "query": "the north face rugzak",
@@ -402,48 +382,6 @@
       ],
       "min_price": 25,
       "threshold": 0.3,
-      "min_profit_eur": 35
-    },
-    {
-      "key": "bag-osprey",
-      "label": "Рюкзак Osprey",
-      "query": "osprey rugzak",
-      "include_any": [
-        "osprey"
-      ],
-      "exclude": [
-        "hoesje"
-      ],
-      "min_price": 40,
-      "threshold": 0.3,
-      "min_profit_eur": 35
-    },
-    {
-      "key": "bag-deuter",
-      "label": "Рюкзак Deuter",
-      "query": "deuter rugzak",
-      "include_any": [
-        "deuter"
-      ],
-      "exclude": [
-        "hoesje"
-      ],
-      "min_price": 30,
-      "threshold": 0.3,
-      "min_profit_eur": 35
-    },
-    {
-      "key": "bag-eastpak",
-      "label": "Рюкзак Eastpak",
-      "query": "eastpak rugzak",
-      "include_any": [
-        "eastpak"
-      ],
-      "exclude": [
-        "hoesje"
-      ],
-      "min_price": 15,
-      "threshold": 0.35,
       "min_profit_eur": 35
     },
     {
@@ -1128,14 +1066,14 @@
         "lader"
       ],
       "group_type": "model_required",
-      "group_regex": "\\b(?:eos\\s*r(?:50|10|7|8|6\\s*ii|5\\s*ii|6|5)|r50|r10|r7|r8|r6\\s*(?:mark\\s*)?ii|r5\\s*(?:mark\\s*)?ii|g7x\\s*(?:ii|iii))\\b",
+      "group_regex": "\\b(?:eos\\s*r(?:50|10|7|8|[56](?:\\s*(?:mark\\s*|mk\\s*)?(?:ii|2))?)|r50|r10|r7|r8|r[56]\\s*(?:mark\\s*|mk\\s*)?(?:ii|2)|g7x\\s*(?:ii|iii))\\b",
       "strict_group": true,
       "min_price": 150,
       "threshold": 0.28,
       "good_threshold": 0.19,
       "min_profit_eur": 100,
       "min_roi": 0.22,
-      "require_regex": "\\b(?:eos\\s*r(?:50|10|7|8|6\\s*ii|5\\s*ii|6|5)|r50|r10|r7|r8|r6\\s*(?:mark\\s*)?ii|r5\\s*(?:mark\\s*)?ii|g7x\\s*(?:ii|iii))\\b"
+      "require_regex": "\\b(?:eos\\s*r(?:50|10|7|8|[56](?:\\s*(?:mark\\s*|mk\\s*)?(?:ii|2))?)|r50|r10|r7|r8|r[56]\\s*(?:mark\\s*|mk\\s*)?(?:ii|2)|g7x\\s*(?:ii|iii))\\b"
     },
     {
       "key": "camera-nikon",
@@ -1363,7 +1301,7 @@
       "search_price_sorted": true
     },
     {
-      "key": "macbook",
+      "key": "macbook", "memory_from_description": true,
       "label": "MacBook Air / Pro",
       "query": "macbook",
       "search_variants": [
@@ -1417,6 +1355,8 @@
       "min_roi": 0.2,
       "search_price_sorted": true
     },
+    {"key": "ssd-samsung", "label": "SSD Samsung T7–T9", "query": "samsung t7 ssd", "search_variants": ["samsung t7 ssd", "samsung t7 shield", "samsung t9 ssd", "samsung portable ssd t7", "samsung portable ssd t9"], "variant_pages": 1, "include_any": ["t7", "t8", "t9"], "require_regex": "(?=.*\\b(?:samsung|ssd)\\b)(?=.*\\bt[789]\\b)(?=.*\\b(?:\\d{3,4}\\s?gb|[1-8]\\s?tb)\\b)", "exclude": ["microsd", "microsdxc", "sdxc", "hoesje", "case", "cover", "sleeve", "kabel", "houder", "behuizing", "defect", "kapot", "onderdelen", "onderdeel", "reparatie", "lege doos"], "group_regex": "\\b(?:t[789]|shield|touch|250\\s?gb|500\\s?gb|1000\\s?gb|2000\\s?gb|4000\\s?gb|1\\s?tb|2\\s?tb|4\\s?tb)\\b", "group_type": "model_required", "strict_group": true, "min_price": 30, "threshold": 0.25, "good_threshold": 0.17, "min_profit_eur": 25, "min_roi": 0.2, "search_price_sorted": true},
+    {"key": "ssd-sandisk", "label": "SSD SanDisk Extreme", "query": "sandisk extreme portable ssd", "search_variants": ["sandisk extreme portable ssd", "sandisk extreme pro ssd", "sandisk extreme ssd 1tb", "sandisk extreme ssd 2tb"], "variant_pages": 1, "include_any": ["sandisk"], "require_regex": "(?=.*\\bsandisk\\b)(?=.*\\bextreme\\b)(?=.*\\b(?:ssd|portable)\\b)(?=.*\\b(?:\\d{3,4}\\s?gb|[1-8]\\s?tb)\\b)", "exclude": ["hoesje", "case", "cover", "sleeve", "kabel", "houder", "behuizing", "defect", "kapot", "onderdelen", "onderdeel", "reparatie", "lege doos", "stick", "usb-stick", "microsd", "micro sd", "sd kaart", "sd-kaart", "geheugenkaart", "cruzer"], "group_regex": "\\b(?:extreme\\s*pro|extreme|e30|e61|e81|250\\s?gb|500\\s?gb|1000\\s?gb|2000\\s?gb|4000\\s?gb|1\\s?tb|2\\s?tb|4\\s?tb)\\b", "group_type": "model_required", "strict_group": true, "min_price": 30, "threshold": 0.25, "good_threshold": 0.17, "min_profit_eur": 25, "min_roi": 0.2, "search_price_sorted": true},
     {
       "key": "ipad",
       "label": "iPad",

@@ -69,9 +69,9 @@ export const FOCUS_KEYS: Record<string, string[]> = {
   tv: ["televisions"],
   cameras: ["camera-sony", "camera-canon", "camera-nikon", "camera-fujifilm", "camera-panasonic", "lens-sony-fe", "action-camera-gopro"],
   drones: ["drones"],
-  bags: ["bag-michael-kors", "backpack-michael-kors", "bag-fjallraven", "bag-northface", "bag-osprey", "bag-deuter", "bag-eastpak"],
+  bags: ["bag-michael-kors", "backpack-michael-kors", "bag-northface"],
   microphones: ["microphone-shure", "microphone-rode", "microphone-dji", "microphone-sennheiser"],
-  electronics: ["iphone-16", "iphone-15", "iphone-14", "iphone-13", "iphone-12", "galaxy-s", "ipad", "macbook", "steam-deck", "switch", "xbox-series", "apple-watch", "sonos", "dyson"],
+  electronics: ["iphone-16", "iphone-15", "iphone-14", "iphone-13", "iphone-12", "galaxy-s", "ipad", "macbook", "ssd-samsung", "ssd-sandisk", "steam-deck", "switch", "xbox-series", "apple-watch", "sonos", "dyson"],
 };
 
 export const TOTAL_SEARCHES = CATEGORIES.length;

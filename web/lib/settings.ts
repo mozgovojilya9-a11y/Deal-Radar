@@ -27,6 +27,8 @@ export type SearchSettings = {
 };
 
 export const SETTINGS_KEY = "deal-radar-settings";
+/** Categories the radar no longer scans: dropped from saved filters so they cannot empty the catalog. */
+const RETIRED_CATEGORIES = new Set(["bag-fjallraven", "bag-osprey", "bag-deuter", "bag-eastpak"]);
 export const SETTINGS_VERSION = 2;
 export const RADIUS_STEPS: Array<number | null> = [5, 10, 20, 30, 50, 75, 100, 150, null];
 export const PRICE_PRESETS: Array<{ label: string; min: number | null; max: number | null }> = [
@@ -79,6 +81,7 @@ export function readSettings(raw: unknown): SearchSettings {
   const categories = Array.isArray(stored.categories)
     ? stored.categories.filter((key): key is string => typeof key === "string" && /^[a-z0-9-]{1,64}$/i.test(key))
       .map((key) => key === "airpods-pro" ? "airpods-pro-3" : key === "airpods" ? "airpods-5" : key)
+      .filter((key) => !RETIRED_CATEGORIES.has(key))
     : [];
   // v1 stored an automatic €800 maxPrice unless the user had touched the filter.
   const maxPrice = isV2 || stored.priceFilterConfigured === true ? finite(stored.maxPrice, 0.01, 1_000_000) : null;

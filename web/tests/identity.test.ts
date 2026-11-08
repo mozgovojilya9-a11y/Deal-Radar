@@ -61,3 +61,43 @@ test("search name drops condition, colour and battery noise", () => {
   assert.equal(buildIdentity("Macbook Air M2 NIEUW 99% batterij! 15,3” 256gb Midnight").searchName, "Macbook Air M2 15,3” 256gb");
   assert.equal(buildIdentity("Ray-Ban Wayfarer Gen 2 Smartbril - Nieuw").searchName, "Ray-Ban Wayfarer Gen 2");
 });
+
+const wrongModelPairs: Array<[string, string, string?]> = [
+  ["Nintendo Switch (2019) met accessoires", "Nintendo Switch 2 Konsole wie neu"],
+  ["Nintendo Switch OLED", "Nintendo Switch 2"],
+  ["CANON EOS R6 BODY | NIEUWSTAAT", "Canon EOS R6 Mark II Body mit OVP"],
+  ["Canon EOS R6", "Canon EOS R6 II Gehäuse"],
+  ["Casio GPR-H1000-1", "CASIO G-Shock Rangeman GPR-B1000-1JR Solar"],
+  ["G-Shock GBD-H1000-1ER Black Edition", "CASIO G-SHOCK / GPR-H1000 / NEU"],
+];
+for (const [listing, offer] of wrongModelPairs) {
+  test(`${listing} is not valued by ${offer}`, () => {
+    assert.notEqual(matchProduct(offer, buildIdentity(listing)).level, "exact");
+  });
+}
+
+test("the same camera generation still matches, with or without the word Mark", () => {
+  assert.equal(matchProduct("Canon EOS R6 Mark II Body", buildIdentity("Canon EOS R6 II")).level, "exact");
+  assert.equal(matchProduct("Canon EOS R6 Body", buildIdentity("Canon EOS R6 camera in zeer goede staat, 13.686 clicks")).level, "exact");
+});
+
+test("RAM read from the description (hint) separates configurations of one MacBook", () => {
+  const identity = buildIdentity("Apple MacBook Pro 14 inch 1TB SSD (M3, 2023)", "14 1tb 8gb m3 pro");
+  assert.equal(matchProduct('MacBook Pro 14" M3 1 TB SSD, 8 GB RAM', identity).level, "exact");
+  assert.notEqual(matchProduct('MacBook Pro 14" M3 16GB RAM 1 TB SSD', identity).level, "exact");
+});
+
+const storageCases: Array<[string, string, MatchLevel]> = [
+  ["Samsung T7 1TB", "Samsung Portable SSD T7 1TB", "exact"],
+  ["Samsung T7 1TB", "Samsung T9 1TB", "variant"],
+  ["Samsung T7 1TB", "Samsung T7 Shield 1TB", "variant"],
+  ["Samsung T7 1TB", "Samsung T7 2TB", "variant"],
+  ["SanDisk Extreme Portable SSD 2TB", "SanDisk Extreme Pro Portable SSD 2TB", "variant"],
+  ["SanDisk Extreme Portable SSD 2TB", "SanDisk Extreme Portable SSD 2TB V2", "exact"],
+  ["Samsung T7 1TB", "Hoesje voor Samsung T7", "accessory"],
+];
+for (const [listing, offer, expected] of storageCases) {
+  test(`${listing} ⟶ ${offer} = ${expected}`, () => {
+    assert.equal(matchProduct(offer, buildIdentity(listing)).level, expected);
+  });
+}

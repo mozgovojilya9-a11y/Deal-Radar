@@ -298,9 +298,9 @@ export const en: Dictionary = {
       { key: "tv", title: "Televisions", models: "Model year 2023 and newer — OLED, QLED, LG, Samsung, Sony Bravia, Philips Ambilight", note: "TV furniture, mounts, remotes and defective panels are excluded." },
       { key: "cameras", title: "Cameras", models: "Sony Alpha (A7 IV/V, A6700, ZV-E10), Canon EOS R, Nikon Z, Fujifilm X, Panasonic Lumix, GoPro Hero 11–14, Sony FE lenses", note: "Bags, straps, batteries and lens-only listings are filtered out." },
       { key: "drones", title: "DJI & drones", models: "DJI Mini 2/3/4, Mavic 2/3, Air 2/3, Avata, Neo, FPV — plus Autel and Parrot", note: "Propellers, batteries and spare parts are excluded." },
-      { key: "bags", title: "Michael Kors & bags", models: "Michael Kors bags (Jet Set, Sloan, Mercer…) and backpacks, Fjällräven, The North Face, Osprey, Deuter, Eastpak", note: "Wallets, belts and key rings are excluded." },
+      { key: "bags", title: "Michael Kors & bags", models: "Michael Kors bags (Jet Set, Sloan, Mercer…) and backpacks, The North Face", note: "Wallets, belts and key rings are excluded." },
       { key: "microphones", title: "Microphones", models: "Shure SM7B/SM58/MV7, RØDE PodMic/NT1/Wireless GO, DJI Mic 2/Mini, Sennheiser MKE/EW-D", note: "Stands, cables and shock mounts are excluded." },
-      { key: "electronics", title: "Electronics", models: "iPhone 12–16, Samsung Galaxy S23–S25, iPad, MacBook, Steam Deck, Nintendo Switch, Xbox Series, Apple Watch, Sonos, Dyson", note: "Screens, batteries and other parts are not treated as devices." },
+      { key: "electronics", title: "Electronics", models: "iPhone 12–16, Samsung Galaxy S23–S25, iPad, MacBook, Samsung T7–T9 & SanDisk Extreme SSD, Steam Deck, Nintendo Switch, Xbox Series, Apple Watch, Sonos, Dyson", note: "Screens, batteries and other parts are not treated as devices." },
     ],
   },
   demo: {

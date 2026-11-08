@@ -28,6 +28,8 @@ FEED_PATH = os.environ.get("DEAL_FEED", os.path.join(HERE, "data", "deals.json")
 RETAIL_PATH = os.environ.get("DEAL_RETAIL_PRICES", os.path.join(HERE, "retail_prices.json"))
 API = "https://www.marktplaats.nl/lrp/api/search"
 SCANNER_DATA_VERSION = "4"
+# Raise when valuation rules change: Good/Strong deals decided under older rules are re-checked at once.
+VALUATION_RULES = 2
 FEED_SCHEMA_VERSION = 2
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
@@ -621,7 +623,24 @@ def model_group_for(q, title, text):
     group = group_of(q, title)
     if group in ("unknown", "other") and q.get("match_description") and text and text != title:
         group = group_of(q, text)
-    return group
+    return with_description_memory(q, title, text, group)
+
+
+MEMORY_SIZES = r"(8|16|18|24|32|36|48|64|96)"
+TITLE_MEMORY_RE = re.compile(r"\b" + MEMORY_SIZES + r"\s?gb\b", re.I)
+DESCRIPTION_MEMORY_RE = re.compile(
+    r"\b" + MEMORY_SIZES + r"\s?gb\s+(?:unified\s+|intern\s+)?(?:ram|geheugen|werkgeheugen|memory)\b"
+    r"|\b(?:ram|geheugen|werkgeheugen|memory)\s*[:=]?\s*" + MEMORY_SIZES + r"\s?gb\b", re.I)
+
+
+def with_description_memory(q, title, text, group):
+    """RAM changes a laptop's price; sellers often name it only in the description."""
+    if not q.get("memory_from_description") or group in ("unknown", "other", "all") or TITLE_MEMORY_RE.search(title or ""):
+        return group
+    found = DESCRIPTION_MEMORY_RE.search(text or "")
+    if not found:
+        return group
+    return "-".join(sorted(set(group.split("-")) | {(found.group(1) or found.group(2)) + "gb"}))
 
 
 def group_of(q, text):
@@ -788,7 +807,7 @@ MULTI_ITEM_RE = re.compile(r"^\s*(?:[2-9]|1\d)\s*x\s|(?:^|\s)(?:[2-9]|1\d)\s*(?:
 
 ELECTRONICS_PREFIXES = ("iphone", "ps", "airpods", "headphones", "camera", "action-camera", "drones", "televisions",
                         "rayban", "microphone", "samsung", "macbook", "ipad", "switch", "xbox", "steam", "watch-apple",
-                        "pixel", "garmin", "lens", "gopro", "dji", "sonos", "kindle", "galaxy", "apple-watch", "dyson")
+                        "pixel", "garmin", "lens", "gopro", "dji", "sonos", "kindle", "galaxy", "apple-watch", "dyson", "ssd")
 ACCESSORY_TERMS = re.compile(
     r"(?<![a-z0-9])(hoesje|hoes|case|cover|sleeve|skin|sticker|screenprotector|screen protector|beschermglas|tempered glass|"
     r"standaard|houder|mount|oplader|charger|lader|kabel|cable|adapter|dock|laadstation|oplaadstation|oplaadcase|laadcase|"
@@ -1867,6 +1886,7 @@ def backfill_coordinates(db, feed_deals, metrics, now, cfg):
 
 WEB_DIR = os.path.join(HERE, "web")
 MARKET_CLI = os.path.join(WEB_DIR, "scripts", "market-cli.ts")
+REVALUE_CLI = os.path.join(WEB_DIR, "scripts", "revalue-cli.ts")
 TS_REGISTER = os.path.join(WEB_DIR, "tests", "register.mjs")
 
 
@@ -2033,6 +2053,73 @@ def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals, 
                         metrics["externalValued"] += 1
             db.commit()
     return results
+
+
+def run_listing_revalue(payload):
+    """Local matching in web/scripts/revalue-cli.ts: which stored offers are this exact listing's product."""
+    node = shutil.which("node")
+    if not node or not os.path.exists(REVALUE_CLI):
+        log("проверка оценок недоступна: не найден Node.js или web/scripts/revalue-cli.ts")
+        return None
+    try:
+        completed = subprocess.run([node, "--no-warnings", "--import", TS_REGISTER, REVALUE_CLI],
+                                   input=json.dumps(payload, ensure_ascii=False), capture_output=True, text=True,
+                                   cwd=WEB_DIR, timeout=180)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        log(f"проверка оценок прервана: {type(exc).__name__}")
+        return None
+    if completed.returncode != 0:
+        log("проверка оценок завершилась с ошибкой: " + completed.stderr.strip()[-400:])
+        return None
+    try:
+        return json.loads(completed.stdout or "[]")
+    except json.JSONDecodeError:
+        log("проверка оценок вернула некорректный JSON")
+        return None
+
+
+def revalue_for_listings(pending, externals, metrics):
+    """One group can hold different products (GPR-H1000 / GBD-H1000): value each listing by its own exact offers.
+
+    Stored offers are matched again here, so a matcher fix also corrects valuations already cached.
+    A listing that could not be checked gets no external value rather than an unchecked one.
+    """
+    groups, items = {}, []
+    for q, candidates, _ai in pending:
+        for listing_id, (item, group, _flags) in candidates.items():
+            key = external_key(q, group, item)
+            external = externals.get(key)
+            if not external or external.get("stale") or not external.get("offers"):
+                continue
+            groups[key] = {"checkedAt": datetime.fromtimestamp(external["checked_at"], timezone.utc).isoformat(), "offers": external["offers"]}
+            items.append({"id": listing_id, "key": key, "title": str(item.get("title") or ""),
+                          "hint": group.replace("-", " ") if group and group not in ("unknown", "all", "other") else None,
+                          "groupValued": bool(external["valuation"].get("market_value"))})
+    if not items:
+        return {}
+    outcome = run_listing_revalue({"groups": groups, "items": items})
+    if outcome is None:
+        metrics["technicalErrors"] += 1
+        return {item["id"]: None for item in items}
+    by_id, result = {row["id"]: row for row in outcome if isinstance(row, dict) and row.get("id")}, {}
+    for item in items:
+        row = by_id.get(item["id"])
+        if not row:
+            result[item["id"]] = None
+            continue
+        valuation, offers = row.get("valuation") or {}, row.get("offers") or []
+        if item["groupValued"] and not valuation.get("marketValue"):
+            metrics["offersNotThisProduct"] = metrics.get("offersNotThisProduct", 0) + 1
+        result[item["id"]] = {
+            **externals[item["key"]], "stale": False, "offers": offers,
+            "valuation": {"market_value": valuation.get("marketValue"), "conservative_value": valuation.get("conservativeValue"),
+                          "used_value": valuation.get("usedValue"), "new_value": valuation.get("newValue"),
+                          "refurbished_value": valuation.get("refurbishedValue"), "confidence": valuation.get("confidence") or "none",
+                          "used_count": sum(1 for offer in offers if offer.get("segment") == "used"),
+                          "source_count": len(offers), "domain_count": len({offer.get("domain") for offer in offers}),
+                          "spread": valuation.get("spread"), "reason": valuation.get("reason") or ""},
+        }
+    return result
 
 
 def build_funnel(metrics, catalog_new):
@@ -2424,7 +2511,8 @@ def run_once(cfg, db, dry=False):
             if state_row and state_row[2] and int(state_row[2]) > now:
                 continue  # another scanner process is evaluating this listing right now
             # Status computed from Marktplaats prices (pre-v6) is never kept: re-value now.
-            legacy = cached_deal.get("price_reference_type") in ("marktplaats", "web_used")
+            legacy = cached_deal.get("price_reference_type") in ("marktplaats", "web_used") \
+                or (cached_deal.get("status") in ("strong", "good") and cached_deal.get("valuation_rules") != VALUATION_RULES)
             if not legacy and state_row and state_row[0] and int(state_row[0]) > now:
                 metrics["awaitingRecheck"] += 1
                 continue
@@ -2479,6 +2567,7 @@ def run_once(cfg, db, dry=False):
     # Phase 2: independent market value for every model group (shops, refurbishers and used
     # platforms outside Marktplaats). Phase 3: evaluate every candidate against that value.
     external_by_key = prepare_external_valuations(db, pending_evaluations, cfg, now, metrics, previous_deals, search_issues, source_health, offer_domains)
+    listing_external = revalue_for_listings(pending_evaluations, external_by_key, metrics)
     max_spread = float(cfg.get("max_price_spread", 0.8))
     for q, candidates, ai_decisions in pending_evaluations:
         qkey = q["key"]
@@ -2489,7 +2578,7 @@ def run_once(cfg, db, dry=False):
             # Marktplaats prices are context only (shown to the user), never the market value.
             context_group = None if group in ("all", "other") else group
             marketplace_prices = [] if group == "unknown" else market_price_samples(db, qkey, context_group, listing_id, window)
-            external = external_by_key.get(external_key(q, group, item))
+            external = listing_external[listing_id] if listing_id in listing_external else external_by_key.get(external_key(q, group, item))
             valuation = (external or {}).get("valuation") or {}
             stale = bool(external and external.get("stale"))
             confidence = valuation.get("confidence") or "none"
@@ -2606,12 +2695,14 @@ def run_once(cfg, db, dry=False):
                                       listing_id in seen_in_search, has_market=valuation_price is not None)
                     feed_deals.pop(listing_id, None)
                     continue
+                # The sale price of an auction is unknown, so no profit can be promised on its minimum bid.
                 metrics["minBidCandidates"] += 1
                 flags = list(flags) + ["цена «bieden vanaf» — это минимальная ставка, итоговая цена может быть выше"]
-                if status == "strong":
-                    metrics["strongDeals"] -= 1
-                    metrics["goodDeals"] += 1
-                    status = "good"
+                metrics["strongDeals" if status == "strong" else "goodDeals"] -= 1
+                metrics["reviewCandidates"] += 1
+                status = "candidate"
+                economics = None
+                reason = f"Минимальная ставка €{item['price']:.0f}: цена сделки неизвестна, прибыль не считается"
             if status in ("strong", "good") and not reason and economics:
                 reason = (f"Цена на {discount:.0%} ниже независимой рыночной цены €{market_value:.0f} "
                           f"({valuation.get('reason')}); прибыль ≈ €{economics['estimated_profit']:.0f} после торга и комиссий")
@@ -2664,6 +2755,7 @@ def run_once(cfg, db, dry=False):
                 "external_domains": int(valuation.get("domain_count") or 0),
                 "market_checked_at": checked_iso,
                 "market_stale": stale,
+                "valuation_rules": VALUATION_RULES,
                 "valuation_reason": valuation.get("reason") or None,
                 "market_confidence": ("high" if confidence == "high" else "preliminary" if confidence == "medium" else "none")
                     if reference_type == "external_used" else ("retail_proxy" if reference_type == "new_retail" else "none"),
