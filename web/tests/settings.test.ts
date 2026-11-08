@@ -6,7 +6,7 @@ test("v1 settings migrate without the old hidden €800 cap", () => {
   const migrated = readSettings({ categories: ["airpods-pro", "ps5"], minDiscount: 20, minPrice: 50, maxPrice: 800 });
   assert.equal(migrated.maxPrice, null);
   assert.equal(migrated.minPrice, 50);
-  assert.deepEqual(migrated.categories, ["airpods-pro-3", "ps5"]);
+  assert.deepEqual(migrated.categories, ["ps5"]); // AirPods Pro is no longer scanned
   assert.equal(readSettings({ maxPrice: 1200, priceFilterConfigured: true }).maxPrice, 1200);
 });
 

@@ -28,7 +28,8 @@ export type SearchSettings = {
 
 export const SETTINGS_KEY = "deal-radar-settings";
 /** Categories the radar no longer scans: dropped from saved filters so they cannot empty the catalog. */
-const RETIRED_CATEGORIES = new Set(["bag-fjallraven", "bag-osprey", "bag-deuter", "bag-eastpak"]);
+const RETIRED_CATEGORIES = new Set(["bag-fjallraven", "bag-osprey", "bag-deuter", "bag-eastpak",
+  "camera-nikon", "camera-fujifilm", "camera-panasonic", "microphone-shure", "microphone-rode", "microphone-sennheiser", "airpods-pro-3", "airpods-5", "airpods-pro-2", "watch-casio", "ps4", "xbox-series"]);
 export const SETTINGS_VERSION = 2;
 export const RADIUS_STEPS: Array<number | null> = [5, 10, 20, 30, 50, 75, 100, 150, null];
 export const PRICE_PRESETS: Array<{ label: string; min: number | null; max: number | null }> = [

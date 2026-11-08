@@ -30,7 +30,7 @@ const LABEL_PATTERNS: Array<[RegExp, Record<Locale, (brand: string) => string>]>
   [/^Рюкзаки (.+)$/, { nl: (b) => `${b}-rugzakken`, en: (b) => `${b} backpacks` }],
 ];
 const FIXED_LABELS: Record<string, Record<Locale, string>> = {
-  "Дроны": { nl: "Drones", en: "Drones" },
+  "Дроны DJI": { nl: "DJI-drones", en: "DJI drones" },
   "Телевизоры": { nl: "Televisies", en: "TVs" },
 };
 
@@ -63,15 +63,15 @@ export function categoryGroups(locale: Locale): CategoryGroup[] {
 
 /** Category keys that belong to each "in focus" block on the categories page. */
 export const FOCUS_KEYS: Record<string, string[]> = {
-  airpods: ["airpods-pro-2", "airpods-pro-3", "airpods-max", "airpods-5"],
+  airpods: ["airpods-max"],
   rayban: ["rayban"],
-  playstation: ["ps5", "ps4"],
+  playstation: ["ps5"],
   tv: ["televisions"],
-  cameras: ["camera-sony", "camera-canon", "camera-nikon", "camera-fujifilm", "camera-panasonic", "lens-sony-fe", "action-camera-gopro"],
+  cameras: ["camera-sony", "camera-canon", "lens-sony-fe", "action-camera-gopro"],
   drones: ["drones"],
   bags: ["bag-michael-kors", "backpack-michael-kors", "bag-northface"],
-  microphones: ["microphone-shure", "microphone-rode", "microphone-dji", "microphone-sennheiser"],
-  electronics: ["iphone-16", "iphone-15", "iphone-14", "iphone-13", "iphone-12", "galaxy-s", "ipad", "macbook", "ssd-samsung", "ssd-sandisk", "steam-deck", "switch", "xbox-series", "apple-watch", "sonos", "dyson"],
+  microphones: ["microphone-dji"],
+  electronics: ["iphone-16", "iphone-15", "iphone-14", "iphone-13", "iphone-12", "galaxy-s", "ipad", "macbook", "ssd-samsung", "ssd-sandisk", "steam-deck", "switch", "apple-watch", "sonos", "dyson"],
 };
 
 export const TOTAL_SEARCHES = CATEGORIES.length;
