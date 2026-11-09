@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseSubito, parseWillhaben, revalueForListing, type MarketOffer } from "../lib/market-research";
+import { isMarktplaats, parseSubito, parseWillhaben, revalueForListing, type MarketOffer } from "../lib/market-research";
 
 const offer = (title: string, price: number, domain = "kleinanzeigen.de"): MarketOffer =>
   ({ title, price, domain, url: "https://" + domain + "/" + price, segment: "used", method: "jsonld", official: false, availability: "in_stock" }) as MarketOffer;
@@ -46,4 +46,10 @@ test("Subito keeps items for sale and skips wanted ads", () => {
 test("a page without listing data gives no offers instead of failing", () => {
   assert.deepEqual(parseWillhaben("<html></html>"), []);
   assert.deepEqual(parseSubito(nextPage({})), []);
+});
+
+test("only Marktplaats listings count as buyable in manual search", () => {
+  assert.ok(isMarktplaats("www.marktplaats.nl"));
+  assert.ok(isMarktplaats("marktplaats.nl"));
+  for (const domain of ["vinted.nl", "www.2dehands.be", "kleinanzeigen.de", "fakemarktplaats.nl", "marktplaats.nl.evil.com"]) assert.equal(isMarktplaats(domain), false, domain);
 });

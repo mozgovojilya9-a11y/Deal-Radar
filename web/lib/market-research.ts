@@ -82,6 +82,8 @@ const REFURB_DOMAINS = /(?:^|\.)(?:backmarket\.[a-z.]+|refurbed\.[a-z.]+|swappie
 const NEW_RETAIL = /(?:^|\.)(?:alternate\.nl|coolblue\.(?:nl|be)|bol\.com|mediamarkt\.(?:nl|be)|amazon\.(?:nl|de|com\.be)|alternate\.(?:nl|be)|bcc\.nl|expert\.nl|ep\.nl|wehkamp\.nl|kamera-express\.nl|cameranu\.nl|fotokonijnenberg\.nl|belsimpel\.nl|megekko\.nl|azerty\.nl|informatique\.nl|paradigit\.nl|intertoys\.nl|gamemania\.nl|nedgame\.nl|koopmanoptics\.com|pearle\.nl|hansanders\.nl|specsavers\.nl|baumsport\.nl|supersales\.nl|kieskeurig\.nl|beslist\.nl|bax-shop\.nl|thomann\.(?:de|nl)|mobiel\.nl|gsmpunt\.nl|dreamland\.be|vandenborre\.be|krefel\.be|fnac\.(?:be|nl)|hifi\.nl|hificorner\.nl|zalando\.nl|debijenkorf\.nl|otto\.nl|sunglasshut\.com|optiek\.nl)$/;
 const SKIP_PAGES = /(?:^|\.)(?:marktplaats\.nl|2dehands\.be)$/;
 /** Same platform as the candidate listings: never independent evidence of market value. */
+/** The only site whose listings the user buys from. */
+export const isMarktplaats = (domain: string) => /(?:^|\.)marktplaats\.nl$/i.test(domain);
 export const MARKETPLACE_DOMAINS = /(?:^|\.)(?:marktplaats\.nl|2dehands\.be|2ememain\.be)$/;
 const WANTED_AD = /\b(ankauf|suche|gesucht|tausch|zoek|gezocht|ruilen|inkoop|wir kaufen|kaufe)\b/i;
 
@@ -257,6 +259,8 @@ export type ResearchOptions = {
   referencePrice?: number | null;
   /** Also collect current Marktplaats/2dehands listings as context (default true). */
   includeMarketplace?: boolean;
+  /** Leave Belgian 2dehands listings out of the buyable results. */
+  marktplaatsOnly?: boolean;
   /** Scanner only: skip shops that never answer its servers. */
   skipBlockedRetail?: boolean;
   /** Marktplaats result pages for buyable listings (100 per page). */
@@ -530,7 +534,7 @@ export async function researchMarket(title: string, options: ResearchOptions = {
         })
         .catch((error) => { errors.push("Marktplaats: " + (error instanceof Error ? error.message : String(error))); }));
     }
-    classifiedTasks.push(searchClassifieds("www.2dehands.be", name, undefined, deadline)
+    if (!options.marktplaatsOnly) classifiedTasks.push(searchClassifieds("www.2dehands.be", name, undefined, deadline)
       .then((rows) => {
         for (const row of rows.slice(0, 60)) {
           const offer = classifiedOffer(row, "www.2dehands.be");

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { offerLimits, resaleEconomics, PROFITABILITY } from "@/lib/economics";
-import { researchMarket } from "@/lib/market-research";
+import { isMarktplaats, researchMarket } from "@/lib/market-research";
 import { understandQuery } from "@/lib/query-understanding";
 import { rateAllowed, verifyInitData } from "@/lib/telegram-auth";
 
@@ -11,8 +11,8 @@ export const maxDuration = 60;
 const HEADERS = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 
 /**
- * Manual product research: real Marktplaats/2dehands listings (with the user's postcode and
- * radius), Dutch retail pages and refurbished shops, each kept in its own segment.
+ * Manual product research: the listings are strictly Marktplaats (with the user's postcode and
+ * radius). Other sites only supply the independent market value and are never offered for buying.
  */
 export async function POST(request: NextRequest) {
   const token = process.env.TELEGRAM_TOKEN;
@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
   try {
     const research = await researchMarket(query, {
       includeNew, includeUsed, includeRefurbished, maxPrice,
+      marktplaatsOnly: true,
       location: postcode && radiusKm ? { postcode, distanceKm: radiusKm } : undefined,
       budgetMs: 45000,
       // Up to 5 Marktplaats pages (500 listings) instead of the first 100.
@@ -57,8 +58,8 @@ export async function POST(request: NextRequest) {
     const newSeg = research.segments.new;
     const basisIsNew = valuation.marketValue === null && newSeg.count >= 2 && new Set(newSeg.domains).size >= 2;
     const resaleBasis = valuation.conservativeValue ?? (basisIsNew ? newSeg.median : null);
-    const priced = research.marketplace.offers
-      .filter((offer) => (maxPrice === null || offer.price <= maxPrice) && (minPrice === null || offer.price >= minPrice))
+    const listings = research.marketplace.offers
+      .filter((offer) => isMarktplaats(offer.domain) && (maxPrice === null || offer.price <= maxPrice) && (minPrice === null || offer.price >= minPrice))
       .map((offer) => {
         const economics = resaleBasis ? resaleEconomics(offer.price, resaleBasis, basisIsNew) : null;
         // Far below the independent market value: fakes, parts or scams are flagged, never "deals".
@@ -71,13 +72,10 @@ export async function POST(request: NextRequest) {
           warning: suspicious ? "Цена в " + (valuation.marketValue! / offer.price).toFixed(1) + " раза ниже рынка — вероятна подделка или мошенничество" : null };
       })
       .sort((a, b) => Number(a.status === "suspicious") - Number(b.status === "suspicious") || (b.estimatedProfit ?? -Infinity) - (a.estimatedProfit ?? -Infinity));
-    // With a known market value only profitable offers stay; without one nothing can be judged, so all are listed.
-    const listings = resaleBasis ? priced.filter((offer) => offer.status === "strong" || offer.status === "good") : priced;
     const warnings = [
       ...(valuation.marketValue === null ? ["Рыночная стоимость не определена: " + valuation.reason + ". Цены Marktplaats как замена не используются."] : []),
-      ...(research.providersUsed.length === 0 ? ["Все поисковые системы сейчас ограничили запросы; использованы Marktplaats, 2dehands и прямой поиск магазинов."] : []),
+      ...(research.providersUsed.length === 0 ? ["Все поисковые системы сейчас ограничили запросы; показаны объявления Marktplaats, рыночная цена считается по прямому поиску других сайтов."] : []),
       ...(research.rejected.variants ? [research.rejected.variants + " предложений другой версии/комплектации не смешаны с этой моделью."] : []),
-      ...(priced.length > listings.length ? ["Скрыто невыгодных или подозрительных объявлений: " + (priced.length - listings.length) + "."] : []),
       "Цены объявлений — цены предложений, а не завершённых сделок.",
     ];
     return NextResponse.json({

@@ -489,3 +489,6 @@ button.kpi:hover { border-color: var(--line-2); transform: translateY(-1px); }
   .seg button { flex: 1 1 auto; padding: 0 8px; font-size: 13px; }
   .seg button b { margin-left: 4px; }
 }
+.research-report > .source-list > :not(summary) { margin: 0 12px 12px; }
+.full-button { width: 100%; }
+.research-report { scroll-margin-top: 72px; }
