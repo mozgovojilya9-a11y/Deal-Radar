@@ -492,3 +492,37 @@ button.kpi:hover { border-color: var(--line-2); transform: translateY(-1px); }
 .research-report > .source-list > :not(summary) { margin: 0 12px 12px; }
 .full-button { width: 100%; }
 .research-report { scroll-margin-top: 72px; }
+
+/* ---- Deal score and price changes ---- */
+.status-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; }
+.score-ring { position: relative; display: inline-grid; place-items: center; flex: none; color: var(--muted); }
+.score-ring svg { position: absolute; inset: 0; }
+.score-ring circle { fill: none; stroke-width: 3; }
+.score-ring .score-track { stroke: var(--line-2); }
+.score-ring .score-arc { stroke: currentColor; stroke-linecap: round; }
+.score-ring b { position: relative; font-size: 12px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.score-ring.s-top { color: var(--accent); } .score-ring.s-solid { color: var(--good); } .score-ring.s-fair { color: var(--warn); }
+.status-row .score-ring { margin: -8px 0; }
+.drop-pill { background: var(--accent); color: var(--accent-ink); }
+.was-price { color: var(--muted); font-size: 14px; }
+.price-change { margin: 10px 0 0; padding: 8px 12px; border-radius: var(--r-s); font-size: 13px; font-weight: 600; border: 1px solid var(--line-2); }
+.price-change.down { color: var(--accent); background: var(--accent-bg); border-color: rgba(167,243,107,.25); }
+.price-change.up { color: var(--warn); }
+.active-chips button.chip-toggle { background: transparent; color: var(--soft); }
+.active-chips button.chip-on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.score-box { margin: 0 0 14px; border: 1px solid var(--line); border-radius: var(--r-m); }
+.score-box summary { display: flex; align-items: center; gap: 12px; padding: 10px 14px; cursor: pointer; list-style: none; }
+.score-box summary::-webkit-details-marker { display: none; }
+.score-box summary span b { display: block; font-size: 14px; }
+.score-box summary small, .score-box li small { display: block; color: var(--muted); font-size: 11px; font-weight: 400; }
+.score-box summary .score-ring b { font-size: 14px; }
+.score-box ul { list-style: none; margin: 0; padding: 0 14px 12px; display: grid; gap: 10px; }
+.score-box li { display: grid; grid-template-columns: minmax(0, 1fr) 72px 64px; align-items: center; gap: 10px; font-size: 13px; }
+.score-box li > i { height: 6px; border-radius: 99px; background: var(--line-2); overflow: hidden; }
+.score-box li > i em { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
+.score-box li.penalty > i em { background: var(--danger); }
+.score-box li > b { text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  /* The photo column is narrow: the second badge goes to its bottom corner. */
+  .fresh-pill { top: auto; right: auto; bottom: 6px; left: 6px; }
+}

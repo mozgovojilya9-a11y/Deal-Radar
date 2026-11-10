@@ -52,3 +52,28 @@ test("the compact list drops heavy fields, opening by id still returns them", as
   assert.equal("market_sources" in row, false);
   assert.equal("description" in (await call("compact=1&ids=ams")).deals[0], true);
 });
+
+test("every deal has a score: the scanner's when present, computed otherwise", async () => {
+  feed.deals.push(deal("scored", 300, 52.37, 4.9, { deal_score: 91, score_parts: { profit: 30, roi: 20, evidence: 20, liquidity: 6, freshness: 15, risk: 0 } }) as never);
+  const rows = (await call("")).deals as Array<{ listing_id: string; deal_score: number; score_parts: Record<string, number> }>;
+  assert.equal(rows.find((row) => row.listing_id === "scored")?.deal_score, 91);
+  const computed = rows.find((row) => row.listing_id === "ams")!;
+  // profit €60 -> 14.7, ROI 30% -> 10, no evidence, just published -> 15
+  assert.equal(computed.deal_score, 40);
+  assert.equal(computed.score_parts.freshness, 15);
+  feed.deals.pop();
+});
+
+test("sorting by score puts the highest score first across tiers", async () => {
+  feed.deals.push(deal("top", 300, 52.37, 4.9, { deal_score: 95 }) as never, deal("low", 300, 52.37, 4.9, { status: "strong", deal_score: 20 }) as never);
+  const ids = (await call("sort=score")).deals.map((d: { listing_id: string }) => d.listing_id);
+  assert.equal(ids[0], "top");
+  assert.ok(ids.indexOf("low") > ids.indexOf("ams"));
+  feed.deals.splice(-2, 2);
+});
+
+test("price drops can be filtered", async () => {
+  feed.deals.push(deal("drop", 300, 52.37, 4.9, { previous_price: 350, price_dropped_at: now }) as never);
+  assert.deepEqual((await call("priceDrop=1")).deals.map((d: { listing_id: string }) => d.listing_id), ["drop"]);
+  feed.deals.pop();
+});

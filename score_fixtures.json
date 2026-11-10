@@ -1,0 +1,12 @@
+[
+  {"name": "ideal deal", "deal": {"estimated_profit": 250, "profit_roi": 0.6, "market_confidence": "high", "market_samples": 30, "external_domains": 3, "market_spread": 0.2, "market_stale": false, "marktplaats_samples": 0, "warning_flags": [], "price_type": "FIXED", "needs_confirmation": false}, "ageHours": 2,
+   "expected": {"total": 100, "parts": {"profit": 30, "roi": 20, "evidence": 25, "liquidity": 10, "freshness": 15, "risk": 0}}},
+  {"name": "thin good deal with a warning", "deal": {"estimated_profit": 50, "profit_roi": 0.2, "market_confidence": "preliminary", "market_samples": 4, "external_domains": 1, "market_spread": 0.4, "market_stale": false, "marktplaats_samples": 0, "warning_flags": ["x"], "price_type": "FIXED", "needs_confirmation": false}, "ageHours": 48,
+   "expected": {"total": 37, "parts": {"profit": 13.4, "roi": 6.7, "evidence": 11, "liquidity": 1.3, "freshness": 9, "risk": -4}}},
+  {"name": "fresh listing without a market value", "deal": {"estimated_profit": null, "profit_roi": null, "market_confidence": "none", "market_samples": 0, "external_domains": 0, "market_spread": null, "warning_flags": [], "price_type": "FIXED"}, "ageHours": 1,
+   "expected": {"total": 15, "parts": {"profit": 0, "roi": 0, "evidence": 0, "liquidity": 0, "freshness": 15, "risk": 0}}},
+  {"name": "loss on an old listing never goes below zero", "deal": {"estimated_profit": -40, "profit_roi": -0.2, "market_confidence": "none", "market_samples": 0, "external_domains": 0, "market_spread": null, "warning_flags": ["a", "b", "c", "d"], "price_type": "MIN_BID", "needs_confirmation": true}, "ageHours": 500,
+   "expected": {"total": 0, "parts": {"profit": 0, "roi": 0, "evidence": 0, "liquidity": 0, "freshness": 0, "risk": -30}}},
+  {"name": "stale valuation halves the evidence", "deal": {"estimated_profit": 120, "profit_roi": 0.3, "market_confidence": "high", "market_samples": 12, "external_domains": 2, "market_spread": 0.55, "market_stale": true, "marktplaats_samples": 12, "warning_flags": [], "price_type": "FIXED", "needs_confirmation": false}, "ageHours": 200,
+   "expected": {"total": 50, "parts": {"profit": 20.8, "roi": 10, "evidence": 10, "liquidity": 6, "freshness": 3, "risk": 0}}}
+]

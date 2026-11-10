@@ -31,6 +31,8 @@ API = "https://www.marktplaats.nl/lrp/api/search"
 SCANNER_DATA_VERSION = "4"
 # Raise when valuation rules change: Good/Strong deals decided under older rules are re-checked at once.
 VALUATION_RULES = 3
+# Raise when the external price search changes: models it found nothing for are searched again at once.
+RESEARCH_RULES = 2
 FEED_SCHEMA_VERSION = 2
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
@@ -108,6 +110,10 @@ def open_db():
         CREATE TABLE IF NOT EXISTS status_history(
             id TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, at INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS ix_status_history_id ON status_history(id, at);
+        -- Asking price of a listing over time (append-only): shows price drops.
+        CREATE TABLE IF NOT EXISTS listing_prices(
+            id TEXT NOT NULL, price REAL NOT NULL, at INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS ix_listing_prices_id ON listing_prices(id, at);
         -- One row per scanner run (performance and outcome history; never overwritten).
         CREATE TABLE IF NOT EXISTS scan_runs(
             started_at INTEGER PRIMARY KEY, finished_at INTEGER, duration_s REAL, fetch_s REAL,
@@ -150,8 +156,31 @@ def record_status_change(db, listing_id, status, reason, now):
                    (listing_id, status, str(reason or "")[:300], now))
 
 
+def record_price(db, listing_id, price, now):
+    """Append the asking price when it differs from the last one seen (the first sighting is the baseline)."""
+    last = db.execute("SELECT price FROM listing_prices WHERE id=? ORDER BY at DESC, rowid DESC LIMIT 1", (listing_id,)).fetchone()
+    if last is None:
+        known = db.execute("SELECT price, first_seen FROM listings WHERE id=?", (listing_id,)).fetchone()
+        if known and known[0] is not None and abs(float(known[0]) - float(price)) >= 0.01:
+            db.execute("INSERT INTO listing_prices(id, price, at) VALUES(?,?,?)", (listing_id, float(known[0]), int(known[1] or now)))
+        db.execute("INSERT INTO listing_prices(id, price, at) VALUES(?,?,?)", (listing_id, float(price), now))
+    elif abs(float(last[0]) - float(price)) >= 0.01:
+        db.execute("INSERT INTO listing_prices(id, price, at) VALUES(?,?,?)", (listing_id, float(price), now))
+
+
+def price_trail(db, listing_id, limit=8):
+    """Price history for the feed: the points, the previous price and when the price last went down."""
+    rows = db.execute("SELECT price, at FROM listing_prices WHERE id=? ORDER BY at DESC, rowid DESC LIMIT ?", (listing_id, limit)).fetchall()[::-1]
+    history = [{"price": round(float(price), 2), "at": datetime.fromtimestamp(int(at), timezone.utc).isoformat()} for price, at in rows]
+    if len(history) < 2:
+        return {"price_history": history, "previous_price": None, "price_dropped_at": None}
+    dropped = history[-1]["price"] < history[-2]["price"]
+    return {"price_history": history, "previous_price": history[-2]["price"], "price_dropped_at": history[-1]["at"] if dropped else None}
+
+
 def upsert_listing(db, listing_id, qkey, group, item, now):
     """Store a comparable observation together with its evidence (URL, condition, location)."""
+    record_price(db, listing_id, item["price"], now)
     values = (
         qkey, group, item["title"], item["price"], now,
         item.get("url") or None, item.get("city") or None, item.get("item_condition") or None,
@@ -1898,12 +1927,27 @@ REVALUE_CLI = os.path.join(WEB_DIR, "scripts", "revalue-cli.ts")
 TS_REGISTER = os.path.join(WEB_DIR, "tests", "register.mjs")
 
 
+TITLE_NOISE = frozenset("""
+    nieuw nieuwe nieuwstaat new used gebruikt tweedehands zgan zo goed als in de het een en of met voor te koop tekoop
+    nette net netjes mooie mooi goede prima perfect perfecte staat conditie zeer heel super top krasvrij compleet complete
+    doos garantie bon factuur sealed geseald ongeopend inruil inruilen mogelijk vaste prijs accu batterij battery
+    zwart wit black white grijs grey gray zilver silver blauw blue rood red groen green goud gold roze pink paars purple
+    apple
+""".split())
+
+
+def title_key_words(title):
+    """Words that identify the product in a title: seller wording, colours and percentages do not."""
+    text = re.sub(r"\d{1,3}\s?%", " ", str(title or "").lower())
+    text = re.sub(r"(\d)\s+(gb|tb|mm|inch)\b", r"\1\2", text)
+    return [word for word in re.sub(r"[^a-z0-9 ]+", " ", text).split() if word not in TITLE_NOISE]
+
+
 def external_key(q, group, item):
     """One independent valuation per exact model group (or per listing title when no group exists)."""
     if group and group not in ("unknown", "all", "other"):
         return f"{q['key']}|{group}"
-    words = re.sub(r"[^a-z0-9 ]+", " ", str(item.get("title") or "").lower()).split()
-    return f"{q['key']}|t:" + "-".join(words[:8])
+    return f"{q['key']}|t:" + "-".join(title_key_words(item.get("title"))[:8])
 
 
 def latest_external(db, key):
@@ -1924,6 +1968,16 @@ def latest_external(db, key):
                       "source_count": int(row[9] or 0), "domain_count": int(row[10] or 0), "spread": row[11], "reason": row[12] or ""},
         "offers": offers, "providers": row[14] or "",
     }
+
+
+def empty_streak(db, key, limit=5):
+    """How many of the latest valuations of a model in a row found no market value (at least 1 when called for one)."""
+    streak = 0
+    for (value,) in db.execute("SELECT market_value FROM external_valuations WHERE key=? ORDER BY checked_at DESC LIMIT ?", (key, limit)):
+        if value:
+            break
+        streak += 1
+    return max(1, streak)
 
 
 def run_external_research(requests, cfg):
@@ -1993,7 +2047,15 @@ def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals, 
     offer_domains = offer_domains if offer_domains is not None else {}
     settings = cfg.get("external_market", {})
     ttl = int(settings.get("cache_hours", 24)) * 3600
+    empty_ttl = int(float(settings.get("empty_cache_hours", 6)) * 3600)
     per_run = int(settings.get("per_run", 45))
+    # After a change of the search itself, earlier "nothing found" answers are no longer trusted.
+    stored_rules = db.execute("SELECT v FROM meta WHERE k='research_rules'").fetchone()
+    if not stored_rules or stored_rules[0] != str(RESEARCH_RULES):
+        db.execute("INSERT OR REPLACE INTO meta VALUES('research_rules', ?)", (str(RESEARCH_RULES),))
+        db.execute("INSERT OR REPLACE INTO meta VALUES('research_rules_since', ?)", (str(now),))
+        db.commit()
+    rules_since = int((db.execute("SELECT v FROM meta WHERE k='research_rules_since'").fetchone() or [0])[0] or 0)
     groups = {}
     for q, candidates, _ai in pending:
         for listing_id, (item, group, _flags) in candidates.items():
@@ -2011,7 +2073,11 @@ def prepare_external_valuations(db, pending, cfg, now, metrics, previous_deals, 
     results, due = {}, []
     for key, entry in groups.items():
         latest = latest_external(db, key)
-        if latest and now - latest["checked_at"] < ttl:
+        wait = ttl
+        if latest and not latest["valuation"]["market_value"]:
+            # Nothing usable found: look again soon, doubling the wait after every further miss.
+            wait = 0 if latest["checked_at"] < rules_since else min(ttl, empty_ttl * 2 ** (empty_streak(db, key) - 1))
+        if latest and now - latest["checked_at"] < wait:
             results[key] = {**latest, "stale": False}
             metrics["externalCached"] += 1
             continue
@@ -2155,9 +2221,11 @@ def euro_text(value):
     return "€" + f"{float(value):,.0f}".replace(",", ".")
 
 
-def deal_message(deal, upgraded=False):
+def deal_message(deal, upgraded=False, dropped=False):
     """Telegram card for one deal: what it is, why it pays, and how far to go when negotiating."""
     head = {"strong": "🔥 Best deal", "good": "✅ Good deal"}[deal["status"]] + (" · повышен" if upgraded else "")
+    if dropped and deal.get("previous_price"):
+        head = f"📉 Цена снижена: {euro_text(deal['previous_price'])} → {euro_text(deal['price'])} · " + head
     lines = [f"<b>{head}</b> · {html_lib.escape(str(deal.get('category_label') or ''))}", html_lib.escape(str(deal.get("title") or "")), "",
              f"Цена: <b>{euro_text(deal['price'])}</b> · рынок ≈ {euro_text(deal['market_value'])}" if deal.get("market_value") else f"Цена: <b>{euro_text(deal['price'])}</b>",
              f"Прибыль после расходов: <b>{euro_text(deal['estimated_profit'])}</b> (ROI {round(float(deal.get('profit_roi') or 0) * 100)}%)"]
@@ -2185,7 +2253,9 @@ def notify_new_deals(db, deals, cfg, now):
               and str(deal.get("listing_url") or "").startswith("https://")
               and float(deal["estimated_profit"]) >= float(settings.get("min_profit_eur", 0))
               and (not categories or deal.get("category_key") in categories)]
-    known = dict(db.execute("SELECT id, status FROM notified").fetchall())
+    notified_rows = db.execute("SELECT id, status, ts FROM notified").fetchall()
+    known = {row[0]: row[1] for row in notified_rows}
+    notified_at = {row[0]: int(row[2] or 0) for row in notified_rows}
     remember = lambda deal: db.execute("INSERT OR REPLACE INTO notified VALUES(?,?,?)", (deal["listing_id"], deal["status"], now))
     if not known:
         # First run: the whole current catalog is not news. Confirm the channel works instead of flooding it.
@@ -2197,12 +2267,24 @@ def notify_new_deals(db, deals, cfg, now):
             db.commit()
         return
     fresh = [deal for deal in wanted if STATUS_RANK[deal["status"]] > STATUS_RANK.get(known.get(deal["listing_id"]), 0)]
+    fresh_ids = {deal["listing_id"] for deal in fresh}
+
+    def dropped_since_alert(deal):
+        """The seller lowered the price after the last alert about this deal."""
+        try:
+            dropped_at = datetime.fromisoformat(str(deal.get("price_dropped_at"))).timestamp()
+        except ValueError:
+            return False
+        return deal["listing_id"] in known and deal["listing_id"] not in fresh_ids and dropped_at > notified_at.get(deal["listing_id"], 0)
+
+    price_drops = {deal["listing_id"] for deal in wanted if deal.get("price_dropped_at") and dropped_since_alert(deal)}
+    fresh += [deal for deal in wanted if deal["listing_id"] in price_drops]
     fresh.sort(key=lambda deal: (-STATUS_RANK[deal["status"]], -float(deal["estimated_profit"])))
     limit = int(settings.get("max_per_run", 8))
     for index, deal in enumerate(fresh[:limit]):
         if index:
             time.sleep(TELEGRAM_LIMIT_SECONDS)
-        if not send_telegram(token, chat_id, deal_message(deal, deal["listing_id"] in known), ("Открыть на Marktplaats", deal["listing_url"])):
+        if not send_telegram(token, chat_id, deal_message(deal, deal["listing_id"] in known and deal["listing_id"] not in price_drops, deal["listing_id"] in price_drops), ("Открыть на Marktplaats", deal["listing_url"])):
             db.commit()
             return
         remember(deal)
@@ -2315,6 +2397,42 @@ def record_evaluation(db, listing_id, qkey, status, reason, now, seen, has_marke
     )
     record_status_change(db, listing_id, status, reason, now)
     return checks, next_check
+
+
+def _half_up(value, digits=0):
+    """Round half up (Python rounds half to even; the web app mirrors this function)."""
+    factor = 10 ** digits
+    return math.floor(float(value) * factor + 0.5) / factor
+
+
+def deal_score(deal, listing_age_hours):
+    """Deal quality 0–100 and its parts. Mirrored by web/lib/score.ts; both are checked against score_fixtures.json.
+
+    profit 30 · ROI 20 · evidence 25 · liquidity 10 · freshness 15, minus risk penalties.
+    """
+    profit = float(deal.get("estimated_profit") or 0)
+    roi = float(deal.get("profit_roi") or 0)
+    samples = int(deal.get("market_samples") or 0)
+    domains = int(deal.get("external_domains") or 0)
+    spread = deal.get("market_spread")
+    profit_part = 30 * min(1.0, math.sqrt(max(0.0, profit) / 250))
+    roi_part = 20 * min(1.0, max(0.0, roi) / 0.6)
+    base = {"high": 15, "preliminary": 9, "retail_proxy": 6}.get(deal.get("market_confidence"), 0)
+    evidence = 0.0
+    if base:
+        evidence = base + min(5.0, samples / 4) + (3 if domains >= 3 else 2 if domains == 2 else 0) \
+            + (0 if spread is None else 2 if spread <= 0.25 else 1 if spread <= 0.5 else 0)
+        evidence = min(25.0, evidence) * (0.5 if deal.get("market_stale") else 1)
+    liquidity = 10 * min(1.0, (samples + 0.5 * int(deal.get("marktplaats_samples") or 0)) / 30)
+    age = listing_age_hours
+    freshness = 0 if age is None else 15 if age <= 6 else 12 if age <= 24 else 9 if age <= 72 else 6 if age <= 168 else 3 if age <= 336 else 0
+    risk = -(min(12, 4 * len(deal.get("warning_flags") or [])) + (10 if deal.get("price_type") == "MIN_BID" else 0)
+             + (8 if deal.get("needs_confirmation") else 0))
+    total = profit_part + roi_part + evidence + liquidity + freshness + risk
+    clean = lambda value: int(value) if float(value).is_integer() else value
+    parts = {name: clean(_half_up(value, 1)) for name, value in (
+        ("profit", profit_part), ("roi", roi_part), ("evidence", evidence), ("liquidity", liquidity), ("freshness", freshness), ("risk", risk))}
+    return int(max(0, min(100, _half_up(total)))), parts
 
 
 def make_feed_deal(q, it, med, discount, flags, grp, status, market_samples, reason=None,
@@ -2874,7 +2992,9 @@ def run_once(cfg, db, dry=False):
                 "checks": checks,
                 "next_check_at": datetime.fromtimestamp(next_check, timezone.utc).isoformat(),
                 "status_changed": previous.get("status") != status if previous else False,
+                **price_trail(db, listing_id),
             })
+            feed_deals[listing_id]["deal_score"], feed_deals[listing_id]["score_parts"] = deal_score(feed_deals[listing_id], age_hours(item.get("date")))
             if ai_decision:
                 feed_deals[listing_id]["ai_review"] = {
                     "confidence": round(ai_decision["confidence"], 3),
@@ -2895,6 +3015,7 @@ def run_once(cfg, db, dry=False):
     metrics["technicalErrors"] += fails
 
     db.execute("DELETE FROM listings WHERE last_seen<?", (now - 30 * 86400,))
+    db.execute("DELETE FROM listing_prices WHERE at<? AND id NOT IN (SELECT id FROM listings)", (now - 30 * 86400,))
     db.commit()
     if fails == len(cfg["queries"]) and not feed_deals:
         log("все запросы и внешние источники недоступны — каталог не перезаписывается")
@@ -2916,8 +3037,8 @@ def run_once(cfg, db, dry=False):
     rank = {"strong": 3, "good": 2, "candidate": 1}
     fresh_deals.sort(key=lambda d: (
         -rank.get(d.get("status", "candidate"), 0),
+        -int(d.get("deal_score") or 0),
         -float(d.get("estimated_profit") if d.get("estimated_profit") is not None else -1),
-        -float(d.get("profit_roi") if d.get("profit_roi") is not None else -1),
         d.get("detected_at") or "",
     ))
     now_iso = datetime.now(timezone.utc).isoformat()

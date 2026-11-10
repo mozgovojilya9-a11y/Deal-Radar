@@ -25,7 +25,7 @@ const REFRESH_MS = 120_000;
 const HIDDEN_KEY = "deal-radar-hidden";
 const SEEN_KEY = "deal-radar-seen-deals";
 const SORT_KEY = "deal-radar-sort";
-const SORTS: Array<[Sort, string]> = [["profit", "По прибыли"], ["score", "Лучшее сочетание"], ["distance", "Ближе ко мне"], ["discount", "По скидке"], ["newest", "Сначала новые"], ["price", "Сначала дешевле"]];
+const SORTS: Array<[Sort, string]> = [["profit", "По прибыли"], ["score", "По баллу сделки"], ["distance", "Ближе ко мне"], ["discount", "По скидке"], ["newest", "Сначала новые"], ["price", "Сначала дешевле"]];
 
 function matchesText(deal: Deal, query: string): boolean {
   const tokens = normalizeText(query).split(" ").filter((token) => token.length >= 2);
@@ -51,6 +51,7 @@ export default function HomePage() {
   const [tier, setTier] = useState<Tier>("all");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
+  const [dropsOnly, setDropsOnly] = useState(false);
   const [saved, setSaved] = useState<string[]>([]);
   const [savedDeals, setSavedDeals] = useState<Deal[]>([]);
   const [savedLoading, setSavedLoading] = useState(false);
@@ -198,8 +199,10 @@ export default function HomePage() {
 
   const visible = useMemo(() => shownDeals.filter((deal) => {
     if (category.startsWith("group:") ? groupOf(deal.category_key) !== category.slice(6) : category && deal.category_key !== category) return false;
+    if (dropsOnly && !deal.price_dropped_at) return false;
     return !search.trim() || matchesText(deal, search);
-  }), [shownDeals, category, search]);
+  }), [shownDeals, category, search, dropsOnly]);
+  const dropCount = useMemo(() => shownDeals.filter((deal) => deal.price_dropped_at).length, [shownDeals]);
   const byTier = useMemo(() => ({
     strong: visible.filter((deal) => deal.status === "strong"),
     good: visible.filter((deal) => deal.status === "good"),
@@ -221,7 +224,7 @@ export default function HomePage() {
   };
   const shown = tier === "all" ? null : byTier[tier];
 
-  const listKey = [tier, category, search, sort].join("|");
+  const listKey = [tier, category, search, sort, dropsOnly].join("|");
   const renderGrid = (list: Deal[]) => <DealGrid deals={list} savedIds={saved} newIds={newIds} resetKey={listKey} onSave={toggleSaved} onOpen={setSelected} />;
 
   function changeHidden(next: string[]) {
@@ -296,6 +299,7 @@ export default function HomePage() {
           </div>
 
           <div className="active-chips">
+            {dropCount || dropsOnly ? <button type="button" className={dropsOnly ? "chip-on" : "chip-toggle"} aria-pressed={dropsOnly} onClick={() => setDropsOnly(!dropsOnly)}>↓ Цена снижена · {dropCount}</button> : null}
             {settings.location && settings.radiusKm !== null ? <button type="button" onClick={() => updateSettings({ ...settings, radiusKm: null })}>≤ {settings.radiusKm} км от {settings.location.city || settings.location.label} ×</button> : null}
             {settings.minPrice !== null || settings.maxPrice !== null ? <button type="button" onClick={() => updateSettings({ ...settings, minPrice: null, maxPrice: null })}>{settings.minPrice !== null ? "от " + euro(settings.minPrice) + " " : ""}{settings.maxPrice !== null ? "до " + euro(settings.maxPrice) : ""} ×</button> : null}
             {settings.minDiscount ? <button type="button" onClick={() => updateSettings({ ...settings, minDiscount: 0 })}>скидка от {settings.minDiscount}% ×</button> : null}
@@ -323,7 +327,7 @@ export default function HomePage() {
           ) : !visible.length ? (
             <div className="state-panel"><div className="state-icon">⌁</div><h3>Ничего не подходит</h3>
               <p>{counts?.feed ? "В каталоге " + counts.feed.toLocaleString("ru-RU") + " выгодных предложений, но они не проходят текущие фильтры." : "Подтверждённо выгодных предложений сейчас нет. Здесь появятся только те, где прибыль подтверждена независимыми ценами."}</p>
-              {activeCount || category || search ? <button className="secondary-button" onClick={() => { setSearch(""); setCategory(""); updateSettings({ ...DEFAULT_SETTINGS, location: settings.location }); }}>Сбросить фильтры</button> : null}
+              {activeCount || category || search || dropsOnly ? <button className="secondary-button" onClick={() => { setSearch(""); setCategory(""); setDropsOnly(false); updateSettings({ ...DEFAULT_SETTINGS, location: settings.location }); }}>Сбросить фильтры</button> : null}
             </div>
           ) : shown ? (shown.length ? renderGrid(shown) : <p className="tier-empty">В этой группе сейчас пусто.</p>) : (
             <div className="deal-tiers">

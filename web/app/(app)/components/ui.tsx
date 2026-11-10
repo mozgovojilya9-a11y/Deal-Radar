@@ -61,6 +61,23 @@ export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   );
 }
 
+/** Deal score 0–100 as a small ring; the colour follows the score band. */
+export function ScoreRing({ score, size = 38 }: { score: number; size?: number }) {
+  const value = Math.max(0, Math.min(100, Math.round(score)));
+  const tone = value >= 75 ? "top" : value >= 55 ? "solid" : value >= 35 ? "fair" : "weak";
+  const radius = 15.5;
+  const length = 2 * Math.PI * radius;
+  return (
+    <span className={"score-ring s-" + tone} style={{ width: size, height: size }} role="img" aria-label={"Балл сделки " + value + " из 100"}>
+      <svg viewBox="0 0 36 36" width={size} height={size} aria-hidden="true">
+        <circle cx="18" cy="18" r={radius} className="score-track" />
+        <circle cx="18" cy="18" r={radius} className="score-arc" strokeDasharray={(length * value) / 100 + " " + length} transform="rotate(-90 18 18)" />
+      </svg>
+      <b>{value}</b>
+    </span>
+  );
+}
+
 export const STATUS_LABEL = { strong: "Очень выгодно", good: "Хорошая цена", candidate: "На проверке", reserved: "Зарезервировано" } as const;
 export const CONFIDENCE_LABEL: Record<string, string> = {
   high: "высокая", preliminary: "предварительная", retail_proxy: "по цене нового", none: "нет данных",

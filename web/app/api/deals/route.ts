@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { CatalogCounts, Deal, DealFeed } from "@/lib/deals";
 import { haversineKm, parseCoordinate } from "@/lib/geo";
+import { dealScore } from "@/lib/score";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -83,13 +84,17 @@ function numberParam(params: URLSearchParams, name: string, min: number, max: nu
   return Number.isFinite(value) && value >= min && value <= max ? value : null;
 }
 
-/** Combined ranking: profit, ROI and evidence quality, minus a small distance penalty. */
+/** Ranking by deal score (0–100), minus a small penalty per kilometre from the user. */
 function score(deal: Deal, distanceWeight: number): number {
-  const profit = deal.estimated_profit ?? 0;
-  const roi = deal.profit_roi ?? 0;
-  const evidence = deal.market_confidence === "high" ? 1 : deal.market_confidence === "preliminary" ? 0.6 : deal.market_confidence === "retail_proxy" ? 0.5 : 0.2;
-  const distance = deal.user_distance_km ?? 0;
-  return profit * evidence * (1 + Math.min(1, Math.max(0, roi))) - distance * distanceWeight;
+  return (deal.deal_score ?? 0) - (deal.user_distance_km ?? 0) * distanceWeight;
+}
+
+/** Feeds written before the scanner computed scores get the same score here. */
+function withScore(deal: Deal): Deal {
+  if (typeof deal.deal_score === "number" && deal.score_parts) return deal;
+  const published = listingTimestamp(deal.posted_at) || Date.parse(deal.first_detected_at || deal.detected_at);
+  const computed = dealScore(deal, Number.isFinite(published) ? Math.max(0, (Date.now() - published) / 3_600_000) : null);
+  return { ...deal, deal_score: typeof deal.deal_score === "number" ? deal.deal_score : computed.total, score_parts: deal.score_parts ?? computed.parts };
 }
 
 function isNewCondition(deal: Deal): boolean {
@@ -99,7 +104,7 @@ function isNewCondition(deal: Deal): boolean {
 /** A list row without the heavy fields a card does not show. */
 function cardOnly(deal: Deal): Record<string, unknown> {
   const card: Record<string, unknown> = { ...deal };
-  for (const field of ["description", "market_sources", "ai_review", "valuation_reason", "evaluated_at", "last_seen_at", "next_check_at", "market_checked_at"]) delete card[field];
+  for (const field of ["description", "market_sources", "ai_review", "valuation_reason", "evaluated_at", "last_seen_at", "next_check_at", "market_checked_at", "price_history"]) delete card[field];
   return card;
 }
 
@@ -141,6 +146,7 @@ export async function GET(request: NextRequest) {
     const categories = new Set((params.get("categories") || params.get("category") || "").split(",").map((key) => key.trim()).filter((key) => /^[a-z0-9-]{1,64}$/i.test(key)));
     const condition = params.get("condition") === "new" || params.get("condition") === "used" ? params.get("condition") : "all";
     const exactOnly = params.get("exactOnly") === "1";
+    const priceDropOnly = params.get("priceDrop") === "1";
     const sortParam = params.get("sort") as Sort | null;
     const sort: Sort = sortParam && ["profit", "distance", "newest", "price", "discount", "score"].includes(sortParam) ? sortParam : "profit";
     const hasLocation = lat !== null && lon !== null;
@@ -151,7 +157,7 @@ export async function GET(request: NextRequest) {
     let outsideRadius = 0;
     const deals: Deal[] = [];
     for (const original of all) {
-      const deal: Deal = { ...original };
+      const deal: Deal = withScore(original);
       if (hasLocation && typeof deal.latitude === "number" && typeof deal.longitude === "number") {
         deal.user_distance_km = Math.round(haversineKm(lat, lon, deal.latitude, deal.longitude) * 10) / 10;
       } else {
@@ -179,11 +185,12 @@ export async function GET(request: NextRequest) {
       }
       // Brand / model words, e.g. "sony a7" or "airpods pro 2": every word must appear in the title.
       if (textQuery && !textQuery.split(/\s+/).every((word) => (deal.title + " " + deal.category_label).toLowerCase().includes(word))) continue;
+      if (priceDropOnly && !deal.price_dropped_at) continue;
       if (exactOnly && (deal.match_level ? deal.match_level !== "exact" : !deal.model_group || deal.model_group === "unknown")) continue;
       deals.push(deal);
     }
 
-    const distanceWeight = params.get("priority") === "distance" ? 2 : 0.3;
+    const distanceWeight = params.get("priority") === "distance" ? 0.5 : 0.05;
     const rank = (deal: Deal) => deal.status === "strong" ? 3 : deal.status === "good" ? 2 : 1;
     deals.sort((a, b) => {
       if (sort !== "distance" && sort !== "score") {

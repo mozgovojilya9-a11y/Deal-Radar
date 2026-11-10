@@ -1114,10 +1114,11 @@
     "categories": []
   },
   "external_market": {
-    "per_run": 60,
+    "per_run": 90,
     "concurrency": 3,
     "budget_ms": 35000,
     "cache_hours": 72,
+    "empty_cache_hours": 6,
     "timeout_seconds": 1200,
     "grounding": false
   }

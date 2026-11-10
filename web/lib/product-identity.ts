@@ -88,6 +88,8 @@ const NOISE_WORDS = new Set([
   "model", "uitvoering", "stuk", "stuks", "incl", "inclusief", "excl", "originele", "amper", "weinig", "gebruikt",
   "smartbril", "smart", "glasses", "bril", "zonnebril", "gepolariseerd", "polarized", "lenses", "glazen",
   "goede", "clicks", "body", "camera", "systeemcamera", "horloge",
+  "tas", "handtas", "schoudertas", "rugzak", "heren", "dames", "herenhorloge", "dameshorloge", "koptelefoon",
+  "vaste", "prijs", "chip", "ram", "swiss", "made", "staal", "datum", "leer", "leren",
 ]);
 
 export function normalizeText(value: string): string {
@@ -156,19 +158,60 @@ function detectBrand(normalized: string): string | null {
   return null;
 }
 
+const COLOUR_WORDS = "midnight|starlight|space\\s*gr[ae]y|spacegrijs|spacegrey|sterrenlicht|middernacht|titanium\\s+\\w+|titanium|natural|zilver|silver|goud|gold|roze|rose|paars|purple|blauw|blue|groen|green|grijs|grey|gray|zwart|black|wit|white|cream|creme|beige|graphite|grafiet|aquamarijn|ultramarijn|ultramarine|teal|lavendel|lavender|mint|koraal|coral|geel|yellow|oranje|orange|rood|red|pink|bruin|brown|antraciet|anthracite";
+
+/**
+ * The product name without seller wording: battery health, OS version, condition, trade-in and
+ * warranty remarks, colours and "+ extras". Such words are not the product: left in, they end up in
+ * the search query (no results) and in the required model tokens (every real offer is rejected).
+ */
+export function stripSellerNoise(title: string): string {
+  const phones = /\b(?:iphone|galaxy)\b/i.test(title);
+  let text = String(title || "").slice(0, 200)
+    .replace(/[|•·–—!?*()[\]~]/g, " ")
+    .replace(/[^\p{L}\p{N}\s.,'"’”/+&€%:;-]/gu, " ")
+    // Price talk: "€ 570", "375 vaste prijs", "nu voor €89.99".
+    .replace(/(?:\b(?:nu\s+)?(?:voor|vanaf|slechts)\s+)?€\s?\d+(?:[.,]\d+)?|\b\d+(?:[.,]\d+)?\s?(?:€|euro\b|eur\b)/gi, " ")
+    .replace(/(?:\b\d{2,5}\s+)?\b(?:vaste?\s*prij\w*|vraagprijs|vanafprijs|bieden)\b/gi, " ")
+    // Usage remarks: shutter count, battery cycles, keyboard layout, grade.
+    .replace(/\b\d+(?:[.,]\d+)?\s?k?\s*(?:clicks?|kliks?)\b|\b(?:laad)?cycl(?:i|us|ussen|es?)?\s*:?\s*\d+\b|\b\d+\s*(?:laad)?cycl(?:i|us|ussen|es?)?\b/gi, " ")
+    .replace(/\b(?:qwert[yz]?|qwer|azerty)\b|\b[a-c][\s-]?grade\b|\bgrade\s+[a-c]\b/gi, " ")
+    .replace(/\b\d{1,2}\s?c(?:ore)?\s*(?:cpu|gpu)\b|\b(?:cpu|gpu)\b/gi, " ")
+    .replace(/\b(?:lichte|minimale|weinig|geen|kleine)?\s*gebruik(?:er)?ssporen\b/gi, " ")
+    .replace(/\b(?:heren|dames|kinder|unisex)?(?:horloge|uurwerk)\b|\b(?:heren|dames|unisex)\b|\bswiss\s+made\b|\b(?:staal|datum)\b/gi, " ")
+    .replace(/\s(?:ll|\/\/+)(?=\s)/gi, " ")
+    .replace(/,(?=\s|$)/g, " ")
+    .replace(/\b\d{1,3}(?:[.,]\d{3})*\s*(?:clicks?|kliks?|ausl(?:ö|oe?)sungen)\b/gi, " ")
+    .replace(/\b\d{1,3}\s?%\s*(?:batterij\w*|baterij\w*|accu\w*|battery\w*|bc\b)?|\b(?:batterij\w*|baterij\w*|accu\w*|battery\w*)\s*:?\s*\d{1,3}\s?%/gi, " ")
+    .replace(/\b(?:ios|ipados|macos|watchos|android|one\s*ui)\s*\d+(?:\.\d+)*/gi, " ")
+    .replace(/\b\d{2,3}\s?hz(?:\s+oled)?\b/gi, " ")
+    .replace(/\b\d+\s+kleuren\b/gi, " ")
+    .replace(/\bdual[\s-]*sim\b/gi, " ")
+    .replace(new RegExp("\\b(?:" + COLOUR_WORDS + ")\\b", "gi"), " ")
+    .replace(/^\s*(?:te\s?koop(?:\s+of\s+inruilen)?|complete set|complete|compleet|complet|set)\s+/i, " ")
+    .replace(/^(?:\s*(?:selling|my|verkoop|ik|mijn|aangeboden|nette|net|en|goed|goede|mooie|mooi|zeer|hele|super|prachtige|originele|a|the|een|de)(?=\s))+/i, " ")
+    // Everything after "+", "met", "incl" describes extras, not the product.
+    .replace(/\s(?:\+|met|incl\.?|inclusief|with|including)(?:\s.*)?$/i, " ")
+    .replace(/\+.*$/, " ")
+    .replace(/\b(?:in\s+)?(?:zeer|heel|super|erg|hele)?\s*(?:nette|net|netjes|mooie|mooi|goede|prima|perfecte|perfect|top|nieuwe)\s+(?:staat|conditie)\b/gi, " ")
+    .replace(/\b(?:zeer|heel|super|erg)\s+(?:nette|net|netjes|mooie|mooi|goede|goed)\b/gi, " ")
+    .replace(/\b(?:netjes|krasvrij\w*|gloednieuw\w*|ongedragen|etc\.?|accu|batterij|baterij)(?=\s|$)/gi, " ")
+    .replace(/\b(?:compleet|complete)(?:\s+en)?(?=\s|$)/gi, " ")
+    .replace(/\binruil\w*(?:\s+mogelijk)?\b/gi, " ")
+    .replace(/\b(nieuw(staat)?(\s+en)?|new|used|gebruikt|tweedehands|zgan|z\.g\.a\.n\.?|zo goed als nieuw|als nieuw|in doos|met doos|sealed|geseald|ongeopend|garantie|bon|factuur|te\s?koop|koopje)(?=\s|$)/gi, " ");
+  if (phones) text = text.replace(/\b[45]g\b/gi, " ");
+  return text
+    .replace(/\s[-,;:/.]+(?=\s)/g, " ")
+    .replace(/(?<=[a-z])\.(?=\s|$)/gi, " ")
+    .replace(/\s+/g, " ")
+    .replace(/(?:\s+(?:en|of|met|voor|-))+\s*$/i, "")
+    .replace(/[\s,;:–-]+$/, "")
+    .trim();
+}
+
 export function buildIdentity(title: string, hint?: string | null): ProductIdentity {
   const raw = String(title || "").slice(0, 200);
-  const cleanWords = raw
-    .replace(/[|•·–—!?*]/g, " ")
-    .replace(/\b\d{1,3}(?:[.,]\d{3})*\s*(?:clicks?|kliks?|ausl(?:ö|oe?)sungen)\b/gi, " ")
-    .replace(/\b\d{1,3}\s?%\s*(?:batterij\w*|accu\w*|battery\w*|bc)?|\b(?:batterij\w*|accu\w*|battery\w*)\s*:?\s*\d{1,3}\s?%/gi, " ")
-    .replace(/\b(midnight|starlight|space\s*gr[ae]y|spacegrijs|spacegrey|sterrenlicht|middernacht|titanium\s+\w+|natural|zilver|silver|goud|gold|roze|rose|paars|purple|blauw|blue|groen|green|grijs|grey|gray|zwart|black|wit|white)\b/gi, " ")
-    .replace(/\([^)]*\b(?:nieuw|new|zgan|garantie|bon)\b[^)]*\)/gi, " ")
-    .replace(/^\s*(?:complete|compleet|complet|complete set|set)\s+/i, "")
-    .replace(/\b(nieuw(staat)?|new|used|gebruikt|tweedehands|zgan|z\.g\.a\.n\.?|zo goed als nieuw|in doos|met doos|sealed|geseald|ongeopend|garantie|bon|factuur|te koop|koopje|incl\.?.*$|inclusief.*$|met .*$|\+.*$)\b/gi, " ")
-    .replace(/[-–]\s*(?:mat|matte|glossy|zwart|black|wit|white)[^,]*$/i, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const cleanWords = stripSellerNoise(raw);
   // Model features come from the cleaned name: "99% batterij", colours or "nieuw" are not product identity.
   const identitySource = cleanWords.length >= 4 ? cleanWords : raw;
   const normalized = normalizeText(identitySource + (hint ? " " + hint : ""));
@@ -442,4 +485,14 @@ export function matchProduct(candidate: string, identity: ProductIdentity): Matc
   }
   if (coreRatio >= 0.7) return { level: "exact", score: Math.min(0.97, 0.7 + coreRatio * 0.27), reason: "совпадают бренд, модель и поколение" };
   return { level: "similar", score: 0.5 + coreRatio * 0.2, reason: "частичное совпадение названия" };
+}
+
+/**
+ * "Tissot horloge" or "Michael Kors tas" names a brand and a kind of product, not a model:
+ * its "market price" would be the median of everything that brand sells.
+ */
+export function isGenericIdentity(identity: ProductIdentity): boolean {
+  if (identity.modelCodes.length || identity.criticalTokens.length || identity.storage) return false;
+  const brandWords = new Set([...(identity.brand || "").split(" "), ...BRANDS.flatMap((brand) => brand.split(" "))]);
+  return !identity.coreTokens.some((token) => !brandWords.has(token) && !/^\d+$/.test(token));
 }

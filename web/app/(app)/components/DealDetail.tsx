@@ -5,7 +5,17 @@ import { sellerMessage } from "@/lib/purchases";
 import type { Deal } from "@/lib/deals";
 import { distanceOf } from "./DealCard";
 import { ProductAdvisor } from "./ProductAdvisor";
-import { CONFIDENCE_LABEL, STATUS_LABEL, ageLabel, dateLabel, euro, pct } from "./ui";
+import { SCORE_MAX, type ScoreParts } from "@/lib/score";
+import { CONFIDENCE_LABEL, STATUS_LABEL, ScoreRing, ageLabel, dateLabel, euro, pct } from "./ui";
+
+const SCORE_ROWS: Array<[keyof ScoreParts, string, string]> = [
+  ["profit", "Прибыль", "чистая прибыль после торга и комиссий"],
+  ["roi", "Окупаемость", "прибыль относительно вложенного"],
+  ["evidence", "Доказательность", "сколько независимых цен и площадок за оценкой"],
+  ["liquidity", "Ликвидность", "насколько активно модель продаётся"],
+  ["freshness", "Свежесть", "как давно опубликовано объявление"],
+  ["risk", "Риски", "предупреждения, bieden, одна площадка"],
+];
 
 const REFERENCE_LABEL: Record<string, string> = {
   external_used: "независимые б/у предложения",
@@ -104,10 +114,34 @@ export function DealDetail({ deal: initial, saved, bought, onSave, onClose, onHi
             <span>{marketValue != null ? "Рыночная стоимость ≈ " + euro(marketValue, true) : "Рыночная стоимость не подтверждена"}</span>
           </div>
 
+          {deal.previous_price != null && deal.previous_price !== deal.price ? (
+            <p className={"price-change " + (deal.price_dropped_at ? "down" : "up")}>
+              {deal.price_dropped_at ? "↓ Продавец снизил цену" : "↑ Продавец поднял цену"}: {euro(deal.previous_price, true)} → {euro(deal.price, true)}
+              {deal.price_dropped_at ? " · " + ageLabel(deal.price_dropped_at) : ""}
+            </p>
+          ) : null}
+
           <div className="why-box">
             <b>{status === "candidate" ? "Почему на проверке" : "Почему выгодно"}</b>
             <p>{why}</p>
           </div>
+
+          {deal.deal_score != null && deal.score_parts ? (
+            <details className="score-box" open={status !== "candidate"}>
+              <summary><ScoreRing score={deal.deal_score} size={44} /><span><b>Балл сделки {deal.deal_score} из 100</b><small>из чего он складывается</small></span></summary>
+              <ul>{SCORE_ROWS.map(([key, label, hint]) => {
+                const value = deal.score_parts![key];
+                const max = SCORE_MAX[key];
+                return (
+                  <li key={key} className={key === "risk" ? "penalty" : ""}>
+                    <span>{label}<small>{hint}</small></span>
+                    <i aria-hidden="true"><em style={{ width: Math.min(100, Math.abs(value / max) * 100) + "%" }} /></i>
+                    <b>{key === "risk" ? (value ? "−" + Math.abs(value) : "0") : value + " / " + max}</b>
+                  </li>
+                );
+              })}</ul>
+            </details>
+          ) : null}
 
           {status !== "candidate" && deal.max_offer_price ? (
             <div className="offer-box">
@@ -138,6 +172,7 @@ export function DealDetail({ deal: initial, saved, bought, onSave, onClose, onHi
             <div><dt>Состояние</dt><dd>{deal.item_condition || "не указано"}</dd></div>
             <div><dt>Оценка обновлена</dt><dd>{deal.evaluated_at ? ageLabel(deal.evaluated_at) : "—"}</dd></div>
             <div><dt>Найдено</dt><dd>{dateLabel(deal.first_detected_at || deal.detected_at)}</dd></div>
+            {deal.price_history && deal.price_history.length > 1 ? <div><dt>История цены</dt><dd>{deal.price_history.map((point) => euro(point.price)).join(" → ")}</dd></div> : null}
             {deal.next_check_at && status === "candidate" ? <div><dt>След. проверка</dt><dd>{dateLabel(deal.next_check_at)} {new Date(deal.next_check_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</dd></div> : null}
           </dl>
 

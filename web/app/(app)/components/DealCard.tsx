@@ -1,7 +1,7 @@
 "use client";
 
 import type { Deal } from "@/lib/deals";
-import { CONFIDENCE_LABEL, STATUS_LABEL, dateLabel, euro } from "./ui";
+import { CONFIDENCE_LABEL, STATUS_LABEL, ScoreRing, dateLabel, euro } from "./ui";
 
 export function distanceOf(deal: Deal): number | null {
   if (deal.user_distance_km != null) return deal.user_distance_km;
@@ -13,6 +13,7 @@ export function DealCard({ deal, saved, isNew, onSave, onOpen }: { deal: Deal; s
   const candidate = status === "candidate";
   const discount = deal.discount == null ? null : Math.max(0, Math.round(Number(deal.discount) * 100));
   const distance = distanceOf(deal);
+  const drop = deal.price_dropped_at && deal.previous_price != null && deal.previous_price > deal.price ? deal.previous_price - deal.price : null;
   const confidence = deal.market_confidence === "high" ? "High" : deal.market_confidence === "preliminary" || deal.market_confidence === "retail_proxy" ? "Medium" : "Low";
   const evidence = deal.external_sources
     ? deal.external_sources + " незав. источн. · " + (CONFIDENCE_LABEL[deal.market_confidence || "none"] || "—")
@@ -28,15 +29,19 @@ export function DealCard({ deal, saved, isNew, onSave, onOpen }: { deal: Deal; s
           <span className={"discount-pill" + (candidate ? " candidate-pill" : status === "good" ? " good-pill" : "")}>
             {discount === null ? "Проверка" : (candidate ? "≈ −" : "−") + discount + "%"}
           </span>
-          {isNew ? <span className="fresh-pill">новое</span> : deal.status_changed && !candidate ? <span className="fresh-pill">повышен</span> : null}
+          {isNew ? <span className="fresh-pill">новое</span> : drop ? <span className="fresh-pill drop-pill">↓ {euro(drop)}</span> : deal.status_changed && !candidate ? <span className="fresh-pill">повышен</span> : null}
         </div>
       </button>
       <div className="deal-content">
         <div className="deal-meta"><span>{deal.category_label}</span><span>{dateLabel(deal.posted_at || deal.first_detected_at || deal.detected_at)}</span></div>
-        <div className={"deal-status " + status}>{STATUS_LABEL[status]}{deal.price_type === "MIN_BID" ? " · bieden" : ""}</div>
+        <div className="status-row">
+          <div className={"deal-status " + status}>{STATUS_LABEL[status]}{deal.price_type === "MIN_BID" ? " · bieden" : ""}</div>
+          {!candidate && deal.deal_score != null ? <ScoreRing score={deal.deal_score} /> : null}
+        </div>
         <button className="deal-title" onClick={onOpen}>{deal.title}</button>
         <div className="price-row">
           <strong>{euro(deal.price)}</strong>
+          {drop ? <s className="was-price">{euro(deal.previous_price)}</s> : null}
           <span className="old-price">{(deal.market_value ?? (deal.price_reference_type === "external_used" || deal.price_reference_type === "new_retail" ? deal.market_price : null)) != null
             ? "рынок ≈ " + euro(deal.market_value ?? deal.market_price) : "рынок уточняется"}</span>
         </div>

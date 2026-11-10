@@ -49,6 +49,13 @@ export type Deal = {
   next_check_at?: string | null;
   checks?: number;
   status_changed?: boolean;
+  /** Deal quality 0–100 (profit, ROI, evidence, liquidity, freshness, minus risks). */
+  deal_score?: number;
+  score_parts?: { profit: number; roi: number; evidence: number; liquidity: number; freshness: number; risk: number };
+  /** Asking price before the latest change, and when it last went down (null when it went up). */
+  previous_price?: number | null;
+  price_dropped_at?: string | null;
+  price_history?: Array<{ price: number; at: string }>;
   /** Distance from the user's location, computed by /api/deals. */
   user_distance_km?: number | null;
   evaluation_reason?: string | null;

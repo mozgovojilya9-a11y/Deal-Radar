@@ -95,6 +95,27 @@ npm run build
 npm run dev
 ```
 
+## Radar quality: clean model names, deal score, price drops
+
+**Clean model names.** Seller wording is removed from a listing title before it is searched or matched
+(`stripSellerNoise` in `web/lib/product-identity.ts`): battery health, OS version, condition, trade-in and warranty
+remarks, price talk, colours and "+ extras". `iPhone 14 Plus 128GB Accu 86% iOS 27.0 Zwart | Nette Staat` is searched
+and matched as `iPhone 14 Plus 128GB`. Every used-goods source retries once with a shorter name when it returns
+fewer than three rows. A title that names only a brand and a product type ("Tissot horloge") gets no market value.
+
+**Empty results are retried soon.** A valuation that found a market value is cached for `external_market.cache_hours`
+(72 h). One that found none is cached for `empty_cache_hours` (6 h), doubling after every further miss up to the long
+cache. Raising `RESEARCH_RULES` in `bot.py` sends every earlier empty result back to the queue at once.
+
+**Deal score 0–100** (`deal_score` in `bot.py`, mirrored by `web/lib/score.ts`, both checked against
+`score_fixtures.json`): profit 30, ROI 20, evidence 25, liquidity 10, freshness 15, minus risk penalties (warnings,
+"bieden", single-site evidence). Best / Good / Watchlist are decided by the existing rules; the score orders deals
+inside a tier, is the "По баллу сделки" sort, and is broken down in the listing card.
+
+**Price drops.** `listing_prices` keeps every asking price a listing had (additive migration). The feed carries
+`previous_price`, `price_dropped_at` and `price_history`; the catalogue has a "Цена снижена" filter, and a Best/Good
+deal whose price went down after its last Telegram alert is announced once more.
+
 ## Deal Radar 2.0
 
 **Pipeline** (`bot.py`): 1) all categories fetched concurrently (3 workers, shared rate limiter ~3 req/s to Marktplaats,

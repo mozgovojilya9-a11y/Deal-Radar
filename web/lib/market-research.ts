@@ -1,5 +1,5 @@
 import { extractPage, textPrices, type ExtractedOffer, type OfferCondition } from "./price-extract";
-import { buildIdentity, matchProduct, type MatchLevel, type ProductIdentity } from "./product-identity";
+import { buildIdentity, isGenericIdentity, matchProduct, type MatchLevel, type ProductIdentity } from "./product-identity";
 import { providerNames, safeWebUrl, searchWithFailover, type SearchAttempt, type SearchResult } from "./web-search";
 import { groundedMarketOffers } from "./grounded-search";
 import { domainMatchesShop } from "./shops";
@@ -321,6 +321,13 @@ export function computeValuation(offers: MarketOffer[], segments: Record<Segment
   };
 }
 
+/** A brand plus a product type ("Tissot horloge") is not a model: its median says nothing about this item. */
+function withoutGenericValue(valuation: MarketValuation, identity: ProductIdentity): MarketValuation {
+  if (!isGenericIdentity(identity)) return valuation;
+  return { ...valuation, marketValue: null, conservativeValue: null, confidence: valuation.sourceCount ? "low" : "none",
+    reason: "в названии нет модели — только бренд и тип товара, рыночную цену определить нельзя" };
+}
+
 /**
  * Valuation of one listing from offers found for its model group: only offers that are the exact
  * same product as this listing count, re-checked with the current matcher (also for stored offers).
@@ -331,7 +338,7 @@ export function revalueForListing(title: string, hint: string | null, offers: Ma
   const bySegment = (segment: Segment) => dropOutliers(exact.filter((offer) => offer.segment === segment)).kept;
   const kept = (["used", "new", "refurbished"] as Segment[]).flatMap(bySegment);
   const segments = { used: stats(bySegment("used")), new: stats(bySegment("new")), refurbished: stats(bySegment("refurbished")) } as Record<Segment, SegmentStats>;
-  return { valuation: computeValuation(kept, segments, checkedAt), offers: kept, removed: offers.length - kept.length };
+  return { valuation: withoutGenericValue(computeValuation(kept, segments, checkedAt), identity), offers: kept, removed: offers.length - kept.length };
 }
 
 const KLEINANZEIGEN_ARTICLE = /<article\b[^>]*data-adid="(\d+)"[^>]*data-href="([^"]+)"[^>]*>([\s\S]*?)<\/article>/gi;
@@ -588,8 +595,15 @@ export async function researchMarket(title: string, options: ResearchOptions = {
     sourceHealth[label] = { ok: false, parsed: 0, error: message };
   };
   const healthy = (label: string, parsed: number) => { sourceHealth[label] = { ok: parsed > 0, parsed, error: parsed ? undefined : "0 предложений" }; };
+  // Long or unusual names often return nothing: retry once with the article code or a shorter name.
+  const fallbackName = identity.modelCodes[0]?.toUpperCase() || name.split(/\s+/).slice(0, 4).join(" ");
+  const withFallback = async <Row,>(fetcher: (query: string, deadline: number) => Promise<Row[]>): Promise<Row[]> => {
+    let rows = await fetcher(name, deadline);
+    if (rows.length < 3 && fallbackName && fallbackName !== name) rows = [...rows, ...(await fetcher(fallbackName, deadline).catch(() => []))];
+    return rows;
+  };
   if (includeUsed) {
-    directTasks.push(fetchVinted(name, deadline).then((rows) => {
+    directTasks.push(withFallback(fetchVinted).then((rows) => {
       healthy("Vinted", rows.length);
       for (const row of rows) accept(row.offer, "used", row.title);
     }).catch(sourceErrors("Vinted")));
@@ -601,19 +615,14 @@ export async function researchMarket(title: string, options: ResearchOptions = {
     }).catch(sourceErrors("Alternate")));
   }
   if (includeUsed) {
-    directTasks.push(fetchKleinanzeigen(name, deadline).then(async (rows) => {
-      // Long seller titles often return nothing: retry with the article code or a shorter name.
-      if (rows.length < 3) {
-        const fallback = identity.modelCodes[0]?.toUpperCase() || name.split(/\s+/).slice(0, 4).join(" ");
-        if (fallback && fallback !== name) rows = [...rows, ...(await fetchKleinanzeigen(fallback, deadline).catch(() => []))];
-      }
+    directTasks.push(withFallback(fetchKleinanzeigen).then((rows) => {
       healthy("Kleinanzeigen", rows.length);
       for (const row of rows) accept(row.offer, "used", row.title, row.description);
     }).catch(sourceErrors("Kleinanzeigen")));
   }
   if (includeUsed) {
     for (const [label, fetcher] of [["Willhaben", fetchWillhaben], ["Subito", fetchSubito]] as const) {
-      directTasks.push(fetcher(name, deadline).then((rows) => {
+      directTasks.push(withFallback(fetcher).then((rows) => {
         healthy(label, rows.length);
         for (const row of rows) accept(row.offer, "used", row.title, row.description);
       }).catch(sourceErrors(label)));
@@ -815,7 +824,7 @@ export async function researchMarket(title: string, options: ResearchOptions = {
     pageLog,
     errors: errors.slice(0, 12),
     marketplace: { offers: marketplaceFinal, stats: stats(marketplaceFinal) },
-    valuation: computeValuation(finalOffers, segments, checkedAt),
+    valuation: withoutGenericValue(computeValuation(finalOffers, segments, checkedAt), identity),
     sourceHealth,
   };
   if (finalOffers.length && !options.fresh) cache.set(cacheKey, { at: Date.now(), value: result });

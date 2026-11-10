@@ -88,6 +88,24 @@ class NotifyTest(unittest.TestCase):
         bot.notify_new_deals(self.db, rows, CFG, 2)
         self.assertEqual(self.sent, [])
 
+    def test_price_drop_on_a_known_deal_is_sent_once(self):
+        self.enable([deal("x")])
+        dropped = deal("x", price=170, previous_price=200, price_dropped_at="1970-01-01T00:00:05+00:00")
+        bot.notify_new_deals(self.db, [dropped], CFG, 10)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("Цена снижена", self.sent[0])
+        self.assertIn("€200 → €170", self.sent[0])
+        bot.notify_new_deals(self.db, [dropped], CFG, 20)
+        self.assertEqual(len(self.sent), 1)
+
+    def test_price_drop_before_the_last_alert_is_not_news(self):
+        self.enable([deal("old")])
+        bot.notify_new_deals(self.db, [deal("old"), deal("x", previous_price=250, price_dropped_at="1970-01-01T00:00:05+00:00")], CFG, 10)
+        self.assertEqual(len(self.sent), 1)
+        self.assertNotIn("Цена снижена", self.sent[0])
+        bot.notify_new_deals(self.db, [deal("old"), deal("x", previous_price=250, price_dropped_at="1970-01-01T00:00:05+00:00")], CFG, 20)
+        self.assertEqual(len(self.sent), 1)
+
     def test_without_secrets_nothing_happens(self):
         with mock.patch.dict(os.environ, {"TELEGRAM_TOKEN": "", "TELEGRAM_CHAT_ID": ""}):
             bot.notify_new_deals(self.db, [deal("a")], CFG, 1)
