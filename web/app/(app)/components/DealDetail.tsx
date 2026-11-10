@@ -196,7 +196,7 @@ export function DealDetail({ deal: initial, saved, bought, onSave, onClose, onHi
 
           {position ? (
             <section className="position-box" aria-label="Цена среди рынка">
-              <b>Цена среди {position.count} б/у предложений</b>
+              <b>{(deal.market_samples ?? 0) > position.count ? "Цена на рынке б/у · выборка " + position.count + " из " + deal.market_samples : "Цена среди " + position.count + " б/у предложений"}</b>
               <div className="position-track" aria-hidden="true">
                 {position.prices.map((value, index) => <i key={index} style={{ left: position.at(value) * 100 + "%" }} />)}
                 <em className="median" style={{ left: position.at(position.median) * 100 + "%" }} />

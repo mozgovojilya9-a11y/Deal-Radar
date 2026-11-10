@@ -2413,6 +2413,18 @@ def _half_up(value, digits=0):
     return math.floor(float(value) * factor + 0.5) / factor
 
 
+def representative_offers(offers, used_slots=11, other_slots=4):
+    """Offers shown as evidence in the card: used offers spread evenly over the whole price range
+    (not the cheapest few, which would make the market look lower than its median), then shops."""
+    valid = [offer for offer in offers if str(offer.get("url") or "").startswith("https://")]
+    used = sorted((offer for offer in valid if offer.get("segment") == "used"), key=lambda offer: offer.get("price") or 0)
+    if len(used) > used_slots:
+        used = [used[round(index * (len(used) - 1) / (used_slots - 1))] for index in range(used_slots)]
+    others = sorted((offer for offer in valid if offer.get("segment") != "used"),
+                    key=lambda offer: ({"new": 0, "refurbished": 1}.get(offer.get("segment"), 2), offer.get("price") or 0))
+    return used + others[:max(other_slots, 15 - len(used))]
+
+
 def deal_score(deal, listing_age_hours):
     """Deal quality 0–100 and its parts. Mirrored by web/lib/score.ts; both are checked against score_fixtures.json.
 
@@ -2954,7 +2966,7 @@ def run_once(cfg, db, dry=False):
                 metrics["newDeals"] += 1
                 db.execute("INSERT OR IGNORE INTO sent VALUES(?,?)", (listing_id, now))
                 db.commit()
-            ordered_offers = sorted(offers, key=lambda offer: ({"used": 0, "new": 1, "refurbished": 2}.get(offer.get("segment"), 3), offer.get("price") or 0))
+            ordered_offers = representative_offers(offers)
             market_sources = [{
                 "title": str(offer.get("title") or "")[:180], "url": offer["url"], "price": offer.get("price"),
                 "price_eur": offer.get("price"), "domain": offer.get("domain"), "condition": offer.get("segment"),

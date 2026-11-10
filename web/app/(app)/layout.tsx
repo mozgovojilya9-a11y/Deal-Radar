@@ -13,14 +13,16 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   viewportFit: "cover",
-  themeColor: "#0a0d12"
+  themeColor: [{ media: "(prefers-color-scheme: light)", color: "#f3f5f8" }, { media: "(prefers-color-scheme: dark)", color: "#0b0e13" }]
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="ru">
+    <html lang="ru" suppressHydrationWarning>
       <body>
         <Script src="https://telegram.org/js/telegram-web-app.js?64" strategy="beforeInteractive" />
+        {/* Theme before the first paint, so light-theme users never see a dark flash (kept in sync by components/theme.ts). */}
+        <Script id="theme" strategy="beforeInteractive">{`try{var w=window.Telegram&&Telegram.WebApp,s=w&&w.platform&&w.platform!=="unknown"?w.colorScheme:null;document.documentElement.dataset.theme=s==="light"||s==="dark"?s:(matchMedia("(prefers-color-scheme: light)").matches?"light":"dark")}catch(e){}`}</Script>
         {children}
       </body>
     </html>

@@ -110,6 +110,17 @@ class FeedScoreAndPriceTest(RadarCase):
         self.assertEqual([row["status"] for row in history], ["candidate", "strong"])
         self.assertTrue(all(row["at"] and "reason" in row for row in history))
 
+    def test_price_sources_cover_the_whole_used_range(self):
+        prices = list(range(200, 800, 20))  # 30 used offers, median 490
+        self.external.set(used=prices, new=[900, 950])
+        self.scan([listing("a", 200)], at=START)
+        sources = self.feed()["a"]["market_sources"]
+        used = sorted(source["price"] for source in sources if source["condition"] == "used")
+        self.assertLessEqual(len(sources), 15)
+        self.assertEqual((used[0], used[-1]), (200, 780))
+        self.assertTrue(440 <= used[len(used) // 2] <= 540, used)
+        self.assertTrue(any(source["condition"] == "new" for source in sources))
+
     def test_price_increase_is_history_but_not_a_drop(self):
         self.external.set(used=[600] * 6)
         self.scan([listing("a", 250)], at=START)
