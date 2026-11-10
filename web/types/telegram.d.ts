@@ -23,6 +23,8 @@ declare global {
         platform?: string;
         onEvent?: (event: "themeChanged", callback: () => void) => void;
         offEvent?: (event: "themeChanged", callback: () => void) => void;
+        /** Opens a Telegram Stars invoice link; the callback gets "paid", "cancelled", "failed" or "pending". */
+        openInvoice?: (url: string, callback?: (status: "paid" | "cancelled" | "failed" | "pending") => void) => void;
         BackButton?: {
           show: () => void;
           hide: () => void;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api-client";
 import type { Deal, RunRecord, ScannerStats } from "@/lib/deals";
 import { DealCard } from "./DealCard";
 import { RadarScope } from "./RadarScope";
@@ -23,7 +24,7 @@ export function Dashboard({ deals, stats, scannedAt, lastLoaded, saved, onSave, 
 }) {
   const [runs, setRuns] = useState<RunRecord[]>([]);
   useEffect(() => {
-    fetch("/api/analytics?range=week").then((r) => r.ok ? r.json() : null).then((data) => { if (data?.runs) setRuns(data.runs); }).catch(() => undefined);
+    apiFetch("/api/analytics?range=week").then((r) => r.ok ? r.json() : null).then((data) => { if (data?.runs) setRuns(data.runs); }).catch(() => undefined);
   }, []);
   const profitable = deals.filter((deal) => deal.status === "strong" || deal.status === "good");
   const best = profitable.filter((deal) => deal.status === "strong");

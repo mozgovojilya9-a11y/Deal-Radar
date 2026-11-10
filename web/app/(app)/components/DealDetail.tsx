@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api-client";
 import { sellerMessage } from "@/lib/purchases";
 import type { Deal } from "@/lib/deals";
 import { distanceOf } from "./DealCard";
@@ -55,7 +56,7 @@ export function DealDetail({ deal: initial, saved, bought, onSave, onClose, onHi
   useEffect(() => {
     if (initial.description !== undefined) return;
     let cancelled = false;
-    fetch("/api/deals?ids=" + encodeURIComponent(initial.listing_id), { cache: "no-store" })
+    apiFetch("/api/deals?ids=" + encodeURIComponent(initial.listing_id), { cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
       .then((data) => { if (!cancelled && data?.deals?.[0]) setFull({ ...initial, ...data.deals[0] }); })
       .catch(() => undefined);

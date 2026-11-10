@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseDealContext, runAdvisor } from "@/lib/advisor";
 import { rateAllowed, verifyInitData } from "@/lib/telegram-auth";
+import { requireAccess } from "@/lib/access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,8 @@ export async function POST(request: NextRequest) {
 
   const userId = verifyInitData(body.initData || "", token);
   if (!userId) return NextResponse.json({ error: "Открой приложение внутри Telegram." }, { status: 401, headers: HEADERS });
+  const denied = await requireAccess(request, body);
+  if (denied) return denied;
   if (!rateAllowed("advisor:" + userId, 10)) return NextResponse.json({ error: "Слишком много вопросов. Попробуй через минуту." }, { status: 429, headers: HEADERS });
 
   const context = body.product && typeof body.product === "object" ? parseDealContext(body.product) : null;

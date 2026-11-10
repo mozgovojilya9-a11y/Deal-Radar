@@ -112,6 +112,48 @@ class NotifyTest(unittest.TestCase):
         self.assertEqual(self.sent, [])
 
 
+def star_payment(user, plan, date, amount=None, period=None):
+    stars = {"month": 1000, "year": 10000}[plan]
+    return {"id": f"c{user}{date}", "amount": amount or stars, "date": date,
+            "source": {"type": "user", "user": {"id": user}, "invoice_payload": f"dr1:{plan}:{user}", "subscription_period": period}}
+
+
+class SubscriberTest(unittest.TestCase):
+    NOW = 1_800_000_000
+
+    def test_active_subscribers_follow_payments_periods_and_refunds(self):
+        day = 86400
+        rows = [
+            star_payment(1, "month", self.NOW - 10 * day, period=2592000),   # active
+            star_payment(2, "month", self.NOW - 40 * day),                   # lapsed
+            star_payment(3, "year", self.NOW - 200 * day),                   # active
+            star_payment(4, "year", self.NOW - day),                         # refunded below
+            {"id": "r4", "amount": 10000, "date": self.NOW, "receiver": {"type": "user", "user": {"id": 4}}},
+            star_payment(5, "year", self.NOW - day, amount=500),             # underpaid
+            {**star_payment(6, "year", self.NOW - day), "source": {"type": "user", "user": {"id": 6}, "invoice_payload": "dr1:year:7"}},
+        ]
+        self.assertEqual(bot.active_subscribers(rows, self.NOW), {"1", "3"})
+
+
+class SubscriberAlertTest(NotifyTest):
+    def test_new_deal_also_goes_to_paying_subscribers(self):
+        self.enable([deal("old")])
+        chats = []
+        self.fake_send_chats = chats
+        with mock.patch.dict(os.environ, {"PAYWALL_ENABLED": "1"}), \
+                mock.patch.object(bot, "fetch_star_transactions", return_value=[star_payment(55, "year", 2)]), \
+                mock.patch.object(bot, "send_telegram", lambda _t, chat, text, button=None: chats.append(chat) or True):
+            bot.notify_new_deals(self.db, [deal("old"), deal("new")], CFG, 3)
+        self.assertEqual(chats, ["1", "55"])
+
+    def test_without_paywall_only_the_owner_gets_alerts(self):
+        self.enable([deal("old")])
+        with mock.patch.object(bot, "fetch_star_transactions") as fetch:
+            bot.notify_new_deals(self.db, [deal("old"), deal("new")], CFG, 3)
+        fetch.assert_not_called()
+        self.assertEqual(len(self.sent), 1)
+
+
 class SendTest(unittest.TestCase):
     def test_token_is_not_logged_on_failure(self):
         logged = []

@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Deal, DealFeed } from "@/lib/deals";
 import { buildIdentity } from "@/lib/product-identity";
+import { requireAccess, paywallEnabled } from "@/lib/access";
+import { fetchFeed } from "@/lib/feed-source";
 import { categoryStats, marketPoints, periodSummary, scoreBands, type PeriodKey } from "@/lib/analytics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const FEED_URL = process.env.DEALS_FEED_URL
-  || "https://raw.githubusercontent.com/mozgovojilya9-a11y/Deal-Radar/deals-data/data/deals.json";
 const RANGES: Record<string, number | null> = { day: 1, week: 7, month: 30, all: null };
 
 const round = (value: number) => Math.round(value * 100) / 100;
@@ -17,13 +17,13 @@ const round = (value: number) => Math.round(value * 100) / 100;
  * Nothing is estimated or filled in: missing data is returned as null / empty.
  */
 export async function GET(request: NextRequest) {
+  const denied = await requireAccess(request);
+  if (denied) return denied;
   const rangeKey = request.nextUrl.searchParams.get("range") || "week";
   const days = rangeKey in RANGES ? RANGES[rangeKey] : 7;
   const since = days === null ? 0 : Date.now() - days * 86400000;
   try {
-    const response = await fetch(FEED_URL + (FEED_URL.includes("?") ? "&" : "?") + "t=" + Math.floor(Date.now() / 60000), { next: { revalidate: 60 } });
-    if (!response.ok) throw new Error("feed HTTP " + response.status);
-    const feed = await response.json() as DealFeed;
+    const feed = await fetchFeed({ next: { revalidate: 60 } }) as DealFeed;
     const deals = (Array.isArray(feed.deals) ? feed.deals : [])
       .filter((deal: Deal) => deal && deal.active !== false && deal.reserved !== true && deal.status !== "reserved");
     const profitable = deals.filter((deal) => deal.status === "strong" || deal.status === "good");
@@ -103,7 +103,7 @@ export async function GET(request: NextRequest) {
         externalResearched: feed.scannerStats?.externalResearched ?? null, externalValued: feed.scannerStats?.externalValued ?? null },
       priceChanges: feed.priceChanges || [],
       rejected: feed.rejected || [],
-    }, { headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" } });
+    }, { headers: { "Cache-Control": paywallEnabled() ? "private, no-store" : "public, s-maxage=60, stale-while-revalidate=120" } });
   } catch (error) {
     console.error("GET /api/analytics failed:", error);
     return NextResponse.json({ error: "Аналитика временно недоступна." }, { status: 502 });

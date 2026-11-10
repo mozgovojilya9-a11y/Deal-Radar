@@ -95,6 +95,39 @@ npm run build
 npm run dev
 ```
 
+## Subscription (Telegram Stars)
+
+Deal Radar Pro costs **1,000 Stars per month** (renews every 30 days; Telegram allows no other subscription period) or
+**10,000 Stars per year** (one payment for 365 days, no renewal). New Telegram users get **3 days free**. Without a
+subscription or trial the app shows the overview figures and the plans; the catalogue, search, analytics and the AI
+advisor answer only to subscribers.
+
+- **Payments:** `createInvoiceLink` in Stars (`/api/subscription/invoice`), opened in the Mini App with `openInvoice`.
+  The bot webhook (`/api/telegram/webhook`) answers `pre_checkout_query` (plan, buyer and amount must match) and
+  replies to `/terms` and `/paysupport`, which Telegram requires for digital goods.
+- **Who paid** is read from Telegram itself (`getStarTransactions`, `web/lib/subscription.ts`); refunds cancel the
+  refunded payment. No payment database.
+- **Trial dates** are kept in Upstash Redis (free tier).
+- **Protected data:** with `FEED_KEY` the scanner seals the published feed (gzip + AES-256-GCM), so it can no longer be
+  read from the public GitHub branch. Paid API answers are `private, no-store`. The public website shows only deals
+  found at least 48 hours ago.
+- **Alerts:** with `PAYWALL_ENABLED=1` the scanner sends new Best/Good deals and price drops to every paying subscriber
+  as well as to `TELEGRAM_CHAT_ID`.
+
+The paywall stays **off** until all of the following are done; until then the app works exactly as before.
+
+1. Vercel → Storage → add **Upstash Redis** (free) to the project; it creates `UPSTASH_REDIS_REST_URL/TOKEN`
+   (or `KV_REST_API_URL/TOKEN`, both work).
+2. Generate a long random key, e.g. `openssl rand -base64 32`, and add it as `FEED_KEY` in **both** Vercel
+   (Environment Variables) and GitHub (Settings → Secrets → Actions). The values must be identical.
+3. Make sure `CRON_SECRET` (≥16 characters) and `TELEGRAM_TOKEN` are set in Vercel, redeploy, then open
+   `https://<app>/api/telegram/setup?key=<CRON_SECRET>` once: it points the bot webhook at the app and registers
+   `/start`, `/terms`, `/paysupport`.
+4. Test a purchase yourself, then switch the paywall on: Vercel `PAYWALL_ENABLED=1` (redeploy) and GitHub
+   Settings → Variables → Actions `PAYWALL_ENABLED=1` (subscriber alerts).
+
+The local scanner script needs the same `FEED_KEY` in its environment once the feed is sealed.
+
 ## Radar quality: clean model names, deal score, price drops
 
 **Clean model names.** Seller wording is removed from a listing title before it is searched or matched

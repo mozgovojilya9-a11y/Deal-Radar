@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api-client";
 import type { Deal } from "@/lib/deals";
 import type { Purchase } from "@/lib/purchases";
 import type { UserLocation } from "@/lib/settings";
@@ -24,7 +25,7 @@ export function SavedTab({ savedIds, onSavedIds, location, purchases, onPurchase
     let cancelled = false;
     const params = new URLSearchParams({ ids: idKey });
     if (location) { params.set("lat", String(location.lat)); params.set("lon", String(location.lon)); }
-    fetch("/api/deals?" + params, { cache: "no-store" })
+    apiFetch("/api/deals?" + params, { cache: "no-store" })
       .then((response) => response.json())
       .then((data) => { if (!cancelled) setDeals(Array.isArray(data.deals) ? data.deals : []); })
       .catch(() => undefined)

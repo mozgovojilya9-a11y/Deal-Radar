@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { apiFetch } from "@/lib/api-client";
 import type { CatalogCounts, Deal, ScannerStats } from "@/lib/deals";
 import { activeSettingsCount, loadSettings, radiusLabel, saveSettings, settingsQuery, type SearchSettings, DEFAULT_SETTINGS } from "@/lib/settings";
 import { addPurchase, loadPurchases, savePurchases, type Purchase } from "@/lib/purchases";
@@ -13,6 +14,7 @@ import { ExploreTab } from "./components/tabs/ExploreTab";
 import { ProfileTab, type TelegramProfile } from "./components/tabs/ProfileTab";
 import { SavedTab } from "./components/tabs/SavedTab";
 import { useTelegramTheme } from "./components/theme";
+import { Paywall, SubscriptionCard, TrialBanner, useSubscription } from "./components/Subscription";
 import { Icon, type IconName } from "./components/ui";
 
 type Tab = "overview" | "home" | "explore" | "analytics" | "saved" | "profile";
@@ -58,6 +60,8 @@ export default function HomePage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profile, setProfile] = useState<TelegramProfile | null>(null);
   const requestId = useRef(0);
+  const subscription = useSubscription();
+  const [paywallOpen, setPaywallOpen] = useState(false);
 
   useEffect(() => {
     const stored = loadSettings();
@@ -80,13 +84,13 @@ export default function HomePage() {
       .catch(() => undefined);
   }, []);
 
-  const query = useMemo(() => settingsQuery(settings, sort).toString(), [settings, sort]);
+  const query = useMemo(() => settingsQuery(settings, sort).toString(), [settings, sort]) + (subscription.locked ? "&locked=1" : "");
 
   const loadDeals = useCallback(async (silent = false) => {
     const id = ++requestId.current;
     if (silent) setRefreshing(true); else setLoading(true);
     try {
-      const response = await fetch("/api/deals?compact=1&" + query, { cache: "no-store" });
+      const response = await apiFetch("/api/deals?compact=1&" + query, { cache: "no-store" });
       const data = await response.json();
       if (id !== requestId.current) return;
       if (!response.ok) throw new Error(data.error || "Не удалось загрузить каталог");
@@ -105,13 +109,14 @@ export default function HomePage() {
   }, [query]);
 
   useEffect(() => {
-    if (!settingsReady) return;
+    // The first catalogue request waits for the access check, which starts a new user's trial.
+    if (!settingsReady || subscription.loading) return;
     void loadDeals();
     const timer = window.setInterval(() => void loadDeals(true), REFRESH_MS);
     const onVisible = () => { if (document.visibilityState === "visible") void loadDeals(true); };
     document.addEventListener("visibilitychange", onVisible);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
-  }, [loadDeals, settingsReady]);
+  }, [loadDeals, settingsReady, subscription.loading]);
 
   function updateSettings(next: SearchSettings) {
     setSettings(next);
@@ -186,6 +191,9 @@ export default function HomePage() {
     setTab(next);
   };
   const showCatalog = (patch: Partial<CatalogFilters>) => { setFilters((current) => ({ ...current, ...patch })); openTab("home"); };
+  const afterPayment = () => { subscription.refresh(); setPaywallOpen(false); };
+  // Without a subscription or trial every section except the overview figures shows the offer.
+  const locked = subscription.locked;
 
   return (
     <main className="app-shell">
@@ -198,30 +206,46 @@ export default function HomePage() {
         <button type="button" className={"icon-button" + (tab === "profile" ? " on" : "")} onClick={() => openTab("profile")} aria-label="Профиль и настройки"><Icon name="sliders" size={18} /></button>
       </header>
 
+      <TrialBanner subscription={subscription} onUpgrade={() => setPaywallOpen(true)} />
+
       <div className="tab-view" key={tab}>
-        {tab === "overview" ? (
+        {locked && tab !== "profile" ? (
+          <section className="content-section">
+            {tab === "overview" ? (
+              <div className="locked-kpis">
+                <div className="kpi best"><span>Best deals сейчас</span><strong>{counts?.byStatus.strong ?? "—"}</strong></div>
+                <div className="kpi good"><span>Good deals сейчас</span><strong>{counts?.byStatus.good ?? "—"}</strong></div>
+                <div className="kpi"><span>Проверено за запуск</span><strong>{stats?.unique?.toLocaleString("ru-RU") ?? "—"}</strong></div>
+              </div>
+            ) : null}
+            <Paywall subscription={subscription} onPaid={afterPayment} />
+          </section>
+        ) : null}
+        {!locked && tab === "overview" ? (
           <Dashboard deals={shownDeals} stats={stats} scannedAt={scannedAt} lastLoaded={lastLoaded} saved={saved} onSave={toggleSaved} onOpen={setSelected}
             onShowAll={(tier) => showCatalog({ tier, dropsOnly: false })} onShowDrops={() => showCatalog({ tier: "all", dropsOnly: true })} />
         ) : null}
-        {tab === "home" ? (
+        {!locked && tab === "home" ? (
           <CatalogTab deals={shownDeals} counts={counts} scannedAt={scannedAt} lastLoaded={lastLoaded} loading={loading} refreshing={refreshing} error={error}
             onReload={(silent) => void loadDeals(silent)} filters={filters} onFilters={(patch) => setFilters((current) => ({ ...current, ...patch }))}
             sort={sort} onSort={changeSort} settings={settings} onSettings={updateSettings} activeCount={activeCount} onOpenSettings={() => setSettingsOpen(true)}
             savedIds={saved} newIds={newIds} onSave={toggleSaved} onOpen={setSelected} />
         ) : null}
-        {tab === "explore" ? (
+        {!locked && tab === "explore" ? (
           <ExploreTab settings={settings} deals={shownDeals} category={filters.category} onOpen={setSelected}
             onPickCategory={(category) => showCatalog({ category })} />
         ) : null}
-        {tab === "analytics" ? <Analytics stats={stats} counts={counts} scannedAt={scannedAt} lastLoaded={lastLoaded} purchases={purchases}
+        {!locked && tab === "analytics" ? <Analytics stats={stats} counts={counts} scannedAt={scannedAt} lastLoaded={lastLoaded} purchases={purchases}
           onOpen={setSelected} onCategory={(category) => showCatalog({ category, tier: "all", dropsOnly: false, search: "" })} /> : null}
-        {tab === "saved" ? (
+        {!locked && tab === "saved" ? (
           <SavedTab savedIds={saved} onSavedIds={changeSaved} location={settings.location} purchases={purchases} onPurchases={changePurchases}
             newIds={newIds} onSave={toggleSaved} onOpen={setSelected} onBrowse={() => openTab("home")} />
         ) : null}
         {tab === "profile" ? (
           <ProfileTab profile={profile} settings={settings} activeCount={activeCount} savedCount={saved.length} hiddenCount={hidden.length}
-            onOpenSettings={() => setSettingsOpen(true)} onShowSaved={() => openTab("saved")} onRestoreHidden={() => changeHidden([])} />
+            onOpenSettings={() => setSettingsOpen(true)} onShowSaved={() => openTab("saved")} onRestoreHidden={() => changeHidden([])}>
+            <SubscriptionCard subscription={subscription} onOpenPaywall={() => setPaywallOpen(true)} />
+          </ProfileTab>
         ) : null}
       </div>
 
@@ -243,6 +267,14 @@ export default function HomePage() {
       </nav>
 
       {selected ? <DealDetail key={selected.listing_id} deal={selected} saved={saved.includes(selected.listing_id)} bought={purchases.some((row) => row.id === selected.listing_id)} onSave={() => toggleSaved(selected.listing_id)} onClose={closeDetail} onHide={() => { if (!hidden.includes(selected.listing_id)) changeHidden([...hidden, selected.listing_id]); }} onBuy={recordPurchase} /> : null}
+      {paywallOpen ? (
+        <div className="modal-backdrop" onClick={() => setPaywallOpen(false)}>
+          <section className="detail-modal paywall-modal" role="dialog" aria-modal="true" aria-label="Подписка" onClick={(event) => event.stopPropagation()}>
+            <button className="modal-close" onClick={() => setPaywallOpen(false)} aria-label="Закрыть">×</button>
+            <Paywall subscription={subscription} title="Подписка Deal Radar" onPaid={afterPayment} />
+          </section>
+        </div>
+      ) : null}
       {settingsOpen ? <SettingsSheet settings={settings} onChange={updateSettings} onClose={() => setSettingsOpen(false)} resultCount={counts?.matched ?? deals.length} loading={loading || refreshing} /> : null}
     </main>
   );

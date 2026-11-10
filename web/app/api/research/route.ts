@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { offerLimits, resaleEconomics, PROFITABILITY } from "@/lib/economics";
 import { isMarktplaats, researchMarket, type ResearchProgress } from "@/lib/market-research";
 import { understandQuery } from "@/lib/query-understanding";
+import { requireAccess } from "@/lib/access";
 import { rateAllowed, verifyInitData } from "@/lib/telegram-auth";
 
 export const runtime = "nodejs";
@@ -26,6 +27,8 @@ export async function POST(request: NextRequest) {
   catch { return NextResponse.json({ error: "Некорректный JSON." }, { status: 400, headers: HEADERS }); }
   const userId = verifyInitData(body.initData || "", token);
   if (!userId) return NextResponse.json({ error: "Откройте исследование внутри Telegram." }, { status: 401, headers: HEADERS });
+  const denied = await requireAccess(request, body);
+  if (denied) return denied;
   if (!rateAllowed("research:" + userId, 5)) return NextResponse.json({ error: "Лимит исследований: не более 5 запусков в минуту." }, { status: 429, headers: HEADERS });
 
   const rawQuery = String(body.query || "").trim().replace(/\s+/g, " ");

@@ -1,9 +1,11 @@
 import "server-only";
-import type { Deal, DealFeed, ScannerStats } from "@/lib/deals";
+import type { Deal, ScannerStats } from "@/lib/deals";
 
-/** Same public feed the app's /api/deals reads. No secrets involved: it is a public JSON file. */
-const FEED_URL = process.env.DEALS_FEED_URL
-  || "https://raw.githubusercontent.com/mozgovojilya9-a11y/Deal-Radar/deals-data/data/deals.json";
+import { fetchFeed } from "@/lib/feed-source";
+import { paywallEnabled } from "@/lib/access";
+
+/** Showcase deals on the public website are at least this old when the paywall is on. */
+const PUBLIC_DELAY_MS = 48 * 60 * 60 * 1000;
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** The subset of a deal the public website needs. Keeps page payloads small. */
@@ -119,15 +121,10 @@ export function getSiteFeed(limit = 48): Promise<SiteFeed> {
 
 async function loadSiteFeed(limit: number): Promise<SiteFeed> {
   try {
-    const response = await fetch(FEED_URL, {
-      headers: { Accept: "application/json" },
-      // Over the 2 MB data-cache limit Next logs a warning and skips caching; the page itself is
-      // still statically regenerated every 5 minutes (ISR), so the download happens once per render.
-      next: { revalidate: 300 },
-    });
-    if (!response.ok) return EMPTY_FEED;
-    const feed = await response.json() as Partial<DealFeed>;
+    // The page is regenerated every 5 minutes (ISR), so the download happens once per render.
+    const feed = await fetchFeed({ next: { revalidate: 300 } });
     if (feed.valuationVersion !== 2 || !Array.isArray(feed.deals)) return EMPTY_FEED;
+    const showcaseDelay = paywallEnabled() ? PUBLIC_DELAY_MS : 0;
 
     // Same availability rules as /api/deals: never show reserved or inactive listings.
     const active = feed.deals.filter(valid).filter((deal) => deal.active !== false && deal.reserved !== true && recent(deal)
@@ -143,6 +140,8 @@ async function loadSiteFeed(limit: number): Promise<SiteFeed> {
     const evaluated = active
       .map(slim)
       .filter((deal) => deal.profit !== null && deal.profit > 0 && deal.marketValue !== null && deal.discount !== null && deal.discount > 0)
+      // Paid catalogue: the public website shows only deals found at least 48 hours ago.
+      .filter((deal) => !showcaseDelay || Date.now() - Date.parse(deal.detectedAt) >= showcaseDelay)
       .sort((a, b) => RANK[b.status] - RANK[a.status] || (b.profit ?? 0) - (a.profit ?? 0));
 
     // The same listing can be posted twice; keep one card per title + price.

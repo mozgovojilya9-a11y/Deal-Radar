@@ -57,6 +57,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Subscription: FEED_KEY seals the published feed; PAYWALL_ENABLED=1 also alerts paying subscribers.
+          FEED_KEY: ${{ secrets.FEED_KEY }}
+          PAYWALL_ENABLED: ${{ vars.PAYWALL_ENABLED }}
           GEMINI_MODEL: gemini-3.5-flash-lite
           AI_REVIEW_MAX_PER_QUERY: "4"
         run: python bot.py

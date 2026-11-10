@@ -1705,12 +1705,35 @@ def risks(it):
     return [label for rx, label in SOFT if rx.search(it["text"])]
 
 
+def feed_crypto(mode, text):
+    """Seal or open the feed with FEED_KEY through web/scripts/feed-crypto-cli.ts (one implementation, in Node)."""
+    node = shutil.which("node")
+    if not node or not os.path.exists(FEED_CRYPTO_CLI):
+        raise RuntimeError("шифрование каталога недоступно: не найден Node.js или " + FEED_CRYPTO_CLI)
+    completed = subprocess.run([node, "--no-warnings", "--import", TS_REGISTER, FEED_CRYPTO_CLI, mode], input=text,
+                               capture_output=True, text=True, cwd=WEB_DIR, timeout=180,
+                               env={**os.environ, "FEED_KEY": os.environ.get("FEED_KEY", "")})
+    if completed.returncode != 0:
+        raise RuntimeError("шифрование каталога не удалось: " + completed.stderr.strip()[-300:])
+    return completed.stdout
+
+
 def load_feed():
-    """Load the public Mini App feed from the GitHub-backed JSON file."""
+    """Load the Mini App feed from the GitHub-backed JSON file (opening it when it is sealed with FEED_KEY)."""
     os.makedirs(os.path.dirname(FEED_PATH), exist_ok=True)
     try:
         with open(FEED_PATH, encoding="utf-8") as f:
-            data = json.load(f)
+            text = f.read()
+        data = json.loads(text)
+        if isinstance(data, dict) and data.get("sealed"):
+            if not os.environ.get("FEED_KEY"):
+                log("каталог зашифрован, а FEED_KEY не задан — начинаю с пустого каталога")
+                return {"updatedAt": None, "deals": []}
+            try:
+                data = json.loads(feed_crypto("open", text))
+            except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+                log("не удалось расшифровать каталог:", str(exc)[:200])
+                return {"updatedAt": None, "deals": []}
         if isinstance(data, list):
             return {"updatedAt": None, "deals": data}
         if isinstance(data, dict) and isinstance(data.get("deals"), list):
@@ -1723,12 +1746,18 @@ def load_feed():
 
 
 def save_feed(data):
-    """Atomically save the current feed; GitHub Actions publishes this file."""
+    """Atomically save the current feed; GitHub Actions publishes this file.
+
+    With FEED_KEY the file is sealed (gzip + AES-256-GCM). If sealing fails nothing is written:
+    a paid catalogue is never published as plain text by accident.
+    """
     os.makedirs(os.path.dirname(FEED_PATH), exist_ok=True)
+    text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    if os.environ.get("FEED_KEY"):
+        text = feed_crypto("seal", text)
     tmp_path = FEED_PATH + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+        f.write(text)
     os.replace(tmp_path, FEED_PATH)
 
 
@@ -1932,6 +1961,7 @@ def backfill_coordinates(db, feed_deals, metrics, now, cfg):
 WEB_DIR = os.path.join(HERE, "web")
 MARKET_CLI = os.path.join(WEB_DIR, "scripts", "market-cli.ts")
 REVALUE_CLI = os.path.join(WEB_DIR, "scripts", "revalue-cli.ts")
+FEED_CRYPTO_CLI = os.path.join(WEB_DIR, "scripts", "feed-crypto-cli.ts")
 TS_REGISTER = os.path.join(WEB_DIR, "tests", "register.mjs")
 
 
@@ -2245,6 +2275,56 @@ def deal_message(deal, upgraded=False, dropped=False):
     return "\n".join(lines)
 
 
+SUBSCRIPTION_PLANS = {"month": (1000, 2592000), "year": (10000, 365 * 86400)}
+PAYLOAD_RE = re.compile(r"^dr1:(month|year):(\d{1,20})$")
+
+
+def fetch_star_transactions(token, max_pages=100):
+    """All Telegram Stars transactions of the bot (getStarTransactions), or None when Telegram is unreachable."""
+    rows = []
+    for page in range(max_pages):
+        request = urllib.request.Request(f"https://api.telegram.org/bot{token}/getStarTransactions",
+                                         data=json.dumps({"offset": page * 100, "limit": 100}).encode("utf-8"),
+                                         headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                data = json.load(response)
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            log(f"Telegram: список платежей недоступен ({type(exc).__name__})")
+            return None
+        batch = (data.get("result") or {}).get("transactions") or [] if data.get("ok") else []
+        rows.extend(batch)
+        if len(batch) < 100:
+            break
+    return rows
+
+
+def active_subscribers(transactions, now):
+    """Telegram user ids with paid access now. Mirrors subscriptionFrom in web/lib/subscription.ts."""
+    payments = []
+    for tx in sorted(transactions or [], key=lambda row: row.get("date") or 0):
+        source, receiver = tx.get("source") or {}, tx.get("receiver") or {}
+        if source.get("type") == "user":
+            user = str((source.get("user") or {}).get("id"))
+            match = PAYLOAD_RE.match(str(source.get("invoice_payload") or ""))
+            if not match or match.group(2) != user:
+                continue
+            stars, seconds = SUBSCRIPTION_PLANS[match.group(1)]
+            if int(tx.get("amount") or 0) < stars:
+                continue
+            if match.group(1) == "month":
+                seconds = int(source.get("subscription_period") or seconds)
+            payments.append({"user": user, "amount": int(tx["amount"]), "date": int(tx["date"]), "end": int(tx["date"]) + seconds, "refunded": False})
+        elif receiver.get("type") == "user":
+            user = str((receiver.get("user") or {}).get("id"))
+            for payment in reversed(payments):
+                if payment["user"] == user and not payment["refunded"] and payment["date"] <= int(tx.get("date") or 0) \
+                        and payment["amount"] == abs(int(tx.get("amount") or 0)):
+                    payment["refunded"] = True
+                    break
+    return {payment["user"] for payment in payments if not payment["refunded"] and payment["end"] > now}
+
+
 def notify_new_deals(db, deals, cfg, now):
     """Telegram alerts for confirmed deals; each listing once, and again only when it is upgraded.
 
@@ -2252,8 +2332,24 @@ def notify_new_deals(db, deals, cfg, now):
     """
     settings = cfg.get("notifications") or {}
     token, chat_id = os.environ.get("TELEGRAM_TOKEN", "").strip(), os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-    if not settings.get("enabled") or not token or not chat_id:
+    if not settings.get("enabled") or not token:
         return
+    # With the paywall on, every paying subscriber gets the same alerts as the owner's chat.
+    subscribers = []
+    if os.environ.get("PAYWALL_ENABLED") == "1":
+        subscribers = sorted(active_subscribers(fetch_star_transactions(token) or [], now) - {chat_id})
+    if not chat_id and not subscribers:
+        return
+
+    def deliver(text, button=None):
+        """The owner's chat decides success (a failed send is retried next run); subscribers are best effort."""
+        delivered = send_telegram(token, chat_id, text, button) if chat_id else True
+        if delivered:
+            for subscriber in subscribers:
+                time.sleep(0.05)
+                send_telegram(token, subscriber, text, button)
+        return delivered
+
     categories = set(settings.get("categories") or [])
     wanted = [deal for deal in deals
               if deal.get("status") in STATUS_RANK and deal.get("active") is not False and not deal.get("reserved")
@@ -2267,7 +2363,7 @@ def notify_new_deals(db, deals, cfg, now):
     remember = lambda deal: db.execute("INSERT OR REPLACE INTO notified VALUES(?,?,?)", (deal["listing_id"], deal["status"], now))
     if not known:
         # First run: the whole current catalog is not news. Confirm the channel works instead of flooding it.
-        if send_telegram(token, chat_id, f"🔔 <b>Уведомления Deal Radar включены</b>\nСейчас в каталоге выгодных: {len(wanted)}. Дальше пришлю только новые."):
+        if not chat_id or send_telegram(token, chat_id, f"🔔 <b>Уведомления Deal Radar включены</b>\nСейчас в каталоге выгодных: {len(wanted)}. Дальше пришлю только новые."):
             for deal in wanted:
                 remember(deal)
             if not wanted:
@@ -2292,14 +2388,14 @@ def notify_new_deals(db, deals, cfg, now):
     for index, deal in enumerate(fresh[:limit]):
         if index:
             time.sleep(TELEGRAM_LIMIT_SECONDS)
-        if not send_telegram(token, chat_id, deal_message(deal, deal["listing_id"] in known and deal["listing_id"] not in price_drops, deal["listing_id"] in price_drops), ("Открыть на Marktplaats", deal["listing_url"])):
+        if not deliver(deal_message(deal, deal["listing_id"] in known and deal["listing_id"] not in price_drops, deal["listing_id"] in price_drops), ("Открыть на Marktplaats", deal["listing_url"])):
             db.commit()
             return
         remember(deal)
     overflow = fresh[limit:]
     if overflow:
         time.sleep(TELEGRAM_LIMIT_SECONDS)
-        if send_telegram(token, chat_id, f"Ещё новых выгодных предложений: {len(overflow)}. Они в каталоге Deal Radar."):
+        if deliver(f"Ещё новых выгодных предложений: {len(overflow)}. Они в каталоге Deal Radar."):
             for deal in overflow:
                 remember(deal)
     db.commit()

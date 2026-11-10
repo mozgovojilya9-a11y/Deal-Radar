@@ -1,8 +1,11 @@
 """Radar quality: empty valuations are retried soon, deals carry a score, price drops are tracked. No network."""
 import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -154,3 +157,41 @@ class RunDailyTest(RadarCase):
         for offset in (0, 100 * 86400):
             self.scan([listing("a", 200)], at=START + offset)
         self.assertEqual(len(bot.load_feed()["runDaily"]), 1)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is required")
+class SealedFeedTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.patch = mock.patch.object(bot, "FEED_PATH", os.path.join(self.tmp, "data", "deals.json"))
+        self.patch.start()
+
+    def tearDown(self):
+        self.patch.stop()
+
+    def test_with_a_key_the_published_file_is_sealed_and_reads_back(self):
+        feed = {"valuationVersion": 2, "deals": [{"listing_id": "m1", "title": "PS5 Slim"}]}
+        with mock.patch.dict(os.environ, {"FEED_KEY": "test-key"}):
+            bot.save_feed(feed)
+            with open(bot.FEED_PATH, encoding="utf-8") as handle:
+                raw = handle.read()
+            self.assertNotIn("PS5", raw)
+            self.assertEqual(json.loads(raw)["sealed"], "aes-256-gcm+gzip")
+            self.assertEqual(bot.load_feed(), feed)
+        # Without the key a sealed file cannot be read: the scanner starts from an empty catalogue.
+        with mock.patch.dict(os.environ, {"FEED_KEY": ""}):
+            self.assertEqual(bot.load_feed()["deals"], [])
+
+    def test_without_a_key_the_feed_stays_plain(self):
+        with mock.patch.dict(os.environ, {"FEED_KEY": ""}):
+            bot.save_feed({"deals": [{"listing_id": "x"}]})
+        with open(bot.FEED_PATH, encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle)["deals"][0]["listing_id"], "x")
+
+    def test_a_failed_seal_never_publishes_plain_text(self):
+        bot.save_feed({"deals": [{"listing_id": "old"}]})
+        with mock.patch.dict(os.environ, {"FEED_KEY": "test-key"}), mock.patch.object(bot, "FEED_CRYPTO_CLI", "/nonexistent.ts"):
+            with self.assertRaises(RuntimeError):
+                bot.save_feed({"deals": [{"listing_id": "new"}]})
+        with open(bot.FEED_PATH, encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle)["deals"][0]["listing_id"], "old")

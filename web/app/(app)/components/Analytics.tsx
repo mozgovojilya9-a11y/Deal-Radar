@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "@/lib/api-client";
 import type { CatalogCounts, Deal, FunnelStage, PriceChange, RejectedDeal, RunRecord, ScannerStats } from "@/lib/deals";
 import { purchaseInsights, type CategoryStat, type MarketPoint, type PeriodSummary } from "@/lib/analytics";
 import type { Purchase } from "@/lib/purchases";
@@ -99,7 +100,7 @@ export function Analytics({ stats, counts, scannedAt, lastLoaded, purchases, onO
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/analytics?range=" + range, { cache: "no-store" })
+    apiFetch("/api/analytics?range=" + range, { cache: "no-store" })
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || "Аналитика недоступна");

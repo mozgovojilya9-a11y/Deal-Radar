@@ -3,12 +3,13 @@ import type { CatalogCounts, Deal, DealFeed } from "@/lib/deals";
 import { haversineKm, parseCoordinate } from "@/lib/geo";
 import { dealScore } from "@/lib/score";
 import { catalogMatcher } from "@/lib/catalog-search";
+import { accessFor, paywallEnabled, requestInitData, telegramUser } from "@/lib/access";
+import { fetchFeed } from "@/lib/feed-source";
+import { hasFullAccess, type Access } from "@/lib/subscription";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const FEED_URL = process.env.DEALS_FEED_URL
-  || "https://raw.githubusercontent.com/mozgovojilya9-a11y/Deal-Radar/deals-data/data/deals.json";
 const MAX_FEED_AGE_HOURS = 720;
 const REVALIDATE_SECONDS = 60;
 
@@ -116,13 +117,21 @@ function cardOnly(deal: Deal): Record<string, unknown> {
  */
 export async function GET(request: NextRequest) {
   try {
-    const minuteBucket = Math.floor(Date.now() / (REVALIDATE_SECONDS * 1000));
-    const response = await fetch(`${FEED_URL}${FEED_URL.includes("?") ? "&" : "?"}t=${minuteBucket}`, {
-      headers: { Accept: "application/json" },
-      next: { revalidate: REVALIDATE_SECONDS }
-    });
-    if (!response.ok) throw new Error(`GitHub feed returned HTTP ${response.status}`);
-    const feed = await response.json() as Partial<DealFeed>;
+    // Paywall: without a subscription or trial the catalogue answers with counts only, no listings.
+    const paywall = paywallEnabled();
+    let access: Access | null = null;
+    if (paywall) {
+      const userId = telegramUser(requestInitData(request));
+      if (userId) {
+        try { access = await accessFor(userId); }
+        catch (error) {
+          console.error("access check failed:", error instanceof Error ? error.message : error);
+          return NextResponse.json({ error: "Не удалось проверить подписку. Попробуйте через минуту." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+        }
+      }
+    }
+    const locked = paywall && !(access && hasFullAccess(access));
+    const feed: Partial<DealFeed> = await fetchFeed({ next: { revalidate: REVALIDATE_SECONDS } });
     const valuationReady = feed.valuationVersion === 2;
     const params = request.nextUrl.searchParams;
 
@@ -217,7 +226,8 @@ export async function GET(request: NextRequest) {
     // The list needs no descriptions or source lists; a card loads them by id when opened.
     const compact = params.get("compact") === "1" && !params.has("ids");
     return NextResponse.json({
-      deals: compact ? deals.map(cardOnly) : deals,
+      deals: locked ? [] : compact ? deals.map(cardOnly) : deals,
+      locked, access,
       count: deals.length,
       catalogCount: all.length,
       counts,
@@ -228,7 +238,8 @@ export async function GET(request: NextRequest) {
       scannerStats: valuationReady && feed.scannerStats && typeof feed.scannerStats === "object" ? feed.scannerStats : null
     }, {
       headers: {
-        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
+        // Per-user answers must never be shared through a CDN cache.
+        "Cache-Control": paywall ? "private, no-store" : "public, s-maxage=60, stale-while-revalidate=120",
         "X-Content-Type-Options": "nosniff"
       }
     });

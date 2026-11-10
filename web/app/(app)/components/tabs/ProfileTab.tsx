@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { categoryLabel } from "@/lib/categories";
 import { radiusLabel, type SearchSettings } from "@/lib/settings";
 import { euro } from "../ui";
 
 export type TelegramProfile = { id: number; firstName: string; lastName: string; username: string };
 
-export function ProfileTab({ profile, settings, activeCount, savedCount, hiddenCount, onOpenSettings, onShowSaved, onRestoreHidden }: {
-  profile: TelegramProfile | null; settings: SearchSettings; activeCount: number; savedCount: number; hiddenCount: number;
+export function ProfileTab({ profile, settings, activeCount, savedCount, hiddenCount, onOpenSettings, onShowSaved, onRestoreHidden, children }: {
+  profile: TelegramProfile | null; settings: SearchSettings; activeCount: number; savedCount: number; hiddenCount: number; children?: ReactNode;
   onOpenSettings: () => void; onShowSaved: () => void; onRestoreHidden: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -22,6 +22,7 @@ export function ProfileTab({ profile, settings, activeCount, savedCount, hiddenC
         <div className="v2-ava" aria-hidden="true">{(profile?.firstName || "D").slice(0, 1).toUpperCase()}</div>
         <div><strong>{profile ? profile.firstName + (profile.lastName ? " " + profile.lastName : "") : "Гость"}</strong><span>{profile?.username ? "@" + profile.username : profile ? "Вход через Telegram" : "Откройте приложение из Telegram"}</span></div>
       </div>
+      {children}
       <button type="button" className="v2-row" onClick={onOpenSettings}><span>Настройки поиска</span><b>{activeCount ? activeCount + " активных" : "по умолчанию"}</b></button>
       <div className="v2-card">
         <div className="v2-card-head"><h3>Сейчас применяется</h3></div>
