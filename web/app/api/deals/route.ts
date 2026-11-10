@@ -104,7 +104,7 @@ function isNewCondition(deal: Deal): boolean {
 /** A list row without the heavy fields a card does not show. */
 function cardOnly(deal: Deal): Record<string, unknown> {
   const card: Record<string, unknown> = { ...deal };
-  for (const field of ["description", "market_sources", "ai_review", "valuation_reason", "evaluated_at", "last_seen_at", "next_check_at", "market_checked_at", "price_history"]) delete card[field];
+  for (const field of ["description", "market_sources", "ai_review", "valuation_reason", "evaluated_at", "last_seen_at", "next_check_at", "market_checked_at", "price_history", "status_history"]) delete card[field];
   return card;
 }
 

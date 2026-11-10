@@ -178,6 +178,14 @@ def price_trail(db, listing_id, limit=8):
     return {"price_history": history, "previous_price": history[-2]["price"], "price_dropped_at": history[-1]["at"] if dropped else None}
 
 
+def status_trail(db, listing_id, limit=6):
+    """The latest status changes of a listing, oldest first, for the listing card."""
+    rows = db.execute("SELECT status, reason, at FROM status_history WHERE id=? ORDER BY at DESC, rowid DESC LIMIT ?",
+                      (listing_id, limit)).fetchall()[::-1]
+    return [{"status": status, "reason": str(reason or "")[:160], "at": datetime.fromtimestamp(int(at), timezone.utc).isoformat()}
+            for status, reason, at in rows]
+
+
 def upsert_listing(db, listing_id, qkey, group, item, now):
     """Store a comparable observation together with its evidence (URL, condition, location)."""
     record_price(db, listing_id, item["price"], now)
@@ -2993,6 +3001,7 @@ def run_once(cfg, db, dry=False):
                 "next_check_at": datetime.fromtimestamp(next_check, timezone.utc).isoformat(),
                 "status_changed": previous.get("status") != status if previous else False,
                 **price_trail(db, listing_id),
+                "status_history": status_trail(db, listing_id),
             })
             feed_deals[listing_id]["deal_score"], feed_deals[listing_id]["score_parts"] = deal_score(feed_deals[listing_id], age_hours(item.get("date")))
             if ai_decision:

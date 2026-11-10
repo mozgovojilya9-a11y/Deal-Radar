@@ -526,3 +526,33 @@ button.kpi:hover { border-color: var(--line-2); transform: translateY(-1px); }
   /* The photo column is narrow: the second badge goes to its bottom corner. */
   .fresh-pill { top: auto; right: auto; bottom: 6px; left: 6px; }
 }
+
+/* ---- Listing detail: profit breakdown, what-if, price position, timeline ---- */
+.calc-box, .position-box, .timeline-box { display: grid; gap: 10px; margin: 0 0 14px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r-m); }
+.calc-box > b, .position-box > b, .timeline-box > b { font-size: 14px; }
+.waterfall, .timeline-box ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.waterfall li, .timeline-box li { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 13px; }
+.waterfall li small, .timeline-box li small { display: block; color: var(--muted); font-size: 11px; }
+.waterfall strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.waterfall li.minus strong { color: var(--soft); font-weight: 600; }
+.waterfall li.total { padding-top: 8px; border-top: 1px solid var(--line-2); font-size: 15px; font-weight: 700; }
+.waterfall li.total.gain strong, .what-if-result.gain strong { color: var(--accent); }
+.waterfall li.total.loss strong, .what-if-result.loss strong { color: var(--danger); }
+.what-if { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--soft); }
+.what-if-input { display: inline-flex; align-items: center; gap: 4px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: var(--r-s); background: var(--surface-2); }
+.what-if-input input { width: 84px; min-height: 40px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 16px; font-weight: 700; text-align: right; outline: none; }
+.what-if-input:focus-within { border-color: var(--accent); }
+.what-if-result { margin: 0; font-size: 14px; color: var(--soft); }
+.calc-box .detail-muted, .position-box .detail-muted { margin: 0; }
+.position-track { position: relative; height: 28px; margin: 4px 8px 0; }
+.position-track::before { content: ""; position: absolute; left: 0; right: 0; top: 13px; height: 2px; border-radius: 2px; background: var(--line-2); }
+.position-track i { position: absolute; top: 9px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--good); opacity: .55; }
+.position-track em { position: absolute; top: 2px; width: 3px; height: 24px; margin-left: -1.5px; border-radius: 2px; }
+.position-track em.median { background: var(--soft); }
+.position-track em.mine { top: 0; width: 6px; height: 28px; margin-left: -3px; background: var(--accent); box-shadow: 0 0 0 3px var(--bg); }
+.position-scale { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.timeline-box li { position: relative; padding-left: 16px; }
+.timeline-box li::before { content: ""; position: absolute; left: 0; top: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+.timeline-box li.t-strong::before { background: var(--accent); } .timeline-box li.t-good::before { background: var(--good); }
+.timeline-box li.t-rejected::before, .timeline-box li.t-reserved::before { background: var(--muted); }
+.timeline-box time { flex: none; color: var(--muted); font-size: 12px; }

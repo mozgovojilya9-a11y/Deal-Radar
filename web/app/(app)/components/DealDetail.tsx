@@ -6,6 +6,7 @@ import type { Deal } from "@/lib/deals";
 import { distanceOf } from "./DealCard";
 import { ProductAdvisor } from "./ProductAdvisor";
 import { SCORE_MAX, type ScoreParts } from "@/lib/score";
+import { pricePosition, profitAt, profitSteps } from "@/lib/detail";
 import { CONFIDENCE_LABEL, STATUS_LABEL, ScoreRing, ageLabel, dateLabel, euro, pct } from "./ui";
 
 const SCORE_ROWS: Array<[keyof ScoreParts, string, string]> = [
@@ -48,6 +49,7 @@ export function DealDetail({ deal: initial, saved, bought, onSave, onClose, onHi
   const [paid, setPaid] = useState(String(initial.opening_offer_price ?? initial.price));
   const [notice, setNotice] = useState("");
   const [copied, setCopied] = useState(false);
+  const [whatIf, setWhatIf] = useState(String(initial.opening_offer_price ?? initial.price));
   const deal = full ?? initial;
   // Catalogue cards arrive without description and sources: load them when the listing is opened.
   useEffect(() => {
@@ -92,6 +94,13 @@ export function DealDetail({ deal: initial, saved, bought, onSave, onClose, onHi
   // Only independent sources are evidence; legacy Marktplaats comparables are not shown as such.
   const sources = (deal.market_sources || []).filter((source) => /^https:\/\//.test(source.url) && !/marktplaats\.nl|2dehands\.be/.test(source.url));
   const marketValue = deal.market_value ?? (deal.price_reference_type === "external_used" || deal.price_reference_type === "new_retail" ? deal.market_price : null);
+  // The profit breakdown and the calculator need the scanner's resale price; "bieden vanaf" has no real price.
+  const resale = deal.expected_resale_price != null && deal.price_type !== "MIN_BID" ? deal.expected_resale_price : null;
+  const steps = resale != null ? profitSteps(deal.price, resale) : null;
+  const whatIfValue = Number(whatIf.replace(",", "."));
+  const whatIfResult = resale != null && Number.isFinite(whatIfValue) && whatIfValue > 0 ? profitAt(whatIfValue, resale) : null;
+  const position = pricePosition(deal.price, sources);
+  const STATUS_STEP: Record<string, string> = { ...STATUS_LABEL, rejected: "Без прибыли" };
   const why = status === "candidate"
     ? deal.evaluation_reason || "Модель распознана, но сопоставимых цен пока мало — сканер перепроверит позже."
     : deal.evaluation_reason || "Цена ниже осторожной рыночной оценки, прибыль покрывает торг и комиссию.";
@@ -155,6 +164,54 @@ export function DealDetail({ deal: initial, saved, bought, onSave, onClose, onHi
             </div>
           ) : null}
 
+          {steps ? (
+            <section className="calc-box" aria-label="Расчёт прибыли">
+              <b>Откуда прибыль</b>
+              <ol className="waterfall">
+                {steps.rows.map((row) => (
+                  <li key={row.key} className={row.amount < 0 ? "minus" : "plus"}>
+                    <span>{row.label}<small>{row.hint}</small></span>
+                    <strong>{row.amount < 0 ? "− " + euro(-row.amount, true) : euro(row.amount, true)}</strong>
+                  </li>
+                ))}
+                <li className={"total " + (steps.profit >= 0 ? "gain" : "loss")}>
+                  <span>Чистая прибыль<small>ROI {pct(steps.roi)}</small></span>
+                  <strong>{euro(steps.profit, true)}</strong>
+                </li>
+              </ol>
+              <label className="what-if">
+                <span>А если купить за</span>
+                <span className="what-if-input">€<input inputMode="decimal" value={whatIf} onChange={(event) => setWhatIf(event.target.value)} aria-label="Цена покупки, €" /></span>
+              </label>
+              {whatIfResult ? (
+                <p className={"what-if-result " + (whatIfResult.profit >= 0 ? "gain" : "loss")}>
+                  {whatIfResult.profit >= 0 ? "Прибыль " : "Убыток "}<strong>{euro(Math.abs(whatIfResult.profit), true)}</strong>
+                  {whatIfResult.roi != null ? " · ROI " + pct(whatIfResult.roi) : ""}
+                  {deal.max_offer_price && whatIfValue > deal.max_offer_price ? " · выше вашего максимума " + euro(deal.max_offer_price) : ""}
+                </p>
+              ) : <p className="what-if-result">Введите цену в евро.</p>}
+              <p className="detail-muted">Безубыточно до {euro(steps.netSale, true)}. Перепродажа — осторожная оценка, а не гарантия.</p>
+            </section>
+          ) : null}
+
+          {position ? (
+            <section className="position-box" aria-label="Цена среди рынка">
+              <b>Цена среди {position.count} б/у предложений</b>
+              <div className="position-track" aria-hidden="true">
+                {position.prices.map((value, index) => <i key={index} style={{ left: position.at(value) * 100 + "%" }} />)}
+                <em className="median" style={{ left: position.at(position.median) * 100 + "%" }} />
+                <em className="mine" style={{ left: position.at(deal.price) * 100 + "%" }} />
+              </div>
+              <div className="position-scale"><span>{euro(position.axisMin)}</span><span>медиана {euro(position.median)}</span><span>{euro(position.axisMax)}</span></div>
+              <p className="detail-muted">
+                {position.cheaperThan === position.count
+                  ? "Дешевле всех найденных предложений."
+                  : "Дешевле " + position.cheaperThan + " из " + position.count + " предложений."}
+                {" "}Предложения — цены объявлений, а не завершённых продаж.
+              </p>
+            </section>
+          ) : null}
+
           <dl className="evidence-grid">
             <div><dt>Цена продавца</dt><dd>{euro(deal.price, true)}</dd></div>
             <div><dt>Рыночная стоимость</dt><dd>{euro(marketValue, true)}</dd></div>
@@ -175,6 +232,18 @@ export function DealDetail({ deal: initial, saved, bought, onSave, onClose, onHi
             {deal.price_history && deal.price_history.length > 1 ? <div><dt>История цены</dt><dd>{deal.price_history.map((point) => euro(point.price)).join(" → ")}</dd></div> : null}
             {deal.next_check_at && status === "candidate" ? <div><dt>След. проверка</dt><dd>{dateLabel(deal.next_check_at)} {new Date(deal.next_check_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</dd></div> : null}
           </dl>
+
+          {deal.status_history && deal.status_history.length > 1 ? (
+            <section className="timeline-box" aria-label="История оценки">
+              <b>История оценки</b>
+              <ol>{deal.status_history.map((row) => (
+                <li key={row.at + row.status} className={"t-" + row.status}>
+                  <span>{STATUS_STEP[row.status] || row.status}<small>{row.reason}</small></span>
+                  <time dateTime={row.at}>{dateLabel(row.at)}</time>
+                </li>
+              ))}</ol>
+            </section>
+          ) : null}
 
           {sources.length ? (
             <details className="source-list" open={sources.length <= 4}>

@@ -100,6 +100,16 @@ class FeedScoreAndPriceTest(RadarCase):
         self.assertTrue(deal["price_dropped_at"])
         self.assertEqual([point["price"] for point in deal["price_history"]], [300, 250])
 
+    def test_status_history_shows_the_promotion(self):
+        self.external.set(used=[])
+        self.scan([listing("a", 200)], at=START)
+        self.assertEqual([row["status"] for row in self.feed()["a"]["status_history"]], ["candidate"])
+        self.external.set(used=[400] * 6)
+        self.scan([listing("a", 200)], at=START + 7 * HOUR)
+        history = self.feed()["a"]["status_history"]
+        self.assertEqual([row["status"] for row in history], ["candidate", "strong"])
+        self.assertTrue(all(row["at"] and "reason" in row for row in history))
+
     def test_price_increase_is_history_but_not_a_drop(self):
         self.external.set(used=[600] * 6)
         self.scan([listing("a", 250)], at=START)

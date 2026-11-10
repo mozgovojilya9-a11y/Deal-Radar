@@ -56,6 +56,8 @@ export type Deal = {
   previous_price?: number | null;
   price_dropped_at?: string | null;
   price_history?: Array<{ price: number; at: string }>;
+  /** Latest status changes (candidate → good → …), oldest first. */
+  status_history?: Array<{ status: string; reason: string; at: string }>;
   /** Distance from the user's location, computed by /api/deals. */
   user_distance_km?: number | null;
   evaluation_reason?: string | null;
