@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Deal, DealFeed } from "@/lib/deals";
 import { buildIdentity } from "@/lib/product-identity";
+import { categoryStats, marketPoints, scoreBands } from "@/lib/analytics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,6 +94,12 @@ export async function GET(request: NextRequest) {
         errors: runs.reduce((sum, run) => sum + (run.errors || 0), 0),
         retries: runs.reduce((sum, run) => sum + (run.retries || 0), 0),
       },
+      categories: categoryStats(deals),
+      points: marketPoints(deals),
+      scoreBands: scoreBands(deals),
+      sources: feed.scannerStats?.sourceHealth || {},
+      queue: { awaitingRecheck: feed.scannerStats?.awaitingRecheck ?? null, externalQueued: feed.scannerStats?.externalQueued ?? null,
+        externalResearched: feed.scannerStats?.externalResearched ?? null, externalValued: feed.scannerStats?.externalValued ?? null },
       priceChanges: feed.priceChanges || [],
       rejected: feed.rejected || [],
     }, { headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" } });

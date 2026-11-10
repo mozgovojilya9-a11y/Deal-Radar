@@ -213,7 +213,8 @@ export default function HomePage() {
           <ExploreTab settings={settings} deals={shownDeals} category={filters.category} onOpen={setSelected}
             onPickCategory={(category) => showCatalog({ category })} />
         ) : null}
-        {tab === "analytics" ? <Analytics stats={stats} counts={counts} scannedAt={scannedAt} /> : null}
+        {tab === "analytics" ? <Analytics stats={stats} counts={counts} scannedAt={scannedAt} lastLoaded={lastLoaded} purchases={purchases}
+          onOpen={setSelected} onCategory={(category) => showCatalog({ category, tier: "all", dropsOnly: false, search: "" })} /> : null}
         {tab === "saved" ? (
           <SavedTab savedIds={saved} onSavedIds={changeSaved} location={settings.location} purchases={purchases} onPurchases={changePurchases}
             newIds={newIds} onSave={toggleSaved} onOpen={setSelected} onBrowse={() => openTab("home")} />

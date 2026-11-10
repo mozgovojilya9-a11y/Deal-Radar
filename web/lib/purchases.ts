@@ -7,6 +7,8 @@ export type Purchase = {
   expectedProfit: number | null;
   boughtAt: string;
   soldFor: number | null;
+  /** When it was marked sold (older records have none). */
+  soldAt?: string | null;
 };
 
 export const PURCHASES_KEY = "deal-radar-purchases";
@@ -17,7 +19,8 @@ function isPurchase(value: unknown): value is Purchase {
 }
 
 export function readPurchases(raw: unknown): Purchase[] {
-  return Array.isArray(raw) ? raw.filter(isPurchase).map((row) => ({ ...row, url: typeof row.url === "string" ? row.url : "", expectedProfit: typeof row.expectedProfit === "number" ? row.expectedProfit : null, soldFor: typeof row.soldFor === "number" && row.soldFor >= 0 ? row.soldFor : null })) : [];
+  return Array.isArray(raw) ? raw.filter(isPurchase).map((row) => ({ ...row, url: typeof row.url === "string" ? row.url : "", expectedProfit: typeof row.expectedProfit === "number" ? row.expectedProfit : null, soldFor: typeof row.soldFor === "number" && row.soldFor >= 0 ? row.soldFor : null,
+    soldAt: typeof row.soldAt === "string" && Number.isFinite(Date.parse(row.soldAt)) ? row.soldAt : null })) : [];
 }
 
 export function loadPurchases(): Purchase[] {
@@ -33,8 +36,8 @@ export function addPurchase(rows: Purchase[], purchase: Purchase): Purchase[] {
   return [purchase, ...rows.filter((row) => row.id !== purchase.id)];
 }
 
-export function markSold(rows: Purchase[], id: string, soldFor: number | null): Purchase[] {
-  return rows.map((row) => row.id === id ? { ...row, soldFor } : row);
+export function markSold(rows: Purchase[], id: string, soldFor: number | null, now = new Date()): Purchase[] {
+  return rows.map((row) => row.id === id ? { ...row, soldFor, soldAt: soldFor === null ? null : now.toISOString() } : row);
 }
 
 export function removePurchase(rows: Purchase[], id: string): Purchase[] {

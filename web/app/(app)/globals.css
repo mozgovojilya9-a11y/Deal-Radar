@@ -663,3 +663,32 @@ button.kpi:hover { border-color: var(--line-2); transform: translateY(-1px); }
   .radar { order: 3; margin: 4px 0; } .dash-profit { order: 4; }
   .radar-scope { max-width: 340px; margin: 0 auto; }
 }
+
+/* ---- Analytics: interactive charts and tables ---- */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.analytics-section .block-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.analytics-section .block-head .analytics-title { margin: 0; }
+.analytics-note.first { margin: -4px 0 10px; }
+.mini-select select { min-height: 34px; max-width: 220px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: var(--r-s); background: var(--surface-2); color: var(--text); font-size: 13px; font-weight: 600; }
+.chart-diagonal { stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 5 4; opacity: .7; }
+.chart-point { cursor: pointer; transition: r var(--ease); outline: none; }
+.chart-point:focus-visible { stroke: var(--text); stroke-width: 2.5; }
+.table-scroll { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+.data-table.sortable { min-width: 560px; }
+.data-table.sortable th button { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 700; white-space: nowrap; }
+.data-table th[aria-sort="ascending"] button, .data-table th[aria-sort="descending"] button { color: var(--accent); }
+.data-table .row-link { cursor: pointer; }
+.data-table .row-link:hover td, .data-table .row-link:focus-visible td { background: var(--accent-bg); }
+.data-table small { color: var(--muted); font-weight: 500; }
+.data-table td.warn { color: var(--warn); }
+.band-bars { display: grid; gap: 8px; }
+.band-bars div { display: grid; grid-template-columns: 64px 1fr 36px; align-items: center; gap: 10px; font-size: 13px; }
+.band-bars span { color: var(--muted); font-variant-numeric: tabular-nums; }
+.band-bars i { height: 10px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.band-bars em { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
+.band-bars b { text-align: right; }
+.forecast-line { display: flex; align-items: center; gap: 14px; margin: 4px 0 0; color: var(--soft); font-size: 14px; }
+.forecast-line strong { font-size: 34px; letter-spacing: -1px; }
+.forecast-line .good { color: var(--accent); } .forecast-line .fair { color: var(--warn); } .forecast-line .weak { color: var(--danger); }
+.data-table.sortable th:first-child, .data-table.sortable td:first-child { position: sticky; left: -16px; z-index: 1; min-width: 132px; padding-left: 16px; background: var(--surface); }
+.data-table.sortable .row-link:hover td:first-child, .data-table.sortable .row-link:focus-visible td:first-child { background: var(--surface-2); }
