@@ -2,14 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { CatalogCounts, Deal, FunnelStage, PriceChange, RejectedDeal, RunRecord, ScannerStats } from "@/lib/deals";
-import { purchaseInsights, type CategoryStat, type MarketPoint } from "@/lib/analytics";
+import { purchaseInsights, type CategoryStat, type MarketPoint, type PeriodSummary } from "@/lib/analytics";
 import type { Purchase } from "@/lib/purchases";
 import { BreakdownBars, Funnel, LineChart, PriceMarketChart, SignedBars, StackedBars } from "./charts";
 import { ageLabel, dateLabel, euro, pct } from "./ui";
 
 const fmt = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("ru-RU");
 const signed = (value: number) => (value >= 0 ? "+" : "−") + euro(Math.abs(value));
-const RANGES = [["day", "День"], ["week", "Неделя"], ["month", "Месяц"], ["all", "Всё время"]] as const;
+const RANGES = [["day", "24 часа"], ["week", "Неделя"], ["month", "Месяц"], ["all", "Всё время"]] as const;
+const RANGE_TEXT: Record<string, string> = { day: "за 24 часа", week: "за неделю", month: "за месяц", all: "за всё время" };
 const VIEWS = [["market", "Рынок"], ["mine", "Мои сделки"], ["radar", "Радар"]] as const;
 type View = typeof VIEWS[number][0];
 
@@ -24,6 +25,7 @@ type AnalyticsData = {
   runs: RunRecord[];
   performance: { runs: number; lastDurationSeconds: number | null; lastListingsPerMinute: number | null; lastAvgMsPerListing: number | null;
     averageDurationSeconds: number | null; listingsPerMinute: number | null; errors: number; retries: number };
+  period: PeriodSummary;
   categories: CategoryStat[];
   points: MarketPoint[];
   scoreBands: Array<{ band: string; count: number }>;
@@ -38,6 +40,43 @@ const COLUMNS: Array<[SortKey, string]> = [["label", "Категория"], ["pr
 
 function Tile({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: string }) {
   return <div className={"metric-tile " + (tone || "")}><span>{label}</span><strong>{value}</strong>{hint ? <small>{hint}</small> : null}</div>;
+}
+
+/** What the scanner did in the chosen period: these numbers change with the period. */
+function PeriodBlock({ period, view }: { period: PeriodSummary; view: "market" | "radar" }) {
+  const label = (at: string) => period.period === "day"
+    ? new Date(at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+    : new Date(at).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+  const text = RANGE_TEXT[period.period];
+  return (
+    <>
+      {!period.complete && period.historyStart ? (
+        <p className="v2-note"><span>История сканера есть только с {new Date(period.historyStart).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })} — данные {text} неполные.</span></p>
+      ) : null}
+      <div className="metric-grid">
+        {view === "market" ? <>
+          <Tile label={"Новых выгодных " + text} value={fmt(period.newDeals)} hint="впервые признаны Best или Good" tone="green" />
+          <Tile label="Новых объявлений" value={fmt(period.newListings)} hint="впервые увидены радаром" />
+        </> : <>
+          <Tile label={"Запусков " + text} value={fmt(period.runs)} hint={period.avgDurationSeconds != null ? "в среднем " + period.avgDurationSeconds + " с на цикл" : undefined} />
+          <Tile label="Ошибок" value={fmt(period.errors)} hint={period.runs ? (period.errors / period.runs).toFixed(1) + " на запуск" : undefined} tone={period.errors ? "warn" : ""} />
+        </>}
+        <Tile label="Просмотрено объявлений" value={fmt(period.received)} hint={fmt(period.runs) + " запусков"} />
+        <Tile label="Прибыль каталога" value={euro(period.series.at(-1)?.catalogProfit ?? null)} hint={"на конец периода · " + (period.series.at(-1) ? (period.series.at(-1)!.best + period.series.at(-1)!.good) + " выгодных" : "—")} />
+      </div>
+      <div className="analytics-card-block">
+        <h3 className="analytics-title">{view === "market" ? "Новые выгодные " + text : "Новые объявления " + text}</h3>
+        <SignedBars unit="" rows={period.series.map((row) => ({ x: label(row.at), y: view === "market" ? row.newDeals : row.newListings }))} />
+        <p className="analytics-note">{period.period === "day" ? "По часам." : "По дням."} {view === "market" ? "Сколько объявлений радар впервые признал выгодными." : "Сколько объявлений радар увидел впервые."}</p>
+      </div>
+      {view === "market" ? (
+        <div className="analytics-card-block">
+          <h3 className="analytics-title">Потенциальная прибыль каталога {text}</h3>
+          <LineChart unit=" €" label="прибыль выгодных в каталоге" points={period.series.map((row) => ({ x: label(row.at), y: Math.round(row.catalogProfit) }))} />
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 /** A listing card from a chart point; the card loads the rest of the listing by id when it opens. */
@@ -99,11 +138,18 @@ export function Analytics({ stats, counts, scannedAt, lastLoaded, purchases, onO
       <div className="seg" role="tablist" aria-label="Раздел аналитики">
         {VIEWS.map(([key, label]) => <button type="button" role="tab" aria-selected={view === key} key={key} className={view === key ? "on" : ""} onClick={() => setView(key)}>{label}{key === "mine" && purchases.length ? <b>{purchases.length}</b> : null}</button>)}
       </div>
+      {view !== "mine" ? (
+        <div className="seg compact period-seg" role="tablist" aria-label="Период">
+          {RANGES.map(([key, label]) => <button type="button" role="tab" aria-selected={range === key} key={key} className={range === key ? "on" : ""} onClick={() => setRange(key)}>{label}</button>)}
+        </div>
+      ) : null}
       {error ? <p className="v2-note error-note"><span>{error}</span></p> : null}
       {loading && !data && view !== "mine" ? <div className="skeleton-card"><div /><span /><span /></div> : null}
 
       {view === "market" && data ? (
         <>
+          {data.period ? <PeriodBlock period={data.period} view="market" /> : null}
+          <h3 className="analytics-title snapshot-title">Сейчас в каталоге <small>не зависит от периода</small></h3>
           <div className="metric-grid">
             <Tile label="Потенциальная прибыль" value={euro(data.finance.totalProfit)} hint={data.finance.profitableCount + " выгодных сейчас"} tone="green" />
             <Tile label="Средняя прибыль" value={euro(data.finance.averageProfit)} hint={"максимум " + euro(data.finance.maxProfit)} />
@@ -158,11 +204,8 @@ export function Analytics({ stats, counts, scannedAt, lastLoaded, purchases, onO
             <p className="analytics-note">Распределение по баллу сделки: прибыль, окупаемость, доказательность, ликвидность, свежесть и риски.</p>
           </div>
 
-          <div className="seg compact" role="tablist" aria-label="Период">
-            {RANGES.map(([key, label]) => <button type="button" key={key} className={range === key ? "on" : ""} onClick={() => setRange(key)}>{label}</button>)}
-          </div>
           <div className="analytics-card-block">
-            <h3 className="analytics-title">Появление выгодных предложений</h3>
+            <h3 className="analytics-title">Текущие выгодные: когда найдены {RANGE_TEXT[range]}</h3>
             <StackedBars rows={data.appearances.map((row) => ({ x: new Date(row.day).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }), best: row.best, good: row.good }))} />
           </div>
           <div className="analytics-card-block">
@@ -212,6 +255,8 @@ export function Analytics({ stats, counts, scannedAt, lastLoaded, purchases, onO
 
       {view === "radar" && data ? (
         <>
+          {data.period ? <PeriodBlock period={data.period} view="radar" /> : null}
+          <h3 className="analytics-title snapshot-title">Последний запуск <small>{ageLabel(stats?.finishedAt || scannedAt)}</small></h3>
           <div className="metric-grid">
             <Tile label="Получено объявлений" value={fmt(stats?.checked)} hint={"уникальных " + fmt(stats?.unique) + " · повторов " + fmt(stats?.duplicates)} />
             <Tile label="Новых" value={fmt(stats?.newListings)} hint="впервые увидены" />
@@ -247,13 +292,10 @@ export function Analytics({ stats, counts, scannedAt, lastLoaded, purchases, onO
             ) : <p className="chart-empty">Появится после запуска с внешним поиском цен.</p>}
           </div>
 
-          <div className="seg compact" role="tablist" aria-label="Период">
-            {RANGES.map(([key, label]) => <button type="button" key={key} className={range === key ? "on" : ""} onClick={() => setRange(key)}>{label}</button>)}
-          </div>
           <div className="analytics-card-block">
-            <h3 className="analytics-title">Объявлений за запуск · {fmt(data.performance.runs)} запусков</h3>
+            <h3 className="analytics-title">Уникальных объявлений за запуск · последние {fmt(runs.length)} запусков</h3>
             <LineChart label="уникальных объявлений за запуск" points={runs.map((run) => ({ x: runLabel(run), y: run.unique || 0 }))} />
-            <p className="analytics-note">В среднем {data.performance.averageDurationSeconds != null ? Math.round(data.performance.averageDurationSeconds) + " с" : "—"} на цикл · ошибок {fmt(data.performance.errors)} · повторов {fmt(data.performance.retries)}</p>
+            <p className="analytics-note">Подробный график хранит только последние ~3 суток запусков; итоги за неделю и месяц — выше.</p>
           </div>
 
           <div className="analytics-card-block">

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { Deal } from "../lib/deals";
 import type { Purchase } from "../lib/purchases";
 import { markSold } from "../lib/purchases";
-import { categoryStats, marketPoints, purchaseInsights, scoreBands } from "../lib/analytics";
+import { categoryStats, marketPoints, periodSummary, purchaseInsights, scoreBands } from "../lib/analytics";
 
 const deal = (id: string, category: string, extra: Partial<Deal> = {}) => ({
   listing_id: id, title: "T " + id, price: 100, market_value: null, status: "candidate", category_key: category, category_label: category.toUpperCase(),
@@ -69,4 +69,39 @@ test("marking a purchase sold records the sale date; undoing clears it", () => {
   const sold = markSold(rows, "1", 20, new Date("2026-10-03T00:00:00Z"));
   assert.equal(sold[0].soldAt, "2026-10-03T00:00:00.000Z");
   assert.equal(markSold(sold, "1", null)[0].soldAt, null);
+});
+
+const NOW = Date.parse("2026-11-20T12:00:00Z");
+const run = (startedAt: string, extra: Record<string, number> = {}) => ({ startedAt, finishedAt: null, durationSeconds: 200, fetchSeconds: null, received: 100, unique: 90,
+  evaluated: 0, valued: 0, best: 1, good: 2, watchlist: 0, rejected: 0, newListings: 5, newDeals: 1, errors: 0, retries: 0, externalResearched: 0,
+  reservedRemoved: 0, catalogSize: 10, catalogProfit: 300, ...extra });
+const day = (date: string, extra: Record<string, number> = {}) => ({ day: date, runs: 100, received: 10000, unique: 9000, newListings: 50, newDeals: 3,
+  errors: 4, durationSeconds: 210, best: 1, good: 2, catalogSize: 10, catalogProfit: 300, ...extra });
+
+test("periods differ: day uses recent runs, week and month use daily totals", () => {
+  const runs = [run("2026-11-19T08:00:00Z"), run("2026-11-20T09:10:00Z"), run("2026-11-20T09:40:00Z", { newDeals: 2, catalogProfit: 500 })];
+  const daily = [day("2026-10-01"), day("2026-11-01"), day("2026-11-15"), day("2026-11-20", { newDeals: 7 })];
+  const dayView = periodSummary(runs, daily, "day", NOW);
+  assert.deepEqual([dayView.runs, dayView.newDeals, dayView.series.length], [2, 3, 1]);
+  assert.equal(dayView.series[0].catalogProfit, 500);
+  const week = periodSummary(runs, daily, "week", NOW);
+  assert.deepEqual([week.runs, week.newDeals, week.series.length], [200, 10, 2]);
+  const month = periodSummary(runs, daily, "month", NOW);
+  assert.deepEqual([month.runs, month.series.length], [300, 3]);
+  assert.equal(periodSummary(runs, daily, "all", NOW).runs, 400);
+  assert.equal(month.complete, true);
+});
+
+test("a period longer than the history is reported as incomplete", () => {
+  const daily = [day("2026-11-18"), day("2026-11-19"), day("2026-11-20")];
+  const month = periodSummary([], daily, "month", NOW);
+  assert.equal(month.complete, false);
+  assert.equal(month.historyStart, "2026-11-18T00:00:00.000Z");
+  assert.equal(periodSummary([], daily, "all", NOW).complete, true);
+});
+
+test("old feeds without daily totals fall back to the run list", () => {
+  const runs = [run("2026-11-18T08:00:00Z"), run("2026-11-19T08:00:00Z"), run("2026-11-19T09:00:00Z")];
+  const week = periodSummary(runs, [], "week", NOW);
+  assert.deepEqual([week.runs, week.series.length, week.avgDurationSeconds], [3, 2, 200]);
 });

@@ -692,3 +692,7 @@ button.kpi:hover { border-color: var(--line-2); transform: translateY(-1px); }
 .forecast-line .good { color: var(--accent); } .forecast-line .fair { color: var(--warn); } .forecast-line .weak { color: var(--danger); }
 .data-table.sortable th:first-child, .data-table.sortable td:first-child { position: sticky; left: -16px; z-index: 1; min-width: 132px; padding-left: 16px; background: var(--surface); }
 .data-table.sortable .row-link:hover td:first-child, .data-table.sortable .row-link:focus-visible td:first-child { background: var(--surface-2); }
+.period-seg { margin-bottom: 14px; }
+.snapshot-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 22px; }
+.snapshot-title small { color: var(--muted); font-size: 12px; font-weight: 600; }
+.analytics-section > .v2-note { margin-bottom: 12px; }

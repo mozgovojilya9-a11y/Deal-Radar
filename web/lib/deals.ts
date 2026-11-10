@@ -151,6 +151,11 @@ export type RunRecord = {
   rejected: number; newListings: number; newDeals: number; errors: number; retries: number;
   externalResearched: number; reservedRemoved: number; catalogSize: number; catalogProfit: number;
 };
+/** Scanner runs summed per UTC day (last 90 days); the catalogue fields are the day's last run. */
+export type RunDay = {
+  day: string; runs: number; received: number; unique: number; newListings: number; newDeals: number; errors: number;
+  durationSeconds: number; best: number; good: number; catalogSize: number; catalogProfit: number;
+};
 export type PriceChange = { key: string; value: number; previous: number; change: number; checkedAt: string; previousAt: string };
 export type RejectedDeal = {
   listing_id: string; title: string; price: number; market_value: number | null; estimated_profit: number | null;
@@ -165,6 +170,7 @@ export type DealFeed = {
   deals: Deal[];
   funnel?: FunnelStage[];
   runHistory?: RunRecord[];
+  runDaily?: RunDay[];
   priceChanges?: PriceChange[];
   rejected?: RejectedDeal[];
 };

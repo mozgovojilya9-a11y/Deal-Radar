@@ -2382,6 +2382,28 @@ def record_run(db, started, finished, metrics, fails, catalog):
     return list(reversed(history))
 
 
+def run_daily_summary(db, now, days=90):
+    """One row per UTC day for the last `days` days. The detailed run list covers only the last ~400 runs
+    (under three days), so week/month analytics use these daily totals."""
+    rows = db.execute(
+        "SELECT started_at, received, unique_listings, new_listings, new_deals, errors, duration_s, best, good, "
+        "catalog_size, catalog_profit FROM scan_runs WHERE started_at>=? ORDER BY started_at", (int(now) - days * 86400,)).fetchall()
+    summary = {}
+    for started, received, unique, new_listings, new_deals, errors, duration, best, good, size, profit in rows:
+        day = datetime.fromtimestamp(int(started), timezone.utc).date().isoformat()
+        entry = summary.setdefault(day, {"day": day, "runs": 0, "received": 0, "unique": 0, "newListings": 0, "newDeals": 0,
+                                         "errors": 0, "durationSeconds": 0.0})
+        entry["runs"] += 1
+        for key, value in (("received", received), ("unique", unique), ("newListings", new_listings), ("newDeals", new_deals), ("errors", errors)):
+            entry[key] += int(value or 0)
+        entry["durationSeconds"] += float(duration or 0)
+        # Catalogue state at the end of the day: the day's last run.
+        entry.update({"best": int(best or 0), "good": int(good or 0), "catalogSize": int(size or 0), "catalogProfit": round(float(profit or 0), 2)})
+    for entry in summary.values():
+        entry["durationSeconds"] = round(entry["durationSeconds"] / entry["runs"], 1)
+    return list(summary.values())
+
+
 def record_evaluation(db, listing_id, qkey, status, reason, now, seen, has_market=True):
     """Persist the lifecycle state and schedule the next re-check (backoff when data is missing)."""
     row = db.execute("SELECT checks FROM evaluations WHERE id=?", (listing_id,)).fetchone()
@@ -3079,9 +3101,11 @@ def run_once(cfg, db, dry=False):
     funnel = build_funnel({**metrics, "rejectedTotal": rejected_total}, metrics.get("newDeals", 0))
     metrics["rejectedTotal"] = rejected_total
     run_history = [] if dry else record_run(db, run_started, finished, metrics, fails, fresh_deals)
+    run_daily = [] if dry else run_daily_summary(db, finished)
     feed_doc = {
         "funnel": funnel,
         "runHistory": run_history,
+        "runDaily": run_daily,
         "priceChanges": market_price_changes(db),
         "rejected": rejected_sample,
         "valuationVersion": FEED_SCHEMA_VERSION,

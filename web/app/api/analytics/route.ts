@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Deal, DealFeed } from "@/lib/deals";
 import { buildIdentity } from "@/lib/product-identity";
-import { categoryStats, marketPoints, scoreBands } from "@/lib/analytics";
+import { categoryStats, marketPoints, periodSummary, scoreBands, type PeriodKey } from "@/lib/analytics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -94,6 +94,7 @@ export async function GET(request: NextRequest) {
         errors: runs.reduce((sum, run) => sum + (run.errors || 0), 0),
         retries: runs.reduce((sum, run) => sum + (run.retries || 0), 0),
       },
+      period: periodSummary(feed.runHistory || [], feed.runDaily || [], (rangeKey in RANGES ? rangeKey : "week") as PeriodKey),
       categories: categoryStats(deals),
       points: marketPoints(deals),
       scoreBands: scoreBands(deals),

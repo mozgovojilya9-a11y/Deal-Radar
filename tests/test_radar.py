@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import unittest
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -132,3 +133,24 @@ class FeedScoreAndPriceTest(RadarCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RunDailyTest(RadarCase):
+    def test_daily_summary_covers_older_days_than_the_detailed_history(self):
+        self.external.set(used=[400] * 6)
+        day = 86400
+        for offset in (0, 3600, day * 10, day * 10 + 3600, day * 40):
+            self.scan([listing("a", 200)], at=START + offset)
+        feed = bot.load_feed()
+        daily = feed["runDaily"]
+        self.assertEqual([row["runs"] for row in daily], [2, 2, 1])
+        self.assertEqual(daily[0]["day"], datetime.fromtimestamp(START, timezone.utc).date().isoformat())
+        self.assertEqual(daily[0]["newDeals"], 1)  # the deal was new only in the first run
+        for key in ("received", "unique", "newListings", "errors", "best", "good", "catalogSize", "catalogProfit", "durationSeconds"):
+            self.assertIn(key, daily[0])
+
+    def test_daily_summary_keeps_ninety_days(self):
+        self.external.set(used=[])
+        for offset in (0, 100 * 86400):
+            self.scan([listing("a", 200)], at=START + offset)
+        self.assertEqual(len(bot.load_feed()["runDaily"]), 1)

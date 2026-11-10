@@ -2,7 +2,7 @@
  * Analytics computed from real data only: the published scanner feed and the user's own purchase log.
  * Nothing is estimated here; a value without data is null.
  */
-import type { Deal } from "./deals";
+import type { Deal, RunDay, RunRecord } from "./deals";
 import type { Purchase } from "./purchases";
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
@@ -112,5 +112,75 @@ export function purchaseInsights(rows: Purchase[]): PurchaseInsights {
     months: [...months.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, entry]) => ({ month, profit: round2(entry.profit), sold: entry.sold })),
     best: ranked[0] ?? null,
     worst: ranked.length > 1 ? ranked[ranked.length - 1] : null,
+  };
+}
+
+export type PeriodKey = "day" | "week" | "month" | "all";
+const PERIOD_DAYS: Record<PeriodKey, number | null> = { day: 1, week: 7, month: 30, all: null };
+
+export type PeriodSummary = {
+  period: PeriodKey;
+  /** Start of the requested period (ISO), null for "all". */
+  from: string | null;
+  /** Oldest data the scanner still has; later than `from` when history is shorter than the period. */
+  historyStart: string | null;
+  /** False when the scanner's history does not reach back to the start of the period. */
+  complete: boolean;
+  runs: number; received: number; newListings: number; newDeals: number; errors: number;
+  avgDurationSeconds: number | null;
+  /** Hourly points for a day, daily points otherwise. */
+  series: Array<{ at: string; newDeals: number; newListings: number; best: number; good: number; catalogProfit: number }>;
+};
+
+/**
+ * Scanner activity over a period. A day uses the detailed run list (hourly points); longer periods use
+ * the daily totals, which go back 90 days. Older feeds without daily totals fall back to the run list.
+ */
+export function periodSummary(runs: RunRecord[], daily: RunDay[], period: PeriodKey, now = Date.now()): PeriodSummary {
+  const days = PERIOD_DAYS[period];
+  const since = days === null ? -Infinity : now - days * 86_400_000;
+  const useRuns = period === "day" || !daily.length;
+  type Bucket = PeriodSummary["series"][number] & { runs: number; received: number; errors: number; duration: number };
+  const buckets = new Map<string, Bucket>();
+  const add = (key: string, row: { runs: number; received: number; newListings: number; newDeals: number; errors: number; duration: number; best: number; good: number; catalogProfit: number }) => {
+    const bucket = buckets.get(key) || { at: key, runs: 0, received: 0, newListings: 0, newDeals: 0, errors: 0, duration: 0, best: 0, good: 0, catalogProfit: 0 };
+    bucket.runs += row.runs; bucket.received += row.received; bucket.newListings += row.newListings; bucket.newDeals += row.newDeals;
+    bucket.errors += row.errors; bucket.duration += row.duration;
+    // Catalogue state of the bucket: its latest run.
+    bucket.best = row.best; bucket.good = row.good; bucket.catalogProfit = row.catalogProfit;
+    buckets.set(key, bucket);
+  };
+  let historyStart: string | null = null;
+  if (useRuns) {
+    const sorted = [...runs].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+    historyStart = sorted[0]?.startedAt ?? null;
+    for (const run of sorted) {
+      const at = Date.parse(run.startedAt);
+      if (!(at >= since)) continue;
+      const key = period === "day" ? new Date(Math.floor(at / 3_600_000) * 3_600_000).toISOString() : run.startedAt.slice(0, 10);
+      add(key, { runs: 1, received: run.received || 0, newListings: run.newListings || 0, newDeals: run.newDeals || 0, errors: run.errors || 0,
+        duration: run.durationSeconds || 0, best: run.best || 0, good: run.good || 0, catalogProfit: run.catalogProfit || 0 });
+    }
+  } else {
+    const sorted = [...daily].sort((a, b) => a.day.localeCompare(b.day));
+    historyStart = sorted[0] ? sorted[0].day + "T00:00:00.000Z" : null;
+    // A day counts when any part of it falls inside the period.
+    for (const day of sorted) {
+      if (!(Date.parse(day.day + "T00:00:00Z") + 86_400_000 > since)) continue;
+      add(day.day, { runs: day.runs, received: day.received, newListings: day.newListings, newDeals: day.newDeals, errors: day.errors,
+        duration: day.durationSeconds * day.runs, best: day.best, good: day.good, catalogProfit: day.catalogProfit });
+    }
+  }
+  const series = [...buckets.values()];
+  const total = (key: "runs" | "received" | "newListings" | "newDeals" | "errors") => series.reduce((sum, bucket) => sum + bucket[key], 0);
+  const runCount = total("runs");
+  return {
+    period,
+    from: days === null ? null : new Date(since).toISOString(),
+    historyStart,
+    complete: days === null || (historyStart !== null && Date.parse(historyStart) <= since + 3_600_000),
+    runs: runCount, received: total("received"), newListings: total("newListings"), newDeals: total("newDeals"), errors: total("errors"),
+    avgDurationSeconds: runCount ? Math.round(series.reduce((sum, bucket) => sum + bucket.duration, 0) / runCount) : null,
+    series: series.map(({ at, newDeals, newListings, best, good, catalogProfit }) => ({ at, newDeals, newListings, best, good, catalogProfit })),
   };
 }
