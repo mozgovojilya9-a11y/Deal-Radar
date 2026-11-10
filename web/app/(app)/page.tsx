@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CatalogCounts, Deal, ScannerStats } from "@/lib/deals";
 import { CATEGORIES, CATEGORY_GROUPS, categoryLabel, groupOf } from "@/lib/categories";
-import { normalizeText } from "@/lib/product-identity";
+import { catalogMatcher } from "@/lib/catalog-search";
+import { HISTORY_KEY, SAVED_KEY, addSavedSearch, isSaved, loadJson, readHistory, readSavedSearches, rememberQuery, removeSavedSearch, storeJson, type SavedSearch } from "@/lib/saved-searches";
 import { activeSettingsCount, loadSettings, radiusLabel, saveSettings, settingsQuery, type SearchSettings, DEFAULT_SETTINGS } from "@/lib/settings";
 import { addPurchase, loadPurchases, savePurchases, type Purchase } from "@/lib/purchases";
 import { Analytics } from "./components/Analytics";
@@ -27,14 +28,6 @@ const SEEN_KEY = "deal-radar-seen-deals";
 const SORT_KEY = "deal-radar-sort";
 const SORTS: Array<[Sort, string]> = [["profit", "По прибыли"], ["score", "По баллу сделки"], ["distance", "Ближе ко мне"], ["discount", "По скидке"], ["newest", "Сначала новые"], ["price", "Сначала дешевле"]];
 
-function matchesText(deal: Deal, query: string): boolean {
-  const tokens = normalizeText(query).split(" ").filter((token) => token.length >= 2);
-  if (!tokens.length) return true;
-  const haystack = normalizeText(deal.title + " " + deal.category_label).replace(/\s+/g, " ");
-  const compact = haystack.replace(/[\s.-]/g, "");
-  return tokens.every((token) => haystack.includes(token) || compact.includes(token));
-}
-
 export default function HomePage() {
   const [settings, setSettings] = useState<SearchSettings>(DEFAULT_SETTINGS);
   const [settingsReady, setSettingsReady] = useState(false);
@@ -52,6 +45,9 @@ export default function HomePage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [dropsOnly, setDropsOnly] = useState(false);
+  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [searchFocused, setSearchFocused] = useState(false);
   const [saved, setSaved] = useState<string[]>([]);
   const [savedDeals, setSavedDeals] = useState<Deal[]>([]);
   const [savedLoading, setSavedLoading] = useState(false);
@@ -73,6 +69,8 @@ export default function HomePage() {
     try { storedSort = localStorage.getItem(SORT_KEY); } catch { /* storage unavailable */ }
     setSort(SORTS.some(([key]) => key === storedSort) && (storedSort !== "distance" || stored.location) ? storedSort as Sort : stored.priority === "distance" && stored.location ? "distance" : "profit");
     setPurchases(loadPurchases());
+    setSavedSearches(loadJson(SAVED_KEY, readSavedSearches));
+    setSearchHistory(loadJson(HISTORY_KEY, readHistory));
     try {
       const stored_hidden = JSON.parse(localStorage.getItem(HIDDEN_KEY) || "[]");
       setHidden(Array.isArray(stored_hidden) ? stored_hidden.filter((id): id is string => typeof id === "string") : []);
@@ -197,11 +195,12 @@ export default function HomePage() {
     return () => button.offClick(close);
   }, [selected, settingsOpen]);
 
+  const matchesSearch = useMemo(() => catalogMatcher(search), [search]);
   const visible = useMemo(() => shownDeals.filter((deal) => {
     if (category.startsWith("group:") ? groupOf(deal.category_key) !== category.slice(6) : category && deal.category_key !== category) return false;
     if (dropsOnly && !deal.price_dropped_at) return false;
-    return !search.trim() || matchesText(deal, search);
-  }), [shownDeals, category, search, dropsOnly]);
+    return matchesSearch(deal);
+  }), [shownDeals, category, matchesSearch, dropsOnly]);
   const dropCount = useMemo(() => shownDeals.filter((deal) => deal.price_dropped_at).length, [shownDeals]);
   const byTier = useMemo(() => ({
     strong: visible.filter((deal) => deal.status === "strong"),
@@ -225,6 +224,35 @@ export default function HomePage() {
   const shown = tier === "all" ? null : byTier[tier];
 
   const listKey = [tier, category, search, sort, dropsOnly].join("|");
+
+  /** Profitable listings each saved search finds right now. */
+  const savedCounts = useMemo(() => {
+    const profitable = shownDeals.filter((deal) => deal.status !== "candidate");
+    return Object.fromEntries(savedSearches.map((item) => {
+      const matches = catalogMatcher(item.text);
+      return [item.id, profitable.filter((deal) => matches(deal) && (!item.dropsOnly || deal.price_dropped_at)
+        && (item.category.startsWith("group:") ? groupOf(deal.category_key) === item.category.slice(6) : !item.category || deal.category_key === item.category)).length];
+    }));
+  }, [shownDeals, savedSearches]);
+  const currentSearch = { text: search.trim(), category, dropsOnly };
+  const canSave = Boolean(currentSearch.text || category || dropsOnly) && !isSaved(savedSearches, currentSearch);
+  const searchLabel = (item: Pick<SavedSearch, "text" | "category" | "dropsOnly">) =>
+    [item.text, item.category ? (item.category.startsWith("group:") ? item.category.slice(6) : categoryLabel(item.category)) : "", item.dropsOnly ? "↓ цена" : ""].filter(Boolean).join(" · ");
+
+  function recordSearch() {
+    const next = rememberQuery(searchHistory, search);
+    if (next !== searchHistory) { setSearchHistory(next); storeJson(HISTORY_KEY, next); }
+  }
+  function changeSavedSearches(next: SavedSearch[]) {
+    setSavedSearches(next);
+    storeJson(SAVED_KEY, next);
+  }
+  function applySearch(item: Pick<SavedSearch, "text" | "category" | "dropsOnly">) {
+    setSearch(item.text);
+    setCategory(item.category);
+    setDropsOnly(item.dropsOnly);
+    setSearchFocused(false);
+  }
   const renderGrid = (list: Deal[]) => <DealGrid deals={list} savedIds={saved} newIds={newIds} resetKey={listKey} onSave={toggleSaved} onOpen={setSelected} />;
 
   function changeHidden(next: string[]) {
@@ -289,7 +317,10 @@ export default function HomePage() {
           {error && deals.length ? <p className="v2-note error-note"><span>Не удалось обновить: {error}. Показаны последние загруженные данные.</span><button type="button" onClick={() => void loadDeals()}>Повторить</button></p> : null}
 
           <div className="toolbar">
-            <label className="search-box"><span aria-hidden="true">⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Модель, например «ps5 slim»" aria-label="Поиск по находкам" />{search ? <button type="button" className="clear-input" onClick={() => setSearch("")} aria-label="Очистить">×</button> : null}</label>
+            <label className="search-box"><span aria-hidden="true">⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} onFocus={() => setSearchFocused(true)}
+              onBlur={() => { recordSearch(); window.setTimeout(() => setSearchFocused(false), 150); }}
+              onKeyDown={(event) => { if (event.key === "Enter") { recordSearch(); (event.target as HTMLInputElement).blur(); } }}
+              enterKeyHint="search" placeholder="Модель на любом языке: «айфон 15», «ps5 slim»" aria-label="Поиск по находкам" />{search ? <button type="button" className="clear-input" onClick={() => setSearch("")} aria-label="Очистить">×</button> : null}</label>
             <label className="sort-select"><span>Сортировка</span>
               <select value={sort} onChange={(event) => changeSort(event.target.value as Sort)}>
                 {SORTS.map(([key, label]) => <option key={key} value={key} disabled={key === "distance" && !settings.location}>{label}{key === "distance" && !settings.location ? " (укажите локацию)" : ""}</option>)}
@@ -297,6 +328,28 @@ export default function HomePage() {
             </label>
             <button type="button" className={"filter-button" + (activeCount ? " active" : "")} onClick={() => setSettingsOpen(true)}><Icon name="sliders" size={18} />Фильтры{activeCount ? <b>{activeCount}</b> : null}</button>
           </div>
+
+          {savedSearches.length || canSave || (searchFocused && !search && searchHistory.length) ? (
+            <div className="search-memory">
+              {searchFocused && !search && searchHistory.length ? (
+                <div className="memory-row"><span>Недавние</span>
+                  {searchHistory.map((item) => <button type="button" key={item} className="memory-chip" onMouseDown={(event) => event.preventDefault()} onClick={() => applySearch({ text: item, category: "", dropsOnly: false })}>{item}</button>)}
+                  <button type="button" className="memory-clear" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchHistory([]); storeJson(HISTORY_KEY, []); }}>очистить</button>
+                </div>
+              ) : null}
+              {savedSearches.length || canSave ? (
+                <div className="memory-row"><span>Мои поиски</span>
+                  {savedSearches.map((item) => (
+                    <span key={item.id} className={"memory-chip saved" + (isSaved([item], currentSearch) ? " on" : "")}>
+                      <button type="button" onClick={() => applySearch(item)}>★ {searchLabel(item)}{savedCounts[item.id] ? <b>{savedCounts[item.id]}</b> : null}</button>
+                      <button type="button" className="memory-remove" aria-label={"Удалить поиск " + searchLabel(item)} onClick={() => changeSavedSearches(removeSavedSearch(savedSearches, item.id))}>×</button>
+                    </span>
+                  ))}
+                  {canSave ? <button type="button" className="memory-chip save" onClick={() => { changeSavedSearches(addSavedSearch(savedSearches, currentSearch)); recordSearch(); }}>☆ Сохранить «{searchLabel(currentSearch)}»</button> : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="active-chips">
             {dropCount || dropsOnly ? <button type="button" className={dropsOnly ? "chip-on" : "chip-toggle"} aria-pressed={dropsOnly} onClick={() => setDropsOnly(!dropsOnly)}>↓ Цена снижена · {dropCount}</button> : null}

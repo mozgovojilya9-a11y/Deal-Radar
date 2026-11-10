@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { offerLimits, resaleEconomics, PROFITABILITY } from "@/lib/economics";
-import { isMarktplaats, researchMarket } from "@/lib/market-research";
+import { isMarktplaats, researchMarket, type ResearchProgress } from "@/lib/market-research";
 import { understandQuery } from "@/lib/query-understanding";
 import { rateAllowed, verifyInitData } from "@/lib/telegram-auth";
 
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   let body: {
     initData?: string; query?: string; maxPrice?: number | null; minPrice?: number | null;
     includeUsed?: boolean; includeNew?: boolean; includeRefurbished?: boolean;
-    postcode?: string | null; radiusKm?: number | null;
+    postcode?: string | null; radiusKm?: number | null; stream?: boolean; pages?: number;
   };
   try { body = await request.json() as typeof body; }
   catch { return NextResponse.json({ error: "Некорректный JSON." }, { status: 400, headers: HEADERS }); }
@@ -44,14 +44,17 @@ export async function POST(request: NextRequest) {
   const postcode = typeof body.postcode === "string" && /^\d{4}\s?[A-Z]{2}$/i.test(body.postcode.trim()) ? body.postcode.trim().toUpperCase().replace(/\s/g, "") : null;
   const radiusKm = Number.isFinite(Number(body.radiusKm)) && Number(body.radiusKm) > 0 ? Math.min(400, Number(body.radiusKm)) : null;
 
-  try {
+  const marketplacePages = Number.isFinite(Number(body.pages)) ? Math.max(1, Math.min(10, Number(body.pages))) : 5;
+
+  const run = async (onProgress?: (event: ResearchProgress) => void) => {
     const research = await researchMarket(query, {
+      onProgress,
       includeNew, includeUsed, includeRefurbished, maxPrice,
       marktplaatsOnly: true,
       location: postcode && radiusKm ? { postcode, distanceKm: radiusKm } : undefined,
       budgetMs: 45000,
       // Up to 5 Marktplaats pages (500 listings) instead of the first 100.
-      marketplacePages: Number.isFinite(Number((body as { pages?: number }).pages)) ? Math.max(1, Math.min(10, Number((body as { pages?: number }).pages))) : 5,
+      marketplacePages,
     });
     // Market value: independent sources only. Marktplaats offers are the things you can buy.
     const valuation = research.valuation;
@@ -78,7 +81,7 @@ export async function POST(request: NextRequest) {
       ...(research.rejected.variants ? [research.rejected.variants + " предложений другой версии/комплектации не смешаны с этой моделью."] : []),
       "Цены объявлений — цены предложений, а не завершённых сделок.",
     ];
-    return NextResponse.json({
+    return {
       query, originalQuery: rawQuery, corrections: understood.corrections, identity: { searchName: research.identity.searchName, aliases: research.identity.aliases, modelCodes: research.identity.modelCodes },
       checkedAt: research.checkedAt, durationMs: research.durationMs,
       location: postcode && radiusKm ? { postcode, radiusKm } : null,
@@ -92,9 +95,33 @@ export async function POST(request: NextRequest) {
       search: { queries: research.queries, providers: research.providersUsed, pagesFetched: research.pagesFetched, pagesWithPrices: research.pagesWithPrices,
         failedProviders: [...new Set(research.attempts.filter((attempt) => !attempt.ok).map((attempt) => attempt.provider))].filter((name) => !research.providersUsed.includes(name)) },
       warnings,
-    }, { headers: HEADERS });
+    };
+  };
+
+  // Streaming answer: one JSON object per line — progress events while sources answer, then the result.
+  if (body.stream === true) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (line: unknown) => { try { controller.enqueue(encoder.encode(JSON.stringify(line) + "\n")); } catch { /* client went away */ } };
+        try {
+          send({ type: "result", data: await run((event) => send({ type: "progress", event })) });
+        } catch (error) {
+          console.error("Deal Radar research failed:", error);
+          send({ type: "error", error: RESEARCH_FAILED });
+        }
+        try { controller.close(); } catch { /* already closed */ }
+      },
+    });
+    return new Response(stream, { headers: { ...HEADERS, "Content-Type": "application/x-ndjson; charset=utf-8", "X-Accel-Buffering": "no" } });
+  }
+
+  try {
+    return NextResponse.json(await run(), { headers: HEADERS });
   } catch (error) {
     console.error("Deal Radar research failed:", error);
-    return NextResponse.json({ error: "Исследование не удалось. Попробуй ещё раз." }, { status: 502, headers: HEADERS });
+    return NextResponse.json({ error: RESEARCH_FAILED }, { status: 502, headers: HEADERS });
   }
 }
+
+const RESEARCH_FAILED = "Исследование не удалось. Попробуй ещё раз.";

@@ -77,3 +77,11 @@ test("price drops can be filtered", async () => {
   assert.deepEqual((await call("priceDrop=1")).deals.map((d: { listing_id: string }) => d.listing_id), ["drop"]);
   feed.deals.pop();
 });
+
+test("text search understands Russian names and does not match other numbers", async () => {
+  feed.deals.push(deal("ps4", 150, 52.37, 4.9, { title: "PS4 Pro 1TB" }) as never);
+  const ids = (await call("q=" + encodeURIComponent("пс5 слим"))).deals.map((d: { listing_id: string }) => d.listing_id);
+  assert.ok(ids.includes("ams"));
+  assert.ok(!ids.includes("ps4"));
+  feed.deals.pop();
+});

@@ -10,4 +10,9 @@ test("Russian product names, typos and spacing become clean model queries", () =
   assert.equal(understandQuery("Sony A7 IV").query, "Sony A7 IV");
   assert.equal(understandQuery("samsnug oled tv").query, "samsung oled tv");
   assert.deepEqual(understandQuery("DJI Mini 4 Pro").corrections, []);
+  assert.equal(understandQuery("айфон 14 плюс 128").query, "iPhone 14 Plus 128");
+  assert.equal(understandQuery("макбук эйр м2").query, "MacBook Air M2");
+  assert.equal(understandQuery("эпл вотч 46").query, "Apple Watch 46");
+  assert.equal(understandQuery("джбл чардж").query.startsWith("JBL"), true);
+  assert.equal(understandQuery("стим дек").query, "Steam Deck");
 });

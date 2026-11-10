@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { CatalogCounts, Deal, DealFeed } from "@/lib/deals";
 import { haversineKm, parseCoordinate } from "@/lib/geo";
 import { dealScore } from "@/lib/score";
+import { catalogMatcher } from "@/lib/catalog-search";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -142,7 +143,8 @@ export async function GET(request: NextRequest) {
     const minProfit = numberParam(params, "minProfit", -100_000, 1_000_000);
     const minRoi = numberParam(params, "minRoi", -100, 10_000);
     const maxAgeDays = numberParam(params, "maxAgeDays", 1, 365);
-    const textQuery = (params.get("q") || "").trim().toLowerCase().slice(0, 80);
+    const textQuery = (params.get("q") || "").trim().slice(0, 80);
+    const matchesQuery = textQuery ? catalogMatcher(textQuery) : null;
     const categories = new Set((params.get("categories") || params.get("category") || "").split(",").map((key) => key.trim()).filter((key) => /^[a-z0-9-]{1,64}$/i.test(key)));
     const condition = params.get("condition") === "new" || params.get("condition") === "used" ? params.get("condition") : "all";
     const exactOnly = params.get("exactOnly") === "1";
@@ -183,8 +185,8 @@ export async function GET(request: NextRequest) {
         const published = listingTimestamp(deal.posted_at) || Date.parse(deal.first_detected_at || deal.detected_at);
         if (Number.isFinite(published) && Date.now() - published > maxAgeDays * 86400000) continue;
       }
-      // Brand / model words, e.g. "sony a7" or "airpods pro 2": every word must appear in the title.
-      if (textQuery && !textQuery.split(/\s+/).every((word) => (deal.title + " " + deal.category_label).toLowerCase().includes(word))) continue;
+      // Brand / model words in any language, e.g. "sony a7" or "айфон 15 про" (lib/catalog-search.ts).
+      if (matchesQuery && !matchesQuery(deal)) continue;
       if (priceDropOnly && !deal.price_dropped_at) continue;
       if (exactOnly && (deal.match_level ? deal.match_level !== "exact" : !deal.model_group || deal.model_group === "unknown")) continue;
       deals.push(deal);

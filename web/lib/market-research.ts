@@ -245,7 +245,15 @@ function classifiedOffer(row: MarktplaatsRow, host: string): Omit<MarketOffer, "
 const cache = new Map<string, { at: number; value: MarketResearch }>();
 const CACHE_MS = 20 * 60 * 1000;
 
+/** Live progress of one research run, for the streaming /api/research answer. */
+export type ResearchProgress =
+  | { type: "source"; label: string; ok: boolean; parsed: number; kept: number; marketplace: number }
+  | { type: "marketplace"; kept: number; marketplace: number }
+  | { type: "pages"; done: number; total: number; kept: number; marketplace: number };
+
 export type ResearchOptions = {
+  /** Called as sources answer; errors thrown by the callback are ignored. */
+  onProgress?: (event: ResearchProgress) => void;
   includeNew?: boolean;
   includeUsed?: boolean;
   includeRefurbished?: boolean;
@@ -505,6 +513,10 @@ export async function researchMarket(title: string, options: ResearchOptions = {
   const name = identity.searchName;
 
   const marketplaceOffers: MarketOffer[] = [];
+  type Progress = ResearchProgress extends infer Event ? Event extends ResearchProgress ? Omit<Event, "kept" | "marketplace"> : never : never;
+  const emit = (event: Progress) => {
+    try { options.onProgress?.({ ...event, kept: offers.length, marketplace: marketplaceOffers.length } as ResearchProgress); } catch { /* a progress listener never breaks research */ }
+  };
   const accept = (base: Omit<MarketOffer, "id" | "match" | "matchReason" | "segment">, segment: Segment, matchText: string, extraText = "", target: MarketOffer[] = offers) => {
     if (exclude.has(base.url.replace(/[?#].*$/, ""))) return;
     if (WANTED_AD.test(matchText)) { rejected.mismatches += 1; return; }
@@ -538,6 +550,7 @@ export async function researchMarket(title: string, options: ResearchOptions = {
             // Private sellers' "nieuw" items are still the second-hand market, not retail.
             accept(offer, "used", offer.title + " " + String(row.description || "").slice(0, 160), String(row.description || "").slice(0, 600), marketplaceOffers);
           }
+          emit({ type: "marketplace" });
         })
         .catch((error) => { errors.push("Marktplaats: " + (error instanceof Error ? error.message : String(error))); }));
     }
@@ -593,8 +606,13 @@ export async function researchMarket(title: string, options: ResearchOptions = {
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 80);
     errors.push(label + ": " + message);
     sourceHealth[label] = { ok: false, parsed: 0, error: message };
+    emit({ type: "source", label, ok: false, parsed: 0 });
   };
-  const healthy = (label: string, parsed: number) => { sourceHealth[label] = { ok: parsed > 0, parsed, error: parsed ? undefined : "0 предложений" }; };
+  const healthy = (label: string, parsed: number) => {
+    sourceHealth[label] = { ok: parsed > 0, parsed, error: parsed ? undefined : "0 предложений" };
+    // Reported after the caller has matched this source's rows, so `kept` includes them.
+    queueMicrotask(() => emit({ type: "source", label, ok: parsed > 0, parsed }));
+  };
   // Long or unusual names often return nothing: retry once with the article code or a shorter name.
   const fallbackName = identity.modelCodes[0]?.toUpperCase() || name.split(/\s+/).slice(0, 4).join(" ");
   const withFallback = async <Row,>(fetcher: (query: string, deadline: number) => Promise<Row[]>): Promise<Row[]> => {
@@ -722,6 +740,8 @@ export async function researchMarket(title: string, options: ResearchOptions = {
   let pagesWithPrices = 0;
   const pageLog: MarketResearch["pageLog"] = [];
   const queue = [...pageUrls];
+  const pageDone = () => emit({ type: "pages", done: pageLog.length, total: pageUrls.length });
+  if (pageUrls.length) emit({ type: "pages", done: 0, total: pageUrls.length });
   await Promise.all(Array.from({ length: 6 }, async () => {
     while (queue.length && Date.now() < deadline - 1500) {
       const url = queue.shift()!;
@@ -731,13 +751,13 @@ export async function researchMarket(title: string, options: ResearchOptions = {
         const found = fromRawText(url, row?.title || url, raw);
         pagesFetched += 1;
         if (found) pagesWithPrices += 1;
-        pageLog.push({ url, status: found ? "ok" : "no_price", offers: found, kept: found, method: "text" });
+        pageLog.push({ url, status: found ? "ok" : "no_price", offers: found, kept: found, method: "text" }); pageDone();
         continue;
       }
       try {
         const page = await fetchPage(url, deadline);
         if (!page) {
-          pageLog.push({ url, status: "failed", offers: 0, kept: 0 });
+          pageLog.push({ url, status: "failed", offers: 0, kept: 0 }); pageDone();
           if (directPages.includes(url)) sourceHealth[domainOf(url)] = { ok: false, parsed: 0, error: "страница недоступна" };
           continue;
         }
@@ -767,10 +787,10 @@ export async function researchMarket(title: string, options: ResearchOptions = {
           if (offers.length > before) found += 1;
         }
         if (found) pagesWithPrices += 1;
-        pageLog.push({ url: page.url, status: found ? "ok" : "no_price", offers: extracted.offers.length, kept: found, method: extracted.offers[0]?.method });
+        pageLog.push({ url: page.url, status: found ? "ok" : "no_price", offers: extracted.offers.length, kept: found, method: extracted.offers[0]?.method }); pageDone();
         if (directPages.includes(url)) sourceHealth[domainOf(url)] = { ok: extracted.offers.length > 0, parsed: extracted.offers.length, error: extracted.offers.length ? undefined : "нет цен на странице" };
       } catch (error) {
-        pageLog.push({ url, status: "failed", offers: 0, kept: 0 });
+        pageLog.push({ url, status: "failed", offers: 0, kept: 0 }); pageDone();
         errors.push(domainOf(url) + ": " + (error instanceof Error ? (error.name === "TimeoutError" ? "таймаут" : error.message) : String(error)).slice(0, 80));
       }
     }

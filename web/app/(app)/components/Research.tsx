@@ -1,7 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
-import type { MarketValuation, SegmentStats } from "@/lib/market-research";
+import { useEffect, useRef, useState } from "react";
+import type { MarketValuation, ResearchProgress, SegmentStats } from "@/lib/market-research";
+import { readNdjson } from "@/lib/ndjson";
+import { RESEARCH_HISTORY_KEY, loadJson, readHistory, rememberQuery, storeJson } from "@/lib/saved-searches";
 import type { Deal } from "@/lib/deals";
 import type { SearchSettings } from "@/lib/settings";
 import { radiusLabel } from "@/lib/settings";
@@ -45,6 +47,47 @@ function toDeal(item: Offer, result: Result): Deal {
   };
 }
 
+type Progress = {
+  sources: Record<string, { ok: boolean; parsed: number }>;
+  marketplace: number | null;
+  pages: { done: number; total: number } | null;
+  kept: number;
+};
+const EMPTY_PROGRESS: Progress = { sources: {}, marketplace: null, pages: null, kept: 0 };
+/** Sources the research asks directly; search-engine pages are counted separately. */
+const SOURCE_ORDER = ["Kleinanzeigen", "Vinted", "Willhaben", "Subito", "Refurbed", "Alternate", "coolblue.nl"];
+
+function applyProgress(current: Progress, event: ResearchProgress): Progress {
+  const next = { ...current, kept: Math.max(current.kept, event.kept) };
+  if (event.type === "source") next.sources = { ...current.sources, [event.label]: { ok: event.ok, parsed: event.parsed } };
+  else if (event.type === "marketplace") next.marketplace = event.marketplace;
+  else next.pages = { done: event.done, total: event.total };
+  return next;
+}
+
+function ResearchProgressView({ progress }: { progress: Progress }) {
+  // Mounted when a research starts: its own mount time is the start time.
+  const [startedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(startedAt);
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  const seconds = Math.max(0, Math.round((now - startedAt) / 1000));
+  const labels = [...SOURCE_ORDER, ...Object.keys(progress.sources).filter((label) => !SOURCE_ORDER.includes(label))];
+  return (
+    <div className="research-progress" role="status" aria-live="polite">
+      <div className="research-loading"><span className="research-pulse" />Ищу объявления и считаю рыночную цену · {seconds} с</div>
+      <ul>
+        <li className={progress.marketplace === null ? "wait" : "done"}><span>Marktplaats</span><b>{progress.marketplace === null ? "ищу…" : progress.marketplace + " подходящих объявл."}</b></li>
+        {labels.map((label) => {
+          const source = progress.sources[label];
+          return <li key={label} className={!source ? "wait" : source.ok ? "done" : "empty"}><span>{label}</span><b>{!source ? "жду ответа…" : source.ok ? source.parsed + " найдено" : "нет данных"}</b></li>;
+        })}
+        {progress.pages ? <li className={progress.pages.done >= progress.pages.total ? "done" : "wait"}><span>Страницы магазинов</span><b>{progress.pages.done} из {progress.pages.total}</b></li> : null}
+      </ul>
+      <p className="research-muted">Точных совпадений с моделью для оценки: <b>{progress.kept}</b>. Обычно 10–40 секунд.</p>
+    </div>
+  );
+}
+
 export function Research({ settings, onOpen }: { settings: SearchSettings; onOpen?: (deal: Deal) => void }) {
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -52,6 +95,9 @@ export function Research({ settings, onOpen }: { settings: SearchSettings; onOpe
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<Result | null>(null);
+  const [progress, setProgress] = useState<Progress>(EMPTY_PROGRESS);
+  // Rendered only on the client (the search tab opens after hydration), so storage can be read at once.
+  const [history, setHistory] = useState<string[]>(() => typeof window === "undefined" ? [] : loadJson(RESEARCH_HISTORY_KEY, readHistory));
   const requestId = useRef(0);
   const reportRef = useRef<HTMLDivElement | null>(null);
   const location = settings.location?.postcode && settings.radiusKm ? { postcode: settings.location.postcode, radiusKm: settings.radiusKm } : null;
@@ -62,20 +108,36 @@ export function Research({ settings, onOpen }: { settings: SearchSettings; onOpe
     const initData = window.Telegram?.WebApp?.initData || "";
     if (!initData) { setError("Откройте приложение внутри Telegram, чтобы запустить исследование."); return; }
     const id = ++requestId.current;
-    setLoading(true); setError(""); setResult(null); setShowAll(false);
+    setLoading(true); setError(""); setResult(null); setShowAll(false); setProgress(EMPTY_PROGRESS);
+    const nextHistory = rememberQuery(history, text);
+    setHistory(nextHistory);
+    storeJson(RESEARCH_HISTORY_KEY, nextHistory);
     try {
       const response = await fetch("/api/research", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          initData, query: text, includeNew: true, includeUsed: true, includeRefurbished: true,
+          initData, query: text, stream: true, includeNew: true, includeUsed: true, includeRefurbished: true,
           minPrice: settings.minPrice, maxPrice: settings.maxPrice,
           postcode: useLocation && location ? location.postcode : null, radiusKm: useLocation && location ? location.radiusKm : null,
         }),
       });
-      const data = await response.json();
+      // Errors before the research starts (auth, limits, bad query) are plain JSON; the research itself is streamed.
+      if (!response.ok || !(response.headers.get("Content-Type") || "").includes("ndjson")) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Исследование не удалось.");
+      }
+      let data: Result | null = null;
+      let failure = "";
+      await readNdjson(response, (line) => {
+        if (id !== requestId.current) return;
+        const row = line as { type: string; event?: ResearchProgress; data?: Result; error?: string };
+        if (row.type === "progress" && row.event) setProgress((current) => applyProgress(current, row.event!));
+        else if (row.type === "result" && row.data) data = row.data;
+        else if (row.type === "error") failure = row.error || "Исследование не удалось.";
+      });
       if (id !== requestId.current) return;
-      if (!response.ok) throw new Error(data.error || "Исследование не удалось.");
-      setResult(data as Result);
+      if (!data) throw new Error(failure || "Исследование прервалось — попробуйте ещё раз.");
+      setResult(data);
       // The form is tall on a phone: bring the Marktplaats results into view.
       window.setTimeout(() => reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
     } catch (caught) {
@@ -95,7 +157,13 @@ export function Research({ settings, onOpen }: { settings: SearchSettings; onOpe
       <div className="research-head"><div><h3>Поиск на Marktplaats</h3><p>Показываем только объявления Marktplaats. Другие сайты нужны лишь для расчёта рыночной цены.</p></div></div>
       <form className="research-form" onSubmit={(event) => { event.preventDefault(); void run(); }}>
         <label className="research-query big-search"><span>Что ищем?</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Модель на любом языке: «айфон 15 про», «Sony A7 IV»…" maxLength={120} autoComplete="off" /></label>
-        <div className="chip-row">{SUGGESTIONS.map((item) => <button type="button" key={item} className="preference-chip" onClick={() => setQuery(item)}>{item}</button>)}</div>
+        {history.length ? (
+          <div className="memory-row"><span>Недавние</span>
+            {history.map((item) => <button type="button" key={item} className="memory-chip" onClick={() => setQuery(item)}>{item}</button>)}
+            <button type="button" className="memory-clear" onClick={() => { setHistory([]); storeJson(RESEARCH_HISTORY_KEY, []); }}>очистить</button>
+          </div>
+        ) : null}
+        <div className="chip-row">{SUGGESTIONS.filter((item) => !history.some((past) => past.toLowerCase() === item.toLowerCase())).map((item) => <button type="button" key={item} className="preference-chip" onClick={() => setQuery(item)}>{item}</button>)}</div>
         <p className="settings-note">
           Цена: {settings.minPrice != null || settings.maxPrice != null ? (settings.minPrice != null ? "от " + euro(settings.minPrice) + " " : "") + (settings.maxPrice != null ? "до " + euro(settings.maxPrice) : "") : "без ограничений"}
           {" · "}
@@ -104,7 +172,7 @@ export function Research({ settings, onOpen }: { settings: SearchSettings; onOpe
         <button type="submit" className="primary-button research-submit" disabled={loading}>{loading ? "Ищу на Marktplaats…" : "Найти на Marktplaats"}</button>
       </form>
       {error ? <p className="research-error" role="alert">{error}</p> : null}
-      {loading ? <div className="research-loading"><span className="research-pulse" />Ищу объявления и считаю рыночную цену — обычно 10–40 секунд</div> : null}
+      {loading ? <ResearchProgressView progress={progress} /> : null}
       {result ? (
         <div className="research-report" ref={reportRef}>
           <p className="research-muted">Модель: <b>{result.identity.searchName}</b>{result.identity.modelCodes.length ? " · артикул " + result.identity.modelCodes.join(", ").toUpperCase() : ""}{result.location ? " · Marktplaats: " + result.location.radiusKm + " км от " + result.location.postcode : ""}</p>
